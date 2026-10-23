@@ -139,6 +139,9 @@
               {% if t.material and t.material != '-' %} · {{ t.material }}{% endif %}
               {% if t.qty %} · Qty {{ "{:,.2f}".format(t.qty or 0) }}{% endif %}
             </div>
+            {% if t.reference %}
+            <div class="small text-muted">Bill / Ref: {{ t.reference }}</div>
+            {% endif %}
           </div>
           <div class="text-end small text-muted d-none d-md-block">
             Money In: Rs. {{ "{:,.2f}".format(t.revenue or 0) }}<br>

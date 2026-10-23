@@ -362,6 +362,8 @@ def profit_reports():
             sale_ref = (_direct_sale_default_bill_ref(sale) or sale.auto_bill_no or f"DS-{sale.id}").strip()
             sale_waive_map[sale.id] = _waive_for_bill(sale_ref)
 
+    include_rent_variance = (not material_query) or _is_rent_material_name(material_query)
+    rent_sale_discount = {}
     direct_gross_total = 0.0
     for item, sale in direct_rows:
         sale_category = normalize_sale_category(getattr(sale, 'category', None))
@@ -379,6 +381,14 @@ def profit_reports():
         total_adjustment = sale_discount + sale_waive
         discount_share = (gross_revenue / sale_gross) * total_adjustment if sale_gross > 0 else 0
         net_revenue = max(0.0, gross_revenue - discount_share)
+
+        # Rent/service charges are reported together with the delivery charge
+        # in a single "Rent" entry (built below).  They must not also appear as
+        # their own profit line here, otherwise the rent revenue and the
+        # delivery variance are counted twice.
+        if include_rent_variance and _is_rent_material_name(item.product_name):
+            rent_sale_discount[sale.id] = rent_sale_discount.get(sale.id, 0.0) + discount_share
+            continue
 
         tx_date = sale.date_posted.date() if sale.date_posted else None
         frozen_cost = float(getattr(item, 'cost_rate_at_sale', 0) or 0)
@@ -430,7 +440,6 @@ def profit_reports():
     # - Positive difference (client rent charged > delivery rent cost) => company profit
     # - Negative difference (delivery rent cost > client rent charged) => company loss
     # This adjustment is operational and must not affect client ledger due.
-    include_rent_variance = (not material_query) or _is_rent_material_name(material_query)
     if include_rent_variance:
         rent_loss_query = DirectSale.query.filter(
             DirectSale.is_void == False,
@@ -550,31 +559,40 @@ def profit_reports():
             }
             rent_revenue = float(getattr(sale, 'rent_item_revenue', 0) or rent_rec['rent_item_revenue'])
             rent_cost = float(getattr(sale, 'delivery_rent_cost', 0) or rent_rec['delivery_rent_cost'])
-            variance = rent_revenue - rent_cost
-            if abs(variance) <= 0.0001:
+            rent_qty = 0.0
+            for rent_item in sale_items_payload:
+                if _is_rent_material_name(rent_item.get('product_name')):
+                    rent_qty += float(rent_item.get('qty') or 0)
+            rent_discount_share = float(rent_sale_discount.get(sale.id, 0.0) or 0.0)
+            rent_revenue_net = max(0.0, rent_revenue - rent_discount_share)
+            variance = rent_revenue_net - rent_cost
+            if rent_revenue_net <= 0.0 and rent_cost <= 0.0:
                 continue
 
             sale_ref = sale.manual_bill_no or sale.auto_bill_no or f"DS-{sale.id}"
             if getattr(sale, 'invoice', None) and sale.invoice and sale.invoice.invoice_no:
                 sale_ref = sale.invoice.invoice_no
 
+            # One single rent line per sale: the rent charged is "Money In",
+            # the delivery charge paid to the delivery person is "Cost of Item",
+            # and the difference is the rent profit/loss.
             transactions.append({
                 'date': sale.date_posted,
-                'source': ('Delivery Rent Variance (Company Profit)' if variance > 0 else 'Delivery Rent Variance (Company Loss)'),
+                'source': 'Rent',
                 'reference': sale_ref,
                 'client': sale.client_name,
                 '_client_norm': _norm_text(sale.client_name),
                 '_ref_variants': _bill_ref_variants(sale_ref),
-                'material': 'Delivery Rent Difference',
-                'qty': 0.0,
+                'material': 'Rent',
+                'qty': rent_qty,
                 'sale_rate': 0.0,
                 'cost_rate': 0.0,
-                'discount_loss': (abs(variance) if variance < 0 else 0.0),
-                'revenue': 0.0,
-                'cogs': 0.0,
+                'discount_loss': rent_discount_share,
+                'revenue': rent_revenue_net,
+                'cogs': rent_cost,
                 'profit': variance,
                 'is_loss': variance < 0,
-                'cogs_known': True
+                'cogs_known': True,
             })
 
         waive_q = db.session.query(

@@ -16,6 +16,7 @@ silently bring the jargon back.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 import pytest
@@ -29,6 +30,7 @@ from models import (
     DirectSaleItem,
     Material,
     Payment,
+    Service,
     db,
 )
 
@@ -131,6 +133,15 @@ def _get(client, url):
     return resp.get_data(as_text=True)
 
 
+def _text(body):
+    # Rendered pages wrap labels and values across lines, <br> tags and
+    # elements; strip the markup and collapse whitespace so the wording that
+    # a browser shows can be asserted on.
+    body = re.sub(r"<script.*?</script>", " ", body, flags=re.S)
+    body = re.sub(r"<[^>]+>", " ", body)
+    return " ".join(body.split())
+
+
 def test_profit_summary_uses_plain_language(app, client):
     login(client)
     _seed(app)
@@ -199,3 +210,68 @@ def test_transactions_page_is_plain(app, client):
     # Per-row bookkeeping columns are gone.
     assert "Delivery Rent Variance" not in body
     assert "Account Reconciliation" not in body
+
+
+def _seed_rent(app, revenue=500, delivery_cost=600, discount=0):
+    with app.app_context():
+        db.session.add(Service(name="RENT-CEMENT", code="SVC-001", unit="Bags"))
+        db.session.add(Client(name="AL RAHMAN", code="CL-001",
+                              category="General", is_active=True))
+        acc = Account(name="MAIN CASH", account_type="Cash", category="Cash",
+                      is_active=True)
+        db.session.add(acc)
+        db.session.commit()
+        sale = DirectSale(
+            client_name="AL RAHMAN", client_code="CL-001", category="Credit Customer",
+            amount=revenue, paid_amount=0, manual_bill_no="MB NO.RENT-1",
+            date_posted=datetime(2026, 2, 1, 10, 0, 0), is_void=False, discount=discount,
+            payment_method="Cash", payment_account_id=acc.id,
+            rent_item_revenue=revenue, delivery_rent_cost=delivery_cost,
+        )
+        db.session.add(sale)
+        db.session.flush()
+        db.session.add(DirectSaleItem(sale_id=sale.id, product_name="RENT-CEMENT",
+                                      qty=1, price_at_time=revenue))
+        db.session.commit()
+
+
+def test_rent_sale_is_one_entry(app, client):
+    # Revenue 500 from the rent service, 600 paid to the delivery person:
+    # the page shows ONE entry - a 100 rent loss - not a +500 line plus a
+    # separate -100 loss line.
+    login(client)
+    _seed_rent(app, revenue=500, delivery_cost=600)
+
+    body = _text(_get(client, "/profit_reports?view=entries&start_date=2026-02-01&end_date=2026-02-28"))
+    assert "1 entries" in body
+    assert "Delivery Rent Difference" not in body
+    # The rent line shows the money in, the cost and the net loss, with the
+    # transaction reference so the user can trace it.
+    assert "Rent" in body
+    assert "Bill / Ref: MB NO.RENT-1" in body
+    assert "Money In: Rs. 500.00" in body
+    assert "Cost of Item: Rs. 600.00" in body
+    assert "Rs. -100.00" in body
+
+    summary = _text(_get(client, "/profit_reports?start_date=2026-02-01&end_date=2026-02-28"))
+    assert "Sales (Money In) Rs. 500.00" in summary
+    assert "Cost of Goods (Money Out) Rs. 600.00" in summary
+    assert "Profit (Money Kept) Rs. -100.00" in summary
+    assert "Total Loss Rs. 100.00" in summary
+    assert "Total Profit Rs. 0.00" in summary
+
+
+def test_rent_sale_profitable_is_one_profit_entry(app, client):
+    # Rent revenue above the delivery charge is shown as one profit entry.
+    login(client)
+    _seed_rent(app, revenue=600, delivery_cost=500)
+
+    summary = _text(_get(client, "/profit_reports?start_date=2026-02-01&end_date=2026-02-28"))
+    assert "Profit (Money Kept) Rs. 100.00" in summary
+    assert "Total Profit Rs. 100.00" in summary
+    assert "Total Loss Rs. 0.00" in summary
+
+    body = _text(_get(client, "/profit_reports?view=entries&start_date=2026-02-01&end_date=2026-02-28"))
+    assert "1 entries" in body
+    assert "Rent" in body
+    assert "Bill / Ref: MB NO.RENT-1" in body
