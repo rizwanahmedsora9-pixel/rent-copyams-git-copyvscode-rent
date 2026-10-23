@@ -1164,6 +1164,32 @@ def profit_reports():
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     materials = list(Material.query.order_by(Material.name.asc()).all()) + list(Service.query.order_by(Service.name.asc()).all())
 
+    # -------------------- Simple "owner view" summaries --------------------
+    # These feed the plain-language Profit Summary page.  Internal rows that
+    # are not real customers/products (reconciliation entries, rent variances,
+    # unlabelled rows) are filtered out so the owner only sees real trade.
+    _INTERNAL_CLIENTS = {'-', 'Account Reconciliation', 'Account', 'Delivery Rent Waive-Off'}
+    _INTERNAL_MATERIALS = {'-', 'Account Reconciliation', 'Delivery Rent Difference', 'Delivery Rent Waive-Off'}
+
+    def _clean_name(row, key):
+        return (row.get(key) or '').strip()
+
+    def _top(rows, key, internal, limit=10):
+        out = []
+        for row in rows:
+            name = _clean_name(row, key)
+            if not name or name in internal:
+                continue
+            if float(row.get('sold_revenue', 0) or 0) <= 0:
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
+    top_clients = _top(client_summary, 'client', _INTERNAL_CLIENTS)
+    top_items = _top(material_summary, 'material', _INTERNAL_MATERIALS)
+
     return render_template(
         template_name,
         transactions=(entries_transactions if view_mode == 'entries' else transactions),
@@ -1211,6 +1237,8 @@ def profit_reports():
         entry_metric=entry_metric,
         entry_metric_label=entry_metric_label,
         entry_metric_help=entry_metric_help,
-        grn_sales_summary=grn_sales_summary
+        grn_sales_summary=grn_sales_summary,
+        top_clients=top_clients,
+        top_items=top_items
     )
 
