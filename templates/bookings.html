@@ -210,6 +210,7 @@
                         <div class="booking-item-grid">
                             <div class="position-relative">
                                 <input type="hidden" name="material_id[]" class="material-id-input" value="">
+                                <input type="hidden" name="service_id[]" class="service-id-input" value="">
                                 <input type="text" name="material_name[]" class="form-control form-control-sm bg-dark text-white border-secondary price-trigger" placeholder="Search material..." autocomplete="off" required>
                             </div>
                             <div>
@@ -418,7 +419,10 @@
 <script>
 const MATERIALS = [
     {% for mat in materials %}
-    { id: {{ mat.id }}, name: {{ mat.name|tojson }}, price: {{ (mat.unit_price or 0)|float }} },
+    { id: {{ mat.id }}, name: {{ mat.name|tojson }}, price: {{ (mat.unit_price or 0)|float }}, isService: false },
+    {% endfor %}
+    {% for svc in services or [] %}
+    { id: {{ svc.id }}, name: {{ svc.name|tojson }}, price: 0, isService: true },
     {% endfor %}
 ];
 window.AMS_KNOWN_MATERIAL_NAMES = new Set(MATERIALS.map((m) => m.name).concat(MATERIALS.map((m) => String(m.name || '').toLowerCase())));
@@ -447,9 +451,13 @@ function buildBookingMaterialCombobox() {
         const div = document.createElement('div');
         div.className = 'combobox-item';
         div.dataset.value = m.name;
-        div.dataset.materialId = m.id;
+        if (m.isService) {
+            div.dataset.serviceId = m.id;
+        } else {
+            div.dataset.materialId = m.id;
+        }
         div.textContent = m.name;
-        div.addEventListener('click', () => selectBookingMaterial(m.name, m.id));
+        div.addEventListener('click', () => selectBookingMaterial(m.name, m.id, !!m.isService));
         list.appendChild(div);
     });
 }
@@ -484,15 +492,17 @@ function filterBookingMaterialCombobox(input) {
     }
 }
 
-function selectBookingMaterial(value, materialId) {
+function selectBookingMaterial(value, itemId, isService) {
     if (!activeBookingMaterialInput) return;
     activeBookingMaterialInput.value = value;
     activeBookingMaterialInput.dataset.comboSuppress = '1';
-    if (typeof window.setSelectedMaterialId === 'function') {
-        window.setSelectedMaterialId(activeBookingMaterialInput, materialId || '', value);
+    if (isService && typeof window.setSelectedServiceId === 'function') {
+        window.setSelectedServiceId(activeBookingMaterialInput, itemId || '', value);
+    } else if (typeof window.setSelectedMaterialId === 'function') {
+        window.setSelectedMaterialId(activeBookingMaterialInput, itemId || '', value);
     } else {
         const hid = activeBookingMaterialInput.closest('.position-relative')?.querySelector('input[name="material_id[]"]');
-        if (hid) hid.value = materialId || '';
+        if (hid) hid.value = isService ? '' : (itemId || '');
     }
     const list = document.getElementById(BOOKING_MATERIAL_LIST_ID);
     if (list) list.style.display = 'none';

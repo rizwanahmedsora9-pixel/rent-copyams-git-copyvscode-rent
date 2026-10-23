@@ -66,10 +66,22 @@ def direct_sale_edit_modal(sale_id):
         if delivered and booked and booked != delivered:
             alt_by_delivered[delivered] = booked
 
+    services = Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all()
+    hist_names = {(it.product_name or '').strip().lower() for it in (sale.items or []) if it.product_name}
+    if hist_names:
+        active_mids = {m.id for m in materials}
+        for hm in Material.query.filter(func.lower(func.trim(Material.name)).in_(hist_names)).all():
+            if hm.id not in active_mids:
+                materials.append(hm)
+        active_sids = {sv.id for sv in services}
+        for hsv in Service.query.filter(func.lower(func.trim(Service.name)).in_(hist_names)).all():
+            if hsv.id not in active_sids:
+                services.append(hsv)
     return render_template(
         '_direct_sale_edit_modal.html',
         sale=sale,
         materials=materials,
+        services=services,
         clients=clients,
         delivery_persons=delivery_persons,
         grns=grns,

@@ -260,7 +260,12 @@ def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
     """Split cash/credit lines so each line is one FIFO lot with a frozen cost."""
     expanded = []
     for item in (items or []):
-        if item.get('is_booking') or float(item.get('price_at_time') or 0) <= 0:
+        # Services are charges, not stock: never allocate a GRN lot to them.
+        if (
+            item.get('is_booking')
+            or float(item.get('price_at_time') or 0) <= 0
+            or _is_rent_material_name(item.get('product_name'))
+        ):
             copied = dict(item)
             copied.setdefault('grn_item_id', None)
             copied.setdefault('cost_rate_at_sale', None)
@@ -570,11 +575,14 @@ def _direct_sale_item_category(sale_category, price_at_time):
 
 
 def _is_rent_material_name(name):
-    txt = (name or '').strip().lower()
-    if not txt:
-        return False
-    normalized = txt.replace('-', ' ').replace('_', ' ')
-    return 'rent' in normalized
+    """True when *name* is a service/charge (including legacy rent names).
+
+    Delegates to ``app.services.lookups.is_service_name`` so all 6 call
+    sites automatically recognise any Service row even if renamed away from
+    the word 'rent'.
+    """
+    from app.services.lookups import is_service_name
+    return is_service_name(name)
 
 
 def _material_norm_key(v):

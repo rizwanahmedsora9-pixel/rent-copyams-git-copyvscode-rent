@@ -85,6 +85,10 @@ def add_material():
     if existing_name:
         flash(f'Material name "{name}" already exists', 'danger')
         return redirect(url_for('materials'))
+    svc_conflict = get_service_by_input(name)
+    if svc_conflict or any(_material_norm_key(sv.name) == _material_norm_key(name) for sv in Service.query.all()):
+        flash(f'A service named "{name}" already exists', 'danger')
+        return redirect(url_for('materials'))
     category = None
     if category_id:
         try:
@@ -97,6 +101,9 @@ def add_material():
         code = _next_material_code_for_category(category, material_name=name)
     if Material.query.filter_by(code=code).first():
         flash(f'Material code "{code}" already exists', 'danger')
+        return redirect(url_for('materials'))
+    if any(_material_norm_key(sv.code) == _material_norm_key(code) for sv in Service.query.all()):
+        flash(f'A service with code "{code}" already exists', 'danger')
         return redirect(url_for('materials'))
     try:
         new_mat = Material(
@@ -146,6 +153,12 @@ def edit_material(id):
         existing = Material.query.filter_by(code=new_code).first()
         if existing and existing.id != id:
             flash(f'Material code "{new_code}" already exists', 'danger')
+            return redirect(url_for('materials'))
+        if any(_material_norm_key(sv.name) == _material_norm_key(new_name) for sv in Service.query.all()):
+            flash(f'A service named "{new_name}" already exists', 'danger')
+            return redirect(url_for('materials'))
+        if any(_material_norm_key(sv.code) == _material_norm_key(new_code) for sv in Service.query.all()):
+            flash(f'A service with code "{new_code}" already exists', 'danger')
             return redirect(url_for('materials'))
 
         old_name = (m.name or '').strip()

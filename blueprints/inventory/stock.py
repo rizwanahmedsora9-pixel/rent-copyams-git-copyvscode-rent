@@ -61,7 +61,8 @@ def stock_summary():
         all_materials = {m for m in all_materials if m == material_filter}
     
     stats = []
-    for mat_name in sorted([m for m in all_materials if m is not None]):
+    # Services have Entry rows (the booking-pool ledger) but are never stock.
+    for mat_name in sorted([m for m in all_materials if m is not None and not is_service_name(m)]):
         prev_net = prev_map.get(mat_name, 0)
         day_in = day_map.get(mat_name, {}).get('in', 0)
         day_out = day_map.get(mat_name, {}).get('out', 0)
@@ -106,7 +107,7 @@ def stock_summary():
         'received': float(row.total_in or 0),
         'delivered': float(row.total_out or 0),
         'net': float((row.total_in or 0) - (row.total_out or 0))
-    } for row in totals_rows if row.material]
+    } for row in totals_rows if row.material and not is_service_name(row.material)]
 
     daily_rows = db.session.query(
         Entry.date,
@@ -134,7 +135,7 @@ def stock_summary():
     grn_receipts = _grn_receipt_history(date_from, date_to, material_filter)
 
     categories = MaterialCategory.query.order_by(MaterialCategory.name.asc()).all()
-    materials = Material.query.order_by(Material.name.asc()).all()
+    materials = [m for m in Material.query.order_by(Material.name.asc()).all() if not is_service_name(m.name)]
     return render_template(
         'stock_summary.html',
         stats=stats,

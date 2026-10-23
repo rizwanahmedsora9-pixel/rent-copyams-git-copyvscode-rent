@@ -23,7 +23,8 @@ def edit_entry(id):
     e.type = request.form.get('type') or e.type
 
     mat_obj = get_material_by_input(request.form.get('material'))
-    e.material = mat_obj.name if mat_obj else (request.form.get('material') or e.material)
+    svc_obj = None if mat_obj else get_service_by_input(request.form.get('material'))
+    e.material = mat_obj.name if mat_obj else (svc_obj.name if svc_obj else (request.form.get('material') or e.material))
 
     client_input = request.form.get('client', '').strip()
     if client_input:

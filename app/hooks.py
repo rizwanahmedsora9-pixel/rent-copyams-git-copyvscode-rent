@@ -45,7 +45,7 @@ def _safe_flash_text(text):
 def register_hooks(app):
     from flask import jsonify, flash, redirect, url_for, session
     from flask_login import current_user
-    from models import Client, Material, DeliveryPerson, Settings
+    from models import Client, Material, Service, DeliveryPerson, Settings
     from app.services.backup import _start_hourly_backup_worker, _start_reconcile_worker
     from app.services.permissions import _user_can
     from app.services.constants import (
@@ -336,6 +336,7 @@ def register_hooks(app):
                         'ts': now_ts,
                         'clients': Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all(),
                         'materials': Material.query.order_by(Material.name.asc()).all(),
+                        'services': Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all(),
                         'delivery_persons': DeliveryPerson.query.filter_by(is_active=True).order_by(DeliveryPerson.name.asc()).all(),
                         'settings': Settings.query.first(),
                     }
@@ -351,10 +352,12 @@ def register_hooks(app):
                         "with empty dropdowns."
                     )
                     cache_obj = {'ts': 0, 'clients': [], 'materials': [],
-                                 'delivery_persons': [], 'settings': None}
+                                 'services': [], 'delivery_persons': [],
+                                 'settings': None}
             return dict(
                 clients=cache_obj.get('clients') or [],
                 materials=cache_obj.get('materials') or [],
+                services=cache_obj.get('services') or [],
                 delivery_persons=cache_obj.get('delivery_persons') or [],
                 settings=cache_obj.get('settings'),
                 user_can=_user_can,

@@ -664,6 +664,7 @@
                                     <div class="position-relative">
                                         <div class="input-group input-group-sm">
                                             <input type="hidden" name="material_id[]" id="addSaleMaterialId0" class="material-id-input" value="">
+                                            <input type="hidden" name="service_id[]" id="addSaleServiceId0" class="service-id-input" value="">
                                             <input type="text" name="product_name[]" id="addSaleMaterialSearch0" class="form-control bg-dark text-white border-secondary price-trigger w-material" placeholder="Search material..." autocomplete="off" required data-combo-list="addSaleMaterialList0" data-combo-display="addSaleMaterialDisplay0" data-material-id-input="addSaleMaterialId0">
                                             <button class="btn btn-outline-secondary material-toggle-btn" type="button" data-combo-toggle data-combo-list="addSaleMaterialList0" data-combo-input="addSaleMaterialSearch0">
                                                 <i class="bi bi-chevron-down text-warning"></i>
@@ -673,6 +674,11 @@
                                             {% for mat in materials %}
                                             <div class="combobox-item" data-value="{{ mat.name }}" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="addSaleMaterialSearch0" data-combo-display="addSaleMaterialDisplay0" data-combo-after="onSaleMaterialPicked">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
+                                            </div>
+                                            {% endfor %}
+                                            {% for svc in services or [] %}
+                                            <div class="combobox-item" data-value="{{ svc.name }}" data-service-id="{{ svc.id }}" data-combo-code="{{ svc.name }}" data-combo-name="{{ svc.name }}" data-combo-input="addSaleMaterialSearch0" data-combo-display="addSaleMaterialDisplay0" data-combo-after="onSaleMaterialPicked">
+                                                <span class="fw-bold text-warning code-span">{{ svc.name }}</span>
                                             </div>
                                             {% endfor %}
                                         </div>
@@ -1029,11 +1035,17 @@ const knownClientCodes = new Set({{ (clients | map(attribute='code') | list)|toj
 const knownClientNames = new Set({{ (clients | map(attribute='name') | list)|tojson }});
 const knownMaterialNames = new Set({{ (materials | map(attribute='name') | list)|tojson }});
 const knownMaterialCodes = new Set({{ (materials | map(attribute='code') | list)|tojson }});
+const knownServiceNames = new Set({{ ((services or []) | map(attribute='name') | list)|tojson }});
+const knownServiceCodes = new Set({{ ((services or []) | map(attribute='code') | list)|tojson }});
 window.AMS_KNOWN_MATERIAL_NAMES = new Set([
     ...Array.from(knownMaterialNames),
     ...Array.from(knownMaterialNames).map((n) => String(n || '').toLowerCase()),
     ...Array.from(knownMaterialCodes),
     ...Array.from(knownMaterialCodes).map((n) => String(n || '').toLowerCase()),
+    ...Array.from(knownServiceNames),
+    ...Array.from(knownServiceNames).map((n) => String(n || '').toLowerCase()),
+    ...Array.from(knownServiceCodes),
+    ...Array.from(knownServiceCodes).map((n) => String(n || '').toLowerCase()),
 ]);
 const saleFormDraft = {{ (sale_form_draft if sale_form_draft is defined else None)|tojson }};
 const resumeMode = {{ (resume_mode if resume_mode is defined else '')|tojson }};
@@ -1102,6 +1114,12 @@ function prepareSaleMaterialComboboxRow(row, idx) {
         matIdInput.id = `addSaleMaterialId${idx}`;
         matIdInput.value = '';
         input.setAttribute('data-material-id-input', matIdInput.id);
+    }
+    const svcIdInput = row.querySelector('.service-id-input, input[name="service_id[]"]');
+    if (svcIdInput) {
+        svcIdInput.id = `addSaleServiceId${idx}`;
+        svcIdInput.value = '';
+        input.setAttribute('data-service-id-input', svcIdInput.id);
     }
     if (typeof window.clearSelectedMaterialId === 'function') window.clearSelectedMaterialId(input);
 
@@ -1498,7 +1516,19 @@ function materialKey(v) {
     return (v || '').toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 function isRentMaterial(v) {
-    const txt = (v || '').toString().trim().toLowerCase().replace(/[-_]+/g, ' ');
+    const raw = (v || '').toString().trim();
+    if (!raw) return false;
+    if (
+        knownServiceNames.has(raw) ||
+        knownServiceNames.has(raw.toLowerCase()) ||
+        Array.from(knownServiceNames).some((n) => String(n || '').toLowerCase() === raw.toLowerCase()) ||
+        knownServiceCodes.has(raw) ||
+        knownServiceCodes.has(raw.toLowerCase()) ||
+        Array.from(knownServiceCodes).some((n) => String(n || '').toLowerCase() === raw.toLowerCase())
+    ) {
+        return true;
+    }
+    const txt = raw.toLowerCase().replace(/[-_]+/g, ' ');
     return txt.includes('rent');
 }
 function toNum(v) {
@@ -2516,8 +2546,12 @@ function validateSaleFormBeforeSubmit(form) {
         // Allow existing sale materials even if deactivated/renamed — check by ID hidden input too
         const matIdInput = row.querySelector('.material-id-input');
         const matIdVal = (matIdInput && matIdInput.value) ? matIdInput.value.trim() : '';
-        const isKnownByName = knownMaterialNames.has(product) || knownMaterialNames.has(product.toLowerCase()) || knownMaterialCodes.has(product) || knownMaterialCodes.has(product.toLowerCase());
-        if (!isKnownByName && !matIdVal) {
+        const svcIdInput = row.querySelector('.service-id-input');
+        const svcIdVal = (svcIdInput && svcIdInput.value) ? svcIdInput.value.trim() : '';
+        const isKnownMaterial = knownMaterialNames.has(product) || knownMaterialNames.has(product.toLowerCase()) || knownMaterialCodes.has(product) || knownMaterialCodes.has(product.toLowerCase());
+        const isKnownService = knownServiceNames.has(product) || knownServiceNames.has(product.toLowerCase()) || knownServiceCodes.has(product) || knownServiceCodes.has(product.toLowerCase()) || Array.from(knownServiceNames).some((n) => String(n || '').toLowerCase() === product.toLowerCase());
+        const isKnownByName = isKnownMaterial || isKnownService;
+        if (!isKnownByName && !matIdVal && !svcIdVal) {
             issues.push(`Row ${idx + 1}: Select a valid material from list.`);
             return;
         }
@@ -2530,7 +2564,10 @@ function validateSaleFormBeforeSubmit(form) {
         const alt = (row.querySelector('[name="alternate_material[]"]')?.value || '').trim();
         const altMatIdInput = row.querySelector('.alt-material-id-input');
         const altMatId = (altMatIdInput && altMatIdInput.value) ? altMatIdInput.value.trim() : '';
-        if (alt && !altMatId && !(knownMaterialNames.has(alt) || knownMaterialNames.has(alt.toLowerCase()) || knownMaterialCodes.has(alt) || knownMaterialCodes.has(alt.toLowerCase()))) {
+        const altIsService = alt && (knownServiceNames.has(alt) || knownServiceNames.has(alt.toLowerCase()) || knownServiceCodes.has(alt) || knownServiceCodes.has(alt.toLowerCase()) || Array.from(knownServiceNames).some((n) => String(n || '').toLowerCase() === alt.toLowerCase()));
+        if (altIsService) {
+            issues.push(`Row ${idx + 1}: A service cannot be selected as an alternate material.`);
+        } else if (alt && !altMatId && !(knownMaterialNames.has(alt) || knownMaterialNames.has(alt.toLowerCase()) || knownMaterialCodes.has(alt) || knownMaterialCodes.has(alt.toLowerCase()))) {
             issues.push(`Row ${idx + 1}: Select a valid alternate material from list.`);
         }
 

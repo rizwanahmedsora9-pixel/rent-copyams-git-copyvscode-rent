@@ -227,6 +227,7 @@ def direct_sales_page():
     return render_template('direct_sales.html',
                            sales=sales,
                            materials=materials,
+                           services=Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all(),
                            clients=clients,
                            grns=grns,
                            accounts=Account.query.filter(func.coalesce(Account.is_active, True) == True).order_by(Account.name.asc()).all(),

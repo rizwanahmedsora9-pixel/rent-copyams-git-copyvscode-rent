@@ -32,11 +32,17 @@
                             <label class="text-white-50 small fw-bold mb-1">Material Brand</label>
                             <div class="position-relative">
                                 <input type="hidden" name="material_id" id="dispatchMaterialId" value="">
+                                <input type="hidden" name="service_id" id="dispatchServiceId" value="">
                                 <input type="text" name="material" id="dispatchMaterialSearch" class="form-control bg-dark text-white border-secondary" placeholder="Type brand name..." autocomplete="off" required onfocus="showCombobox('dispatchMaterialSearch', 'dispatchMaterialList')" oninput="filterCombobox('dispatchMaterialSearch', 'dispatchMaterialList', 'dispatchMaterialDisplay')" data-material-id-input="dispatchMaterialId">
                                 <div id="dispatchMaterialList" class="combobox-list shadow-lg" style="display: none;">
                                     {% for m in materials %}
                                     <div class="combobox-item" data-material-id="{{ m.id }}" data-combo-code="{{ m.name }}" data-combo-name="{{ m.name }}" data-combo-input="dispatchMaterialSearch" data-combo-display="dispatchMaterialDisplay">
                                         <span class="fw-bold text-warning">{{ m.name }}</span>
+                                    </div>
+                                    {% endfor %}
+                                    {% for svc in services or [] %}
+                                    <div class="combobox-item" data-service-id="{{ svc.id }}" data-combo-code="{{ svc.name }}" data-combo-name="{{ svc.name }}" data-combo-input="dispatchMaterialSearch" data-combo-display="dispatchMaterialDisplay">
+                                        <span class="fw-bold text-warning">{{ svc.name }}</span>
                                     </div>
                                     {% endfor %}
                                 </div>

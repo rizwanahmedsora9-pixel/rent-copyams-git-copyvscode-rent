@@ -220,7 +220,10 @@ def add_direct_sale():
 
         for mat_in in set(materials_list):
             try:
-                mat_obj = resolve_transaction_material(typed_text=mat_in, require_active=True)
+                # Services resolve here too: this is the booking pool
+                # (booked - delivered + returned). Filtering them out would
+                # make booked rent unconsumable.
+                _kind, mat_obj = resolve_transaction_item(typed_text=mat_in, require_active=True)
             except ValueError:
                 continue
             if not mat_obj:
@@ -234,6 +237,7 @@ def add_direct_sale():
     missing_rate_non_booked = []
 
     material_ids = request.form.getlist('material_id[]')
+    service_ids = request.form.getlist('service_id[]')
     alternate_ids = request.form.getlist('alternate_material_id[]')
 
     for idx, mat in enumerate(materials_list):
@@ -241,11 +245,16 @@ def add_direct_sale():
         rate_val = rates[idx] if idx < len(rates) else ''
         mat_name_in = str(mat or '').strip()
         mid = material_ids[idx] if idx < len(material_ids) else ''
+        sid = service_ids[idx] if idx < len(service_ids) else ''
         qty = _to_float_or_zero(qty_val)
         if not mat_name_in and not str(mid or '').strip() and qty <= 0:
             continue
         try:
-            mat_obj = resolve_transaction_material(
+            # service_id is a separate channel on purpose: service ids overlap
+            # material ids, so a service id must never reach the unqualified
+            # Material PK lookup.
+            _kind, mat_obj = resolve_transaction_item(
+                service_id=sid,
                 material_id=mid,
                 typed_text=mat_name_in,
                 require_active=True,
@@ -373,6 +382,8 @@ def add_direct_sale():
         required_total_stock[mat] = required_total_stock.get(mat, 0) + req_qty
 
     for mat, req_qty in required_total_stock.items():
+        if is_service_name(mat):
+            continue
         mat_obj = Material.query.filter_by(name=mat).first()
         if mat_obj:
             available = mat_obj.total or 0

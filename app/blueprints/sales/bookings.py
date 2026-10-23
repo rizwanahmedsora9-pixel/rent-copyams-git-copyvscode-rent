@@ -43,25 +43,27 @@ def _sync_booking_paid_into_account(booking, *, payment_account_id, method='Cash
     return acc
 
 
-def _collect_booking_item_updates(materials_list, qtys, rates, item_ids=None, material_ids=None):
-    """Normalize submitted booking lines against existing Material Master records."""
+def _collect_booking_item_updates(materials_list, qtys, rates, item_ids=None, material_ids=None, service_ids=None, allow_inactive_names=None):
+    """Normalize submitted booking lines against existing Material or Service records."""
     rows = []
-    for mat, qty, rate, item_id, mid in zip_longest(
-        materials_list or [], qtys or [], rates or [], item_ids or [], material_ids or [], fillvalue=''
+    for mat, qty, rate, item_id, mid, sid in zip_longest(
+        materials_list or [], qtys or [], rates or [], item_ids or [], material_ids or [], service_ids or [], fillvalue=''
     ):
         mat_name = str(mat or '').strip()
         qty_val = _to_float_or_zero(qty)
         rate_val = _to_float_or_zero(rate)
-        if qty_val <= 0 and not mat_name and not str(mid or '').strip():
+        if qty_val <= 0 and not mat_name and not str(mid or '').strip() and not str(sid or '').strip():
             continue
         if qty_val > 0 and rate_val <= 0:
             raise ValueError(f'Unit rate is required and must be greater than 0 for "{mat_name}".')
-        if not mat_name and not str(mid or '').strip():
+        if not mat_name and not str(mid or '').strip() and not str(sid or '').strip():
             continue
-        mat_obj = resolve_transaction_material(
+        _kind, mat_obj = resolve_transaction_item(
+            service_id=sid,
             material_id=mid,
             typed_text=mat_name,
             require_active=True,
+            allow_inactive_names=allow_inactive_names,
         )
         if not mat_obj:
             raise ValueError(MATERIAL_NOT_SELECTED_MSG)
@@ -193,6 +195,7 @@ def bookings_page():
                            bookings=bookings,
                            clients=clients,
                            materials=materials,
+                           services=Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all(),
                            accounts=accounts,
                            next_auto=next_auto,
                            show_mode=show_mode,
@@ -218,7 +221,18 @@ def booking_edit_modal(booking_id):
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     accounts = Account.query.filter(func.coalesce(Account.is_active, True) == True).order_by(Account.name.asc()).all()
     materials = Material.query.filter_by(is_active=True).order_by(Material.name.asc()).all()
-    return render_template('_booking_edit_modal.html', booking=booking, clients=clients, accounts=accounts, materials=materials)
+    services = Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all()
+    hist_names = {(it.material_name or '').strip().lower() for it in (booking.items or []) if it.material_name}
+    if hist_names:
+        active_mids = {m.id for m in materials}
+        for hm in Material.query.filter(func.lower(func.trim(Material.name)).in_(hist_names)).all():
+            if hm.id not in active_mids:
+                materials.append(hm)
+        active_sids = {sv.id for sv in services}
+        for hsv in Service.query.filter(func.lower(func.trim(Service.name)).in_(hist_names)).all():
+            if hsv.id not in active_sids:
+                services.append(hsv)
+    return render_template('_booking_edit_modal.html', booking=booking, clients=clients, accounts=accounts, materials=materials, services=services)
 
 
 @bp.route('/add_booking', methods=['POST'])
@@ -227,6 +241,7 @@ def add_booking():
     client_input = request.form.get('client_code', '').strip() or request.form.get('client_name', '').strip()
     materials_list = request.form.getlist('material_name[]')
     material_ids = request.form.getlist('material_id[]')
+    service_ids = request.form.getlist('service_id[]')
     qtys = request.form.getlist('qty[]')
     rates = request.form.getlist('unit_rate[]')
     amount = _to_float_or_zero(request.form.get('amount', 0))
@@ -284,18 +299,19 @@ def add_booking():
     db.session.add(booking)
     db.session.flush()
 
-    # Add booking items from existing Material Master records only.
-    for mat, qty, rate, mid in zip_longest(materials_list, qtys, rates, material_ids, fillvalue=''):
+    # Add booking items from existing Material or Service records.
+    for mat, qty, rate, mid, sid in zip_longest(materials_list, qtys, rates, material_ids, service_ids, fillvalue=''):
         mat_name = str(mat or '').strip()
         qty_val = _to_float_or_zero(qty)
         rate_val = _to_float_or_zero(rate)
-        if qty_val <= 0 and not mat_name and not str(mid or '').strip():
+        if qty_val <= 0 and not mat_name and not str(mid or '').strip() and not str(sid or '').strip():
             continue
         if qty_val > 0 and rate_val <= 0:
             flash(f'Unit rate is required and must be greater than 0 for "{mat_name}".', 'danger')
             return redirect(url_for('bookings_page'))
         try:
-            mat_obj = resolve_transaction_material(
+            _kind, mat_obj = resolve_transaction_item(
+                service_id=sid,
                 material_id=mid,
                 typed_text=mat_name,
                 require_active=True,
@@ -369,6 +385,7 @@ def edit_booking(id):
 
     materials_list = request.form.getlist('material_name[]')
     material_ids = request.form.getlist('material_id[]')
+    service_ids = request.form.getlist('service_id[]')
     qtys = request.form.getlist('qty[]')
     rates = request.form.getlist('unit_rate[]')
     item_ids = request.form.getlist('booking_item_id[]')
@@ -381,7 +398,13 @@ def edit_booking(id):
             label='Booking discount',
             require_reason=False
         )
-        desired_rows = _collect_booking_item_updates(materials_list, qtys, rates, item_ids)
+        existing_item_names = [it.material_name for it in (booking.items or []) if it.material_name]
+        desired_rows = _collect_booking_item_updates(
+            materials_list, qtys, rates, item_ids,
+            material_ids=material_ids,
+            service_ids=service_ids,
+            allow_inactive_names=existing_item_names,
+        )
         _apply_booking_item_updates(booking, desired_rows)
     except ValueError as ve:
         db.session.rollback()

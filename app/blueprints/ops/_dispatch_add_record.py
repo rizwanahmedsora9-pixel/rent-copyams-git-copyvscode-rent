@@ -37,7 +37,8 @@ def add_record():
     if entry_type == 'OUT' and client_obj:
         mat_input = request.form.get('material', '')
         try:
-            mat_obj = resolve_transaction_material(
+            _kind, mat_obj = resolve_transaction_item(
+                service_id=request.form.get('service_id'),
                 material_id=request.form.get('material_id'),
                 typed_text=mat_input,
                 require_active=True,
@@ -88,10 +89,13 @@ def add_record():
     if entry_type == 'OUT' and client_obj and not nimbus_no_val:
         nimbus_no_val = "Booking Delivery"
 
-    # Resolve material for entry
+    # Resolve material (or service, for booked rent dispatch). mat_obj is
+    # used immediately below to update Material.total, so keep it strictly
+    # a Material — a Service must never get a stock delta.
     mat_input = request.form.get('material', '')
     mat_obj = get_material_by_input(mat_input)
-    entry_material_name = mat_obj.name if mat_obj else mat_input
+    svc_obj = None if mat_obj else get_service_by_input(mat_input)
+    entry_material_name = mat_obj.name if mat_obj else (svc_obj.name if svc_obj else mat_input)
     entry = Entry(date=entry_date,
                   time=now.strftime('%H:%M:%S'),
                   type=entry_type,

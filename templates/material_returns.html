@@ -223,6 +223,7 @@
                         <div class="col-md-5 position-relative">
                             <div class="input-group">
                                 <input type="hidden" name="material_id[]" class="material-id-input" value="">
+                                <input type="hidden" name="service_id[]" class="service-id-input" value="">
                                 <input class="form-control return-material-input" name="material_name[]" placeholder="Material" autocomplete="off" onfocus="openReturnMaterialCombobox(this)" oninput="filterReturnMaterialCombobox(this)">
                                 <button class="btn btn-outline-secondary" type="button" onclick="openReturnMaterialFromButton(this)">
                                     <i class="bi bi-chevron-down text-warning"></i>
@@ -299,6 +300,7 @@
                         <div class="col-md-5 position-relative">
                             <div class="input-group">
                                 <input type="hidden" name="material_id[]" class="material-id-input" value="{% for m in materials %}{% if m.name == it.material_name %}{{ m.id }}{% endif %}{% endfor %}">
+                                <input type="hidden" name="service_id[]" class="service-id-input" value="{% for s in services or [] %}{% if s.name == it.material_name %}{{ s.id }}{% endif %}{% endfor %}">
                                 <input class="form-control return-material-input" name="material_name[]" value="{{ it.material_name }}" placeholder="Material" autocomplete="off" onfocus="openReturnMaterialCombobox(this)" oninput="filterReturnMaterialCombobox(this)">
                                 <button class="btn btn-outline-secondary" type="button" onclick="openReturnMaterialFromButton(this)">
                                     <i class="bi bi-chevron-down text-warning"></i>
@@ -341,7 +343,10 @@
 (function () {
     const RETURN_MATERIALS = [
         {% for m in materials %}
-        { id: {{ m.id }}, name: {{ (m.name or '')|tojson }} },
+        { id: {{ m.id }}, name: {{ (m.name or '')|tojson }}, isService: false },
+        {% endfor %}
+        {% for s in services or [] %}
+        { id: {{ s.id }}, name: {{ (s.name or '')|tojson }}, isService: true },
         {% endfor %}
     ];
     window.AMS_KNOWN_MATERIAL_NAMES = new Set(
@@ -366,7 +371,7 @@
             div.className = 'combobox-item';
             div.dataset.value = mat.name;
             div.innerHTML = `<span class="fw-bold text-warning code-span">${mat.name}</span>`;
-            div.addEventListener('click', () => selectReturnMaterial(mat.name, mat.id));
+            div.addEventListener('click', () => selectReturnMaterial(mat.name, mat.id, !!mat.isService));
             list.appendChild(div);
         });
     }
@@ -401,15 +406,17 @@
             item.style.display = txt.includes(filter) ? '' : 'none';
         });
     };
-    function selectReturnMaterial(value, materialId) {
+    function selectReturnMaterial(value, itemId, isService) {
         if (!activeReturnMaterialInput) return;
         activeReturnMaterialInput.value = value;
         activeReturnMaterialInput.dataset.comboSuppress = '1';
-        if (typeof window.setSelectedMaterialId === 'function') {
-            window.setSelectedMaterialId(activeReturnMaterialInput, materialId || '', value);
+        if (isService && typeof window.setSelectedServiceId === 'function') {
+            window.setSelectedServiceId(activeReturnMaterialInput, itemId || '', value);
+        } else if (typeof window.setSelectedMaterialId === 'function') {
+            window.setSelectedMaterialId(activeReturnMaterialInput, itemId || '', value);
         } else {
             const hid = activeReturnMaterialInput.closest('.position-relative')?.querySelector('input[name="material_id[]"]');
-            if (hid) hid.value = materialId || '';
+            if (hid) hid.value = isService ? '' : (itemId || '');
         }
         const display = activeReturnMaterialInput.closest('.position-relative')?.querySelector('.return-material-display');
         if (display) display.innerText = `Material: ${value}`;

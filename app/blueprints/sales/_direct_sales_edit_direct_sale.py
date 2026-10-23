@@ -147,6 +147,7 @@ def edit_direct_sale(id):
         materials_list = request.form.getlist('product_name[]')
         alternate_list = request.form.getlist('alternate_material[]')
         material_ids = request.form.getlist('material_id[]')
+        service_ids = request.form.getlist('service_id[]')
         alternate_ids = request.form.getlist('alternate_material_id[]')
         qtys = request.form.getlist('qty[]')
         rates = request.form.getlist('unit_rate[]')
@@ -219,7 +220,7 @@ def edit_direct_sale(id):
 
             for raw in set(materials_list):
                 try:
-                    m = resolve_transaction_material(typed_text=raw, require_active=False)
+                    _k, m = resolve_transaction_item(typed_text=raw, require_active=False)
                 except ValueError:
                     continue
                 if not m:
@@ -245,11 +246,16 @@ def edit_direct_sale(id):
             rate = rates[idx] if idx < len(rates) else ''
             mat_name_in = str(mat or '').strip()
             mid = material_ids[idx] if idx < len(material_ids) else ''
+            sid = service_ids[idx] if idx < len(service_ids) else ''
             qty_val = _to_float_or_zero(qty)
-            if not mat_name_in and not str(mid or '').strip() and qty_val <= 0:
+            if not mat_name_in and not str(mid or '').strip() and not str(sid or '').strip() and qty_val <= 0:
                 continue
             try:
-                mat_obj = resolve_transaction_material(
+                # Alternate resolution below intentionally stays on
+                # resolve_transaction_material — a service can never be the
+                # physical substitute delivered for booked goods.
+                _kind, mat_obj = resolve_transaction_item(
+                    service_id=sid,
                     material_id=mid,
                     typed_text=mat_name_in,
                     require_active=True,

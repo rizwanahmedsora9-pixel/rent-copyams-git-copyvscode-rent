@@ -70,11 +70,20 @@ def material_returns_page():
             func.lower(func.trim(Material.name)).in_(historical_names)
         ).order_by(Material.name.asc()).all() if historical_names else []
         materials.extend([m for m in historical if m.id not in active_ids])
+    services = Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all()
+    if edit_return:
+        active_sids = {sv.id for sv in services}
+        historical_names = {(item.material_name or '').strip().lower() for item in edit_return.items}
+        hist_svcs = Service.query.filter(
+            func.lower(func.trim(Service.name)).in_(historical_names)
+        ).order_by(Service.name.asc()).all() if historical_names else []
+        services.extend([sv for sv in hist_svcs if sv.id not in active_sids])
     return render_template(
         'material_returns.html',
         returns=returns_pagination.items,
         clients=clients,
         materials=materials,
+        services=services,
         show_mode=show_mode,
         client_filter=client_filter,
         bill_filter=bill_filter,
@@ -110,6 +119,7 @@ def add_material_return():
 
         materials_list = request.form.getlist('material_name[]')
         material_ids = request.form.getlist('material_id[]')
+        service_ids = request.form.getlist('service_id[]')
         qtys = request.form.getlist('qty[]')
         try:
             return_type = _parse_transaction_return_type(request.form, default='normal')
@@ -119,15 +129,16 @@ def add_material_return():
         unit_rates = request.form.getlist('unit_rate[]')
         rent_rates = request.form.getlist('rent_rate[]')
         parsed_items = []
-        for mat_raw, mid_raw, qty_raw, unit_raw, rent_raw in zip_longest(
-            materials_list, material_ids, qtys, unit_rates, rent_rates, fillvalue=''
+        for mat_raw, mid_raw, sid_raw, qty_raw, unit_raw, rent_raw in zip_longest(
+            materials_list, material_ids, service_ids, qtys, unit_rates, rent_rates, fillvalue=''
         ):
             mat_txt = (mat_raw or '').strip()
             qty_val = _to_float_or_zero(qty_raw)
-            if not mat_txt and not str(mid_raw or '').strip() and qty_val <= 0:
+            if not mat_txt and not str(mid_raw or '').strip() and not str(sid_raw or '').strip() and qty_val <= 0:
                 continue
             try:
-                mat_obj = resolve_transaction_material(
+                _kind, mat_obj = resolve_transaction_item(
+                    service_id=sid_raw,
                     material_id=mid_raw,
                     typed_text=mat_txt,
                     require_active=True,
@@ -311,21 +322,23 @@ def edit_material_return(id):
 
         materials_list = request.form.getlist('material_name[]')
         material_ids = request.form.getlist('material_id[]')
+        service_ids = request.form.getlist('service_id[]')
         qtys = request.form.getlist('qty[]')
         unit_rates = request.form.getlist('unit_rate[]')
         rent_rates = request.form.getlist('rent_rate[]')
         historical_names = {(it.material_name or '').strip().lower() for it in (ret.items or [])}
 
         parsed_items = []
-        for mat_raw, mid_raw, qty_raw, unit_raw, rent_raw in zip_longest(
-            materials_list, material_ids, qtys, unit_rates, rent_rates, fillvalue=''
+        for mat_raw, mid_raw, sid_raw, qty_raw, unit_raw, rent_raw in zip_longest(
+            materials_list, material_ids, service_ids, qtys, unit_rates, rent_rates, fillvalue=''
         ):
             mat_txt = (mat_raw or '').strip()
             qty_val = _to_float_or_zero(qty_raw)
-            if not mat_txt and not str(mid_raw or '').strip() and qty_val <= 0:
+            if not mat_txt and not str(mid_raw or '').strip() and not str(sid_raw or '').strip() and qty_val <= 0:
                 continue
             try:
-                mat_obj = resolve_transaction_material(
+                _kind, mat_obj = resolve_transaction_item(
+                    service_id=sid_raw,
                     material_id=mid_raw,
                     typed_text=mat_txt,
                     require_active=True,

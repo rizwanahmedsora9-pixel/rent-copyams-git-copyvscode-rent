@@ -4,7 +4,8 @@ from flask_login import login_required
 from datetime import date, datetime
 from types import SimpleNamespace
 from sqlalchemy import func, case, or_, and_
-from models import db, Material, MaterialCategory, Entry, Client, PendingBill, DirectSale, Booking, Payment, GRN, Invoice
+from models import db, Material, Service, MaterialCategory, Entry, Client, PendingBill, DirectSale, Booking, Payment, GRN, Invoice
+from app.services.lookups import is_service_name
 
 # Module configuration
 MODULE_CONFIG = {

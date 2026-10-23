@@ -469,6 +469,10 @@ def edit_grn(id):
                     if name and qty_val <= 0:
                         edit_skipped_lines.append(f"{name} (qty={qty or 0})")
                     continue
+                if is_service_name(name) or get_service_by_input(name):
+                    db.session.rollback()
+                    flash(f'"{name}" is a service/charge and cannot be received on a GRN.', 'danger')
+                    return redirect(url_for('edit_grn', id=grn_obj.id))
 
                 item_obj = None
                 if str(raw_id).strip().isdigit():
