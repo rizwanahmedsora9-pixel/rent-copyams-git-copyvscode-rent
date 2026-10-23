@@ -219,7 +219,9 @@ def tracking():
                        Entry.note.ilike(f'%{search}%')))
 
         summary_query = base_query.group_by(Entry.material).all()
-        summary = {row.material: row.net for row in summary_query}
+        # Services stay in the paginated movement list above, but are excluded
+        # from the net-stock summary bar.
+        summary = {row.material: row.net for row in summary_query if not is_service_name(row.material)}
         total_qty = sum(summary.values()) if summary else 0
 
     today_str = pk_today().strftime('%Y-%m-%d')

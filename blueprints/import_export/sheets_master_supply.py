@@ -40,7 +40,9 @@ def _process_grn_items(df, strategy, report):
         manual_bill = str(row.get('grn_manual_bill_no', '') or row.get('grn_manual_bill', '')).strip()
         auto_bill = str(row.get('grn_auto_bill_no', '') or row.get('grn_auto_bill', '')).strip()
         mat_name = str(row.get('material_name', '')).strip()
-        if not mat_name:
+        if not mat_name or is_service_name(mat_name):
+            if mat_name:
+                report['skipped'] += 1
             continue
             
         grn = None

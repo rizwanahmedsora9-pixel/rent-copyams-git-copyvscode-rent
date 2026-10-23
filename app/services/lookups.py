@@ -191,6 +191,236 @@ def resolve_transaction_material(material_id=None, typed_text=None, *, require_a
     return mat
 
 
+# ---------------------------------------------------------------------------
+# Services — charges that are billed like a material but are never stock.
+#
+# Everything here is name-keyed, because that is how the schema works:
+# BookingItem.material_name / DirectSaleItem.product_name / Entry.material are
+# free-text strings, not FKs. A material can therefore become a service without
+# touching a single historical row — the name simply resolves elsewhere.
+# ---------------------------------------------------------------------------
+
+# Small TTL cache: `is_service_name()` is called per bill line inside report
+# loops, and a query per line would be wasteful. Invalidated explicitly by
+# every service mutation.
+_SERVICE_CACHE: dict = {'ts': 0.0, 'names': set(), 'codes': set()}
+_SERVICE_CACHE_TTL = 30.0
+
+
+def invalidate_service_cache() -> None:
+    """Drop the cached service name/code sets (call after any mutation)."""
+    _SERVICE_CACHE['ts'] = 0.0
+
+
+def _service_cache() -> dict:
+    now = time.time()
+    if now - float(_SERVICE_CACHE.get('ts') or 0.0) < _SERVICE_CACHE_TTL:
+        return _SERVICE_CACHE
+    try:
+        rows = db.session.query(Service.name, Service.code).all()
+    except Exception:
+        # Schema not ready yet (very early bootstrap) — degrade to "no services"
+        # rather than break every page, matching the dropdown-cache behaviour
+        # in app/hooks.py.
+        return {'ts': now, 'names': set(), 'codes': set()}
+    names = {_material_norm_key(n) for n, _c in rows if n}
+    codes = {_material_norm_key(c) for _n, c in rows if c}
+    _SERVICE_CACHE['ts'] = now
+    _SERVICE_CACHE['names'] = names
+    _SERVICE_CACHE['codes'] = codes
+    return _SERVICE_CACHE
+
+
+def _material_norm_key(value):
+    """Normalised identity key used for name/code comparisons.
+
+    Deliberately identical to ``app.services.sales_core._material_norm_key``.
+    These domain modules are parallel copies that do not import each other
+    (they are aggregated by ``app/services/api.py``), so the helper is mirrored
+    rather than shared — keep the two in step.
+    """
+    txt = (value or '').strip().lower()
+    return re.sub(r'[^a-z0-9]+', '', txt)
+
+
+def get_service_by_input(input_str):
+    """Resolve a Service by exact name or code, then a case-insensitive match.
+
+    Mirrors ``get_material_by_input`` so both masters behave identically.
+    Never creates a Service and never treats a partial search as a match.
+    """
+    if not input_str:
+        return None
+    input_str = input_str.strip()
+    svc = Service.query.filter(
+        or_(Service.name == input_str, Service.code == input_str)
+    ).first()
+    if svc:
+        return svc
+    return Service.query.filter(
+        or_(Service.name.ilike(input_str), Service.code.ilike(input_str))
+    ).first()
+
+
+def _is_legacy_rent_name(name):
+    """The historic 'is this rent?' rule, kept only as a transition fallback.
+
+    Before the rent rows are moved into the Service master they are still
+    Materials, so ``is_service_name`` must keep answering True for them —
+    otherwise the rent box on the sale form would go dark the day service
+    support ships. The ``and not a Material`` clause in ``is_service_name``
+    closes the overlap so the two rules can never both fire.
+    """
+    txt = (name or '').strip().lower()
+    if not txt:
+        return False
+    return 'rent' in txt.replace('-', ' ').replace('_', ' ')
+
+
+def is_service_name(name):
+    """True when *name* identifies a Service (a charge, not stock).
+
+    Two rules, in order:
+
+    1. the name resolves to a Service — the explicit master, which is the
+       destination state;
+    2. the legacy ``'rent' in name`` heuristic — which is how the business
+       identifies a rent charge *today*.
+
+    Rule 2 is kept live **across** the conversion rather than being dropped the
+    moment the rent rows move. Rent is a charge while it is still a Material and
+    it stays a charge afterwards; keeping the heuristic in place is exactly what
+    makes the rent box on the sale form, ``rent_item_revenue`` and the profit
+    variance block identical before and after — with no dark window between
+    shipping the code and pressing Convert.
+
+    It is a strict superset of today's ``_is_rent_material_name``: same answer
+    for every name in the master today, plus every Service ever added.
+    """
+    key = _material_norm_key(name)
+    if not key:
+        return False
+    cache = _service_cache()
+    if key in cache['names'] or key in cache['codes']:
+        return True
+    return _is_legacy_rent_name(name)
+
+
+def resolve_transaction_item(service_id=None, material_id=None, typed_text=None, *,
+                             require_active=True, allow_inactive_names=None):
+    """Resolve a bill line to ``('material', obj)`` or ``('service', obj)``.
+
+    Resolution order is fixed and deliberately puts ``service_id`` first:
+
+        service_id  ->  material_id  ->  typed text
+
+    ``material_id`` must **never** carry a Service id. Service ids start at 1
+    and so do Material ids, so a Service id reaching the unqualified
+    ``db.session.get(Material, mid)`` lookup would silently resolve to whatever
+    Material shares that integer — posting a rent charge as, say, 12MM STEEL.
+    Callers therefore get a separate ``service_id`` channel and this function
+    keeps the two strictly apart.
+
+    Returns ``(None, None)`` for a blank row. Raises ``ValueError`` when the
+    user supplied a value that does not resolve to exactly one master, or when
+    the typed text contradicts the supplied id.
+    """
+    allow_inactive_names = {
+        (n or '').strip().lower()
+        for n in (allow_inactive_names or [])
+        if (n or '').strip()
+    }
+
+    raw_service_id = '' if service_id is None else str(service_id).strip()
+    raw_material_id = '' if material_id is None else str(material_id).strip()
+    typed = (typed_text or '').strip()
+
+    obj = None
+    kind = None
+
+    if raw_service_id:
+        try:
+            sid = int(raw_service_id)
+        except (TypeError, ValueError):
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+        obj = db.session.get(Service, sid)
+        if not obj:
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+        kind = 'service'
+        # A stale hidden id after the user edited the search box is invalid.
+        if typed and not _service_text_matches_record(obj, typed):
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+    elif raw_material_id:
+        try:
+            mid = int(raw_material_id)
+        except (TypeError, ValueError):
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+        obj = db.session.get(Material, mid)
+        if not obj:
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+        kind = 'material'
+        if typed and not _material_text_matches_record(obj, typed):
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+    elif typed:
+        # A name may legitimately live in either master, but never in both —
+        # the collision guard (services blueprint) prevents that. If it ever
+        # happens we refuse rather than guess.
+        mat = get_material_by_input(typed)
+        svc = None if mat else get_service_by_input(typed)
+        if mat and svc:
+            raise ValueError(
+                f'"{typed}" matches both a material and a service. '
+                'Ask an administrator to resolve the duplicate.'
+            )
+        if mat:
+            obj, kind = mat, 'material'
+        elif svc:
+            obj, kind = svc, 'service'
+        else:
+            raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+    else:
+        return (None, None)
+
+    if require_active and not bool(getattr(obj, 'is_active', True)):
+        hist = (obj.name or '').strip().lower()
+        if hist not in allow_inactive_names:
+            raise ValueError(f'{obj.name} was not found or is suspended.')
+    return (kind, obj)
+
+
+def _service_text_matches_record(svc, typed_text):
+    """True when typed text is empty or is exactly this service's name/code."""
+    typed = _material_lookup_key(typed_text)
+    if not typed:
+        return True
+    if not svc:
+        return False
+    return typed in {
+        _material_lookup_key(svc.name),
+        _material_lookup_key(svc.code),
+    }
+
+
+def resolve_transaction_service(service_id=None, typed_text=None, *,
+                                require_active=True, allow_inactive_names=None):
+    """Resolve a Service, raising unless the result is one.
+
+    Used by paths that must accept charges *only* — the counterpart of
+    ``resolve_transaction_material`` for goods-only paths.
+    """
+    kind, obj = resolve_transaction_item(
+        service_id=service_id,
+        typed_text=typed_text,
+        require_active=require_active,
+        allow_inactive_names=allow_inactive_names,
+    )
+    if kind == 'service':
+        return obj
+    if kind is None:
+        return None
+    raise ValueError(MATERIAL_NOT_SELECTED_MSG)
+
+
 def get_supplier_by_input(input_str):
     """Helper to find supplier by name."""
     if not input_str:

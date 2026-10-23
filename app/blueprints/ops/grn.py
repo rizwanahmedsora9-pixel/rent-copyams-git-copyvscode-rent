@@ -218,6 +218,10 @@ def grn():
                     )
                     skipped_lines.append(f"{name} (qty={qty or 0})")
                     continue
+                if is_service_name(name) or get_service_by_input(name):
+                    db.session.rollback()
+                    flash(f'"{name}" is a service/charge and cannot be received on a GRN.', 'danger')
+                    return redirect(url_for('grn'))
                 price_val = float(price) if price else 0
                 item = GRNItem(grn_id=new_grn.id, mat_name=name, qty=qty_val, price_at_time=price_val)
                 db.session.add(item)
@@ -319,7 +323,10 @@ def grn():
             GRN.id.desc()
         ).all()
 
-    materials = Material.query.filter_by(is_active=True).order_by(Material.name.asc()).all()
+    materials = [
+        m for m in Material.query.filter_by(is_active=True).order_by(Material.name.asc()).all()
+        if not is_service_name(m.name)
+    ]
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     suppliers_list = Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all()
 

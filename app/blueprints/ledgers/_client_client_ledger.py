@@ -27,7 +27,7 @@ def client_ledger(id):
         }
 
         clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
-        materials = Material.query.order_by(Material.name.asc()).all()
+        materials = list(Material.query.order_by(Material.name.asc()).all()) + list(Service.query.order_by(Service.name.asc()).all())
 
         return render_template('ledger.html',
                                client=client,

@@ -99,6 +99,12 @@ def profit_reports():
         if not needle:
             report_cost_cache[cache_key] = (0.0, False)
             return report_cost_cache[cache_key]
+        # Services in the Service master have no product COGS (their cost is
+        # tracked in the delivery-rent variance block below), so treat their
+        # unit cost as known-0 rather than 'COGS unknown'.
+        if get_service_by_input(material_name) is not None:
+            report_cost_cache[cache_key] = (0.0, True)
+            return report_cost_cache[cache_key]
 
         matching = [row for row in purchase_cost_rows if needle in row[0]]
         if tx_date:
@@ -1156,7 +1162,7 @@ def profit_reports():
     ]
 
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
-    materials = Material.query.order_by(Material.name.asc()).all()
+    materials = list(Material.query.order_by(Material.name.asc()).all()) + list(Service.query.order_by(Service.name.asc()).all())
 
     return render_template(
         template_name,

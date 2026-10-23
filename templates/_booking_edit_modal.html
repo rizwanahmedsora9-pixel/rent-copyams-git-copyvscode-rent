@@ -39,6 +39,7 @@
                         <div class="booking-item-grid">
                             <div class="position-relative">
                                 <input type="hidden" name="material_id[]" class="material-id-input" value="{% for mat in materials or [] %}{% if mat.name|lower == item.material_name|lower %}{{ mat.id }}{% endif %}{% endfor %}">
+                                <input type="hidden" name="service_id[]" class="service-id-input" value="{% for svc in services or [] %}{% if svc.name|lower == item.material_name|lower %}{{ svc.id }}{% endif %}{% endfor %}">
                                 <input type="text" name="material_name[]" class="form-control form-control-sm bg-dark text-white border-secondary price-trigger" value="{{ item.material_name }}" placeholder="Search material..." autocomplete="off" required data-selected-material-name="{{ item.material_name }}" data-combo-suppress="1">
                             </div>
                             <div>

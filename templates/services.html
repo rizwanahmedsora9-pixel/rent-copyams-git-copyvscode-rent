@@ -1,0 +1,329 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold text-warning mb-1">Services &amp; Charges</h2>
+        <div class="text-white-50 small">
+            Charges billed on a bill line like a material — rent, labour, freight —
+            but with <strong class="text-info">no stock, no GRN and no stock report</strong>.
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-warning fw-bold px-4 rounded-pill shadow" data-bs-toggle="modal" data-bs-target="#migrateModal">
+            <i class="bi bi-box-arrow-in-right me-1"></i> Move Rent Materials &amp; Entries to Services
+        </button>
+        <button class="btn btn-outline-info fw-bold px-4 rounded-pill shadow" data-bs-toggle="modal" data-bs-target="#mergeServiceModal">
+            <i class="bi bi-intersect me-1"></i> Merge Services
+        </button>
+        <a href="/materials" class="btn btn-outline-light fw-bold px-4 rounded-pill shadow">
+            <i class="bi bi-tags me-1"></i> Material Brands
+        </a>
+        <a href="/" class="btn btn-outline-light fw-bold px-4 rounded-pill shadow">
+            <i class="bi bi-arrow-left me-1"></i> Back
+        </a>
+        <button class="btn btn-warning text-dark fw-bold px-4 rounded-pill shadow" data-bs-toggle="modal" data-bs-target="#addServiceModal">
+            <i class="bi bi-plus-lg me-1"></i> Add Service
+        </button>
+    </div>
+</div>
+
+{# ---- migration banner ------------------------------------------------- #}
+{% if pending_rent or orphan_rent_names %}
+<div class="card shadow-sm mb-4 border-warning" style="background: #1e293b; border-width: 2px !important; border-radius: 15px;">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <h5 class="text-warning fw-bold mb-1">
+                    <i class="bi bi-arrow-left-right me-2"></i>{{ pending_rent|length }} rent material(s) still in the Material master
+                </h5>
+                <div class="text-white-50 small">
+                    {% for m in pending_rent %}
+                    <span class="badge bg-dark border border-secondary text-warning me-1">{{ m.name }}</span>
+                    {% endfor %}
+                    {% for n in orphan_rent_names or [] %}
+                    <span class="badge bg-dark border border-secondary text-info me-1">{{ n }}</span>
+                    {% endfor %}
+                    {% if pending_rent_entries %}
+                    <span class="ms-2 text-info fw-bold">({{ pending_rent_entries }} historical entries &amp; bill lines)</span>
+                    {% endif %}
+                </div>
+                <div class="text-white-50 small mt-2">
+                    Converting moves these rows out of inventory. Historical bills, entries,
+                    bookings and payments are <strong class="text-info">not modified</strong> —
+                    they store the name as text, so they simply resolve here instead.
+                </div>
+            </div>
+            <button class="btn btn-warning text-dark fw-bold px-4 rounded-pill shadow" data-bs-toggle="modal" data-bs-target="#migrateModal">
+                <i class="bi bi-box-arrow-in-right me-1"></i> Convert to Services
+            </button>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert border mb-4" style="background: #1e293b; border-color: #475569 !important; border-radius: 15px;">
+    <div class="text-white-50 small">
+        <i class="bi bi-check-circle-fill text-success me-2"></i>
+        No rent materials remain in the Material master — everything is already a service.
+    </div>
+</div>
+{% endif %}
+
+{# ---- search ----------------------------------------------------------- #}
+<form class="d-flex gap-2 mb-3" method="GET" action="/services">
+    <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm bg-dark text-white border-secondary"
+           style="max-width: 320px;" placeholder="Search services...">
+    <button class="btn btn-sm btn-outline-warning">Search</button>
+    {% if q %}<a href="/services" class="btn btn-sm btn-outline-light">Clear</a>{% endif %}
+</form>
+
+{# ---- table ------------------------------------------------------------ #}
+<div class="card shadow-sm" style="background: #1e293b; border: 2px solid #475569; border-radius: 15px; overflow: hidden;">
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle mb-0">
+            <thead style="background: #0f172a;">
+                <tr>
+                    <th class="text-white-50 fw-bold py-3 ps-4 border-0">Service Name</th>
+                    <th class="text-white-50 fw-bold py-3 border-0">Code</th>
+                    <th class="text-white-50 fw-bold py-3 border-0">Unit</th>
+                    <th class="text-white-50 fw-bold py-3 border-0">Historical Records</th>
+                    <th class="text-white-50 fw-bold py-3 border-0">Status</th>
+                    <th class="text-white-50 fw-bold py-3 text-end pe-4 border-0">Actions</th>
+                </tr>
+            </thead>
+            <tbody style="background: #1e293b;">
+                {% for row in rows %}
+                {% set s = row.service %}
+                <tr style="border-bottom: 1px solid #334155; background: #1e293b;">
+                    <td class="ps-4 py-3 border-0">
+                        <span class="fw-bold text-white fs-5">{{ s.name }}</span>
+                        {% if s.converted_from_material_id %}
+                        <span class="badge bg-dark border border-secondary text-info ms-2">converted</span>
+                        {% endif %}
+                    </td>
+                    <td class="border-0">
+                        <span class="badge bg-dark border border-secondary text-warning">{{ s.code }}</span>
+                    </td>
+                    <td class="border-0">
+                        <span class="badge bg-dark border border-secondary text-light">{{ s.unit or 'Pcs' }}</span>
+                    </td>
+                    <td class="border-0">
+                        <span class="badge bg-dark border border-secondary text-info">{{ row.usage }}</span>
+                        <span class="text-white-50 small ms-1">entries / bill lines</span>
+                    </td>
+                    <td class="border-0">
+                        <span class="badge {{ 'bg-success' if s.is_active else 'bg-secondary' }}">
+                            {{ 'Active' if s.is_active else 'Suspended' }}
+                        </span>
+                    </td>
+                    <td class="text-end pe-4 border-0">
+                        <button class="btn btn-outline-warning btn-sm border-2 rounded-pill shadow-sm me-1"
+                                data-bs-toggle="modal" data-bs-target="#editService{{ s.id }}">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <form action="{{ url_for('masters.toggle_service', id=s.id) }}" method="POST" class="d-inline"
+                              onsubmit="return confirm('{{ 'Suspend' if s.is_active else 'Activate' }} this service?')">
+                            <button type="submit" class="btn {{ 'btn-outline-danger' if s.is_active else 'btn-outline-success' }} btn-sm border-2 rounded-pill shadow-sm me-1">
+                                <i class="bi {{ 'bi-pause-circle' if s.is_active else 'bi-play-circle' }}"></i>
+                                {{ 'Suspend' if s.is_active else 'Activate' }}
+                            </button>
+                        </form>
+                        <form action="{{ url_for('masters.delete_service', id=s.id) }}" method="POST" class="d-inline"
+                              onsubmit="return confirm('Delete this service? It can only be deleted when no historical record references it.')">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm border-2 rounded-pill shadow-sm">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-white-50 py-5 border-0">
+                        No services yet. Add one, or convert the rent materials above.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# ---- add modal -------------------------------------------------------- #}
+<div class="modal fade" id="addServiceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form action="{{ url_for('masters.add_service') }}" method="POST" class="modal-content border-secondary" style="background: #1e293b; border-radius: 15px;">
+            <div class="modal-header border-0">
+                <h5 class="text-warning fw-bold">Add Service</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="text-white fw-bold mb-2 small text-uppercase">Service Name</label>
+                <input type="text" name="service_name" class="form-control bg-dark text-white border-secondary fs-5 py-2 mb-3"
+                       placeholder="e.g. Delivery Rent" required>
+
+                <label class="text-white fw-bold mb-2 small text-uppercase">Code (optional)</label>
+                <input type="text" name="service_code" class="form-control bg-dark text-white border-secondary mb-3" placeholder="Auto-generated if blank">
+
+                <label class="text-white fw-bold mb-2 small text-uppercase">Unit</label>
+                <input type="text" name="service_unit" value="Pcs" class="form-control bg-dark text-white border-secondary mb-2">
+
+                <div class="alert border mt-3 mb-0" style="background: #0f172a; border-color: #475569 !important;">
+                    <div class="text-white-50 small">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Services have <strong class="text-info">no fixed price</strong> — the rate is
+                        typed on each bill line, exactly as it works today. No stock is tracked and
+                        no GRN can be raised against a service.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="submit" class="btn btn-warning text-dark fw-bold w-100 py-2 rounded-pill shadow">Add Service</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ---- edit modals ------------------------------------------------------ #}
+{% for row in rows %}
+{% set s = row.service %}
+<div class="modal fade" id="editService{{ s.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form action="{{ url_for('masters.edit_service', id=s.id) }}" method="POST" class="modal-content border-secondary" style="background: #1e293b; border-radius: 15px;">
+            <div class="modal-header border-0">
+                <h5 class="text-warning fw-bold">Edit Service</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="text-white fw-bold mb-2 small text-uppercase">Service Name</label>
+                <input type="text" name="service_name" value="{{ s.name }}" class="form-control bg-dark text-white border-secondary fs-5 py-2 mb-3" required>
+
+                <label class="text-white fw-bold mb-2 small text-uppercase">Code</label>
+                <input type="text" name="service_code" value="{{ s.code }}" class="form-control bg-dark text-white border-secondary mb-3">
+
+                <label class="text-white fw-bold mb-2 small text-uppercase">Unit</label>
+                <input type="text" name="service_unit" value="{{ s.unit or 'Pcs' }}" class="form-control bg-dark text-white border-secondary mb-2">
+
+                {% if row.usage %}
+                <div class="alert border mt-3 mb-0" style="background: #0f172a; border-color: #475569 !important;">
+                    <div class="text-white-50 small">
+                        <i class="bi bi-arrow-repeat me-2"></i>
+                        Renaming updates all {{ row.usage }} historical record(s) that carry this name.
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            <div class="modal-footer border-0">
+                <button type="submit" class="btn btn-info text-dark fw-bold w-100 py-2 rounded-pill shadow">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+
+{# ---- migrate modal ---------------------------------------------------- #}
+<div class="modal fade" id="migrateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <form action="{{ url_for('masters.migrate_rent_to_services') }}" method="POST" class="modal-content border-secondary" style="background: #1e293b; border-radius: 15px;">
+            <div class="modal-header border-0">
+                <h5 class="text-warning fw-bold">Convert rent materials into services</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-white">The following material(s) will be moved out of inventory:</p>
+                <table class="table table-dark table-sm align-middle mb-3">
+                    <thead><tr>
+                        <th class="text-white-50 small">Name</th>
+                        <th class="text-white-50 small">Code</th>
+                        <th class="text-white-50 small">Unit</th>
+                        <th class="text-white-50 small text-end">Current Stock</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for m in pending_rent %}
+                    <tr>
+                        <td class="fw-bold text-white">{{ m.name }}</td>
+                        <td><span class="badge bg-dark border border-secondary text-warning">{{ m.code }}</span></td>
+                        <td>{{ m.unit }}</td>
+                        <td class="text-end text-danger fw-bold">{{ '{:,.2f}'.format(m.total or 0) }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+
+                <div class="alert border" style="background: #0f172a; border-color: #475569 !important;">
+                    <div class="small text-white-50">
+                        <div class="mb-2"><strong class="text-info">What changes:</strong></div>
+                        <div>• These rows leave the Material master and appear here instead.</div>
+                        <div>• They stop appearing in Stock Summary, Dashboard and Dispatch reports —
+                            the negative balances above disappear.</div>
+                        <div>• No GRN can be raised against them.</div>
+                        <div>• A rent-only sale will post even with <em>Allow Negative Stock</em> off.</div>
+                        <div class="mt-2 mb-2"><strong class="text-info">What does not change:</strong></div>
+                        <div>• Every bill, PDF, client ledger, payment and balance stays identical.
+                            Historical rows store the name as text, so they are not modified — they
+                            simply resolve here.</div>
+                        <div>• Booked rent keeps working: booking, dispatch, cancellation and returns
+                            all read the same records.</div>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning mt-3 mb-0">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Take a database backup first.</strong>
+                    The conversion is reversible (the material rows can be restored), but a
+                    snapshot is the standing convention before any structural change.
+                </div>
+
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" name="confirm" value="yes" id="migrateConfirm" required>
+                    <label class="form-check-label text-white fw-bold" for="migrateConfirm">
+                        I have a backup and want to convert these into services
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="submit" class="btn btn-warning text-dark fw-bold w-100 py-2 rounded-pill shadow"
+                        onclick="return confirm('Convert these rent materials into services?');">
+                    Convert to Services
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ---- merge modal ------------------------------------------------------ #}
+<div class="modal fade" id="mergeServiceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form action="{{ url_for('masters.merge_services') }}" method="POST" class="modal-content border-secondary" style="background: #1e293b; border-radius: 15px;">
+            <div class="modal-header border-0">
+                <h5 class="text-warning fw-bold">Merge Services</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-white-50 small">
+                    Move all historical bills, entries and bookings from the Source service into the Target service, then remove the duplicate Source service.
+                </p>
+                <label class="text-white fw-bold mb-2 small text-uppercase">Source Service (To Remove)</label>
+                <select name="source_service_id" class="form-select bg-dark text-white border-secondary mb-3" required>
+                    <option value="">Select source...</option>
+                    {% for s in services %}
+                    <option value="{{ s.id }}">{{ s.name }} ({{ s.code }})</option>
+                    {% endfor %}
+                </select>
+
+                <label class="text-white fw-bold mb-2 small text-uppercase">Target Service (To Keep)</label>
+                <select name="target_service_id" class="form-select bg-dark text-white border-secondary" required>
+                    <option value="">Select target...</option>
+                    {% for s in services %}
+                    <option value="{{ s.id }}">{{ s.name }} ({{ s.code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="submit" class="btn btn-info text-dark fw-bold w-100 py-2 rounded-pill shadow"
+                        onclick="return confirm('Merge these two services and update all historical records?');">
+                    Merge Services
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

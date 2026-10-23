@@ -176,7 +176,7 @@ def daily_transactions():
         items=paged_rows
     )
 
-    materials = Material.query.all()
+    materials = list(Material.query.all()) + list(Service.query.all())
     material_category_map = {m.name: (m.category.name if m.category else '') for m in materials}
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     material_categories = MaterialCategory.query.order_by(MaterialCategory.name.asc()).all()

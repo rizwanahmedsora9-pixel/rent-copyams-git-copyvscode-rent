@@ -53,10 +53,15 @@ def index():
         }
 
     # Every material from the master, plus any entry-only material
-    # (explicitly marked rather than silently lost).
-    all_names = material_names + sorted(
-        n for n in entry_map.keys() if n and n not in material_names
-    )
+    # (explicitly marked rather than silently lost) — excluding services,
+    # whose Entry rows exist for the booking pool, not physical stock.
+    all_names = [
+        n for n in (
+            material_names + sorted(
+                n for n in entry_map.keys() if n and n not in material_names
+            )
+        ) if not is_service_name(n)
+    ]
     stats = sorted([{
         'name': name or 'Unknown/Unbranded',
         'in': entry_map.get(name, {}).get('in', 0),

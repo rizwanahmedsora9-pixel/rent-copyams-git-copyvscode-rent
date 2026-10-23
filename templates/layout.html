@@ -580,6 +580,9 @@
                 <a href="/materials" class="nav-link {{ 'active' if request.path == '/materials' }}" onclick="closeSidebar()">
                     <i class="bi bi-tags"></i> Material Brands
                 </a>
+                <a href="/services" class="nav-link {{ 'active' if request.path == '/services' }}" onclick="closeSidebar()">
+                    <i class="bi bi-receipt-cutoff"></i> Services &amp; Charges
+                </a>
                 {% endif %}
                 {% if current_user.can_manage_delivery_persons or current_user.role == 'admin' %}
                 <a href="/delivery_persons" class="nav-link {{ 'active' if request.path == '/delivery_persons' }}" onclick="closeSidebar()">
@@ -1863,8 +1866,14 @@ function toggleNavGroup(groupId, btn) {
         const code = item.getAttribute('data-combo-code') || '';
         const name = item.getAttribute('data-combo-name') || item.getAttribute('data-combo-code') || '';
         if (inputId) selectComboboxItem(inputId, list.id, code, name, displayId, nameInputId, valueInputId);
+        const svcId = item.getAttribute('data-service-id') || '';
         const matId = item.getAttribute('data-material-id') || '';
-        if (inputId && (matId || item.hasAttribute('data-material-id'))) {
+        if (inputId && (svcId || item.hasAttribute('data-service-id'))) {
+            const picked = document.getElementById(inputId);
+            if (typeof window.setSelectedServiceId === 'function') {
+                window.setSelectedServiceId(picked, svcId, name || code);
+            }
+        } else if (inputId && (matId || item.hasAttribute('data-material-id'))) {
             const picked = document.getElementById(inputId);
             if (typeof window.setSelectedMaterialId === 'function') {
                 window.setSelectedMaterialId(picked, matId, name || code);
