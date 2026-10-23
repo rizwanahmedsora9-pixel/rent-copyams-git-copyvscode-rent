@@ -739,6 +739,8 @@ def profit_reports():
         'cogs': 'Known COGS Rows',
         'net_profit': 'Net Profit/Loss Rows',
         'unknown_cost': 'Unknown Cost Rows',
+        'profit': 'Profit Entries',
+        'loss': 'Loss Entries',
     }
     metric_help_map = {
         'revenue': 'Shows rows where revenue > 0 from Booking and Direct Sale items.',
@@ -746,6 +748,8 @@ def profit_reports():
         'cogs': 'Shows rows with known material cost used in Estimated COGS.',
         'net_profit': 'Shows rows that contribute to net profit/loss where cost is known (profit = revenue - cogs).',
         'unknown_cost': 'Shows rows with unknown cost (N/A cost), excluded from net profit known-cost calculation.',
+        'profit': 'Every sale that earned more than it cost (profitable entries).',
+        'loss': 'Every sale that cost more than it earned (loss-making entries).',
     }
     metric_filter_map = {
         'revenue': lambda t: float(t.get('revenue') or 0) > 0,
@@ -753,6 +757,8 @@ def profit_reports():
         'cogs': lambda t: bool(t.get('cogs_known')) and float(t.get('cogs') or 0) > 0,
         'net_profit': lambda t: bool(t.get('cogs_known')),
         'unknown_cost': lambda t: not bool(t.get('cogs_known')),
+        'profit': lambda t: bool(t.get('cogs_known')) and float(t.get('profit') or 0) > 0,
+        'loss': lambda t: bool(t.get('cogs_known')) and float(t.get('profit') or 0) < 0,
     }
 
     entries_transactions = transactions
@@ -769,6 +775,14 @@ def profit_reports():
     known_cost_revenue = sum(float(t.get('revenue') or 0) for t in transactions if t.get('cogs_known'))
     unknown_cost_revenue = max(0.0, total_revenue - known_cost_revenue)
     total_profit = sum(float(t.get('profit') or 0) for t in transactions if t.get('cogs_known'))
+    total_profit_sum = sum(float(t.get('profit') or 0) for t in transactions
+                           if t.get('cogs_known') and float(t.get('profit') or 0) > 0)
+    total_loss_sum = -sum(float(t.get('profit') or 0) for t in transactions
+                          if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
+    profit_entry_count = sum(1 for t in transactions
+                             if t.get('cogs_known') and float(t.get('profit') or 0) > 0)
+    loss_entry_count = sum(1 for t in transactions
+                           if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
     unknown_cost_rows = sum(1 for t in transactions if not t.get('cogs_known'))
     profit_rows = sum(1 for t in transactions if t.get('cogs_known') and float(t.get('profit') or 0) >= 0)
     loss_rows = sum(1 for t in transactions if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
@@ -1205,6 +1219,10 @@ def profit_reports():
         total_discount_loss=total_discount_loss,
         total_cogs=total_cogs,
         total_profit=total_profit,
+        total_profit_sum=total_profit_sum,
+        total_loss_sum=total_loss_sum,
+        profit_entry_count=profit_entry_count,
+        loss_entry_count=loss_entry_count,
         margin_pct=margin_pct,
         markup_pct=markup_pct,
         profit_rows=profit_rows,

@@ -4,6 +4,8 @@ The owner asked for the profit/loss section to be readable by non-accountants:
 
 * real words (Sales / Cost of Goods / Profit / Money Received) instead of
   COGS / margin / markup / GRN;
+* two clickable cards — **Total Profit** and **Total Loss** — that drill into
+  a list-style page of those entries;
 * the detailed transaction list hidden behind a single "View all transactions"
   link instead of being the default view;
 * the internal "unknown cost" bookkeeping kept out of the way unless it
@@ -66,7 +68,9 @@ def _seed(app):
 
         c1 = Client(name="AL RAHMAN TRADERS", code="CL-001", category="General",
                     is_active=True)
-        db.session.add(c1)
+        c2 = Client(name="BILAL BUILDERS", code="CL-002", category="General",
+                    is_active=True)
+        db.session.add_all([c1, c2])
         db.session.flush()
 
         acc = Account(name="MAIN CASH", account_type="Cash", category="Cash",
@@ -75,6 +79,7 @@ def _seed(app):
         db.session.flush()
         db.session.commit()
 
+        # Profitable booking: 1000 bags @ 1250, cost 1200 => +50,000
         booking = Booking(
             client_name="AL RAHMAN TRADERS", amount=1250000, paid_amount=500000,
             manual_bill_no="MB NO.1", date_posted=datetime(2026, 1, 10, 10, 0, 0),
@@ -85,6 +90,7 @@ def _seed(app):
         db.session.add(BookingItem(booking_id=booking.id, material_name="OPC CEMENT",
                                    qty=1000, price_at_time=1250))
 
+        # Profitable direct sale: 100 bags @ 1300, cost 1200 => +10,000
         sale = DirectSale(
             client_name="AL RAHMAN TRADERS", client_code="CL-001",
             category="Credit Customer", amount=130000, paid_amount=0,
@@ -97,9 +103,22 @@ def _seed(app):
         db.session.add(DirectSaleItem(sale_id=sale.id, product_name="OPC CEMENT",
                                       qty=100, price_at_time=1300))
 
+        # Loss direct sale: 10 bags @ 1000, cost 1200 => -2,000
+        loss_sale = DirectSale(
+            client_name="BILAL BUILDERS", client_code="CL-002",
+            category="Credit Customer", amount=10000, paid_amount=0,
+            manual_bill_no="MB NO.3", date_posted=datetime(2026, 1, 14, 12, 0, 0),
+            is_void=False, discount=0, payment_method="Cash",
+            payment_account_id=acc.id,
+        )
+        db.session.add(loss_sale)
+        db.session.flush()
+        db.session.add(DirectSaleItem(sale_id=loss_sale.id, product_name="OPC CEMENT",
+                                      qty=10, price_at_time=1000))
+
         db.session.add(Payment(
             client_id=c1.id, client_name="AL RAHMAN TRADERS", amount=400000,
-            method="Cash", payment_type="Receipt", manual_bill_no="MB NO.3",
+            method="Cash", payment_type="Receipt", manual_bill_no="MB NO.4",
             date_posted=datetime(2026, 1, 20, 9, 0, 0), is_void=False,
             payment_account_id=acc.id,
         ))
@@ -138,6 +157,32 @@ def test_profit_summary_hides_accounting_jargon(app, client):
     for hidden in ["Estimated COGS", "Margin %", "Markup %", "GRN-wise Sales Profit",
                    "Unknown Cost Rows", "Open All Entries Page", "Profit/Loss Entries"]:
         assert hidden not in body, hidden
+
+
+def test_profit_and_loss_cards_link_to_list_pages(app, client):
+    login(client)
+    _seed(app)
+    body = _get(client, "/profit_reports?start_date=2026-01-01&end_date=2026-01-31")
+
+    assert "Total Profit" in body
+    assert "Total Loss" in body
+    assert "View profit entries" in body
+    assert "View loss entries" in body
+
+    profit_page = _get(
+        client,
+        "/profit_reports?view=entries&metric=profit"
+        "&start_date=2026-01-01&end_date=2026-01-31",
+    )
+    assert "Profit Entries" in profit_page
+    assert "profitable entries" in profit_page.lower()
+
+    loss_page = _get(
+        client,
+        "/profit_reports?view=entries&metric=loss"
+        "&start_date=2026-01-01&end_date=2026-01-31",
+    )
+    assert "Loss Entries" in loss_page
 
 
 def test_transactions_page_is_plain(app, client):

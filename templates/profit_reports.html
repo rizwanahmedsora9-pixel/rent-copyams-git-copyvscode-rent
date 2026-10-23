@@ -7,6 +7,8 @@
 <div class="ui-v2">
 
   {% set entries_url = url_for('profit_reports', view='entries', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
+  {% set profit_url = url_for('profit_reports', view='entries', metric='profit', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
+  {% set loss_url = url_for('profit_reports', view='entries', metric='loss', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
 
   {% set _toolbar %}
     <a href="{{ entries_url }}" class="btn btn-warning btn-pill fw-bold">
@@ -69,6 +71,16 @@
   {% endcall %}
 
   <div class="ui-kpi-grid">
+    {{ ui_tile(href=profit_url, label='Total Profit',
+               value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))),
+               icon='bi-arrow-up-circle', colour='green',
+               sub=(profit_entry_count ~ ' profitable entries'),
+               cta='View profit entries') }}
+    {{ ui_tile(href=loss_url, label='Total Loss',
+               value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))),
+               icon='bi-arrow-down-circle', colour='red',
+               sub=(loss_entry_count ~ ' loss entries'),
+               cta='View loss entries') }}
     {{ ui_tile(href=entries_url, label='Profit (Money Kept)',
                value=("Rs. " ~ ("{:,.2f}".format(total_profit))),
                icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'),
