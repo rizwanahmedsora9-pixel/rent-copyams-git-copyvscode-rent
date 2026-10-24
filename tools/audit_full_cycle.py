@@ -878,7 +878,9 @@ def main() -> int:
     parser.add_argument("--skip-wipe", action="store_true", help="run the smoke phase only")
     args = parser.parse_args()
 
-    db_path = Path(args.db)
+    # Resolve first: a relative APP_DB_PATH makes SQLAlchemy's connect fail
+    # ("unable to open database file") depending on the current directory.
+    db_path = Path(args.db).expanduser().resolve()
     for suffix in ("", "-wal", "-shm", "-journal"):
         Path(str(db_path) + suffix).unlink(missing_ok=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)

@@ -2,8 +2,11 @@
 
 **Date:** 2026-10-24
 **Branch:** `arena/2a5c9d26-rent-copyams-git-copyvscode-re`
-**Database used for the destructive run:** throw-away SQLite file `instance/audit_full_cycle.db`
-(the live `instance/ahmed_cement_v44_fresh.db` was never touched)
+**Databases:** the destructive run was rehearsed on a throw-away file
+(`instance/audit_full_cycle.db`), then executed for real on the application database
+**`instance/ahmed_cement_v44_fresh.db`** after taking a backup
+(`instance/ahmed_cement_v44_fresh.PRE_AUDIT_BACKUP.db`). The app now holds exactly the
+one-cycle dataset below, so every figure can be opened in the UI.
 
 ---
 
@@ -22,7 +25,11 @@ Reproduce everything with one command:
 
 ```bash
 python tools/audit_full_cycle.py          # add --keep to inspect the DB, --skip-wipe for the cycle only
+python tools/audit_full_cycle.py --db instance/ahmed_cement_v44_fresh.db --keep   # apply to the app DB
 ```
+
+The app currently runs on the audited database on `http://localhost:5000`
+(`Admin` / `Admin@fbm12345`).
 
 ---
 
