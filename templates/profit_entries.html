@@ -3,164 +3,97 @@
 {% from "_ui/kpi_tile.html" import tile as ui_tile %}
 {% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
 {% block content %}
-<div class="ui-v2">
-
-  {% set summary_url = url_for('profit_reports', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
-  {% set all_url = url_for('profit_reports', view='entries', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
-
+<div class="ui-v2 profit-center">
+  <style>
+    .profit-center .entry-card{background:var(--ui-surface-2);border:1px solid var(--ui-border);border-radius:12px;padding:1rem}
+    .profit-center .entry-card:hover{border-color:var(--ui-warn)}
+    .profit-center .entry-money{font-variant-numeric:tabular-nums;white-space:nowrap}
+    .profit-center .cost-badge{display:inline-block;border:1px solid var(--ui-border);border-radius:999px;padding:.18rem .5rem;font-size:.7rem;font-weight:700}
+    .profit-center .pagination .page-link{background:var(--ui-surface-2);border-color:var(--ui-border);color:var(--ui-text)}
+    .profit-center .pagination .active .page-link{background:var(--ui-warn);color:#111;border-color:var(--ui-warn)}
+  </style>
+  {% set summary_url = report_url(view=None, metric=None, q=None, entry_type=None, cost_status=None) %}
+  {% set all_url = report_url(view='entries', metric=None, q=None, entry_type=None, cost_status=None) %}
   {% if entry_metric == 'profit' %}
-    {% set page_title = 'Profit Entries' %}
-    {% set page_icon = 'bi-arrow-up-circle' %}
-    {% set kpi_label = 'Total Profit' %}
-    {% set kpi_value = ("Rs. " ~ ("{:,.2f}".format(total_profit_sum))) %}
-    {% set kpi_colour = 'green' %}
+    {% set page_title = 'Profit Entries' %}{% set page_icon = 'bi-arrow-up-circle' %}
   {% elif entry_metric == 'loss' %}
-    {% set page_title = 'Loss Entries' %}
-    {% set page_icon = 'bi-arrow-down-circle' %}
-    {% set kpi_label = 'Total Loss' %}
-    {% set kpi_value = ("Rs. " ~ ("{:,.2f}".format(total_loss_sum))) %}
-    {% set kpi_colour = 'red' %}
+    {% set page_title = 'Loss Entries' %}{% set page_icon = 'bi-arrow-down-circle' %}
+  {% elif entry_metric == 'unknown_cost' %}
+    {% set page_title = 'Unresolved Cost Review' %}{% set page_icon = 'bi-exclamation-triangle' %}
   {% else %}
-    {% set page_title = 'Transactions' %}
-    {% set page_icon = 'bi-list-check' %}
+    {% set page_title = 'Transactions' %}{% set page_icon = 'bi-list-check' %}
   {% endif %}
-
   {% set _toolbar %}
-    <a href="{{ summary_url }}" class="btn btn-outline-secondary btn-pill fw-bold">
-      <i class="bi bi-arrow-left me-1"></i> Back to Profit Summary
-    </a>
-    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
-      <i class="bi bi-printer"></i>
-    </button>
+    <a href="{{ summary_url }}" class="btn btn-outline-secondary btn-pill fw-bold"><i class="bi bi-arrow-left me-1"></i> Back to Profit Summary</a>
+    <a href="{{ report_url('profit_report_excel') }}" class="btn btn-outline-success btn-pill fw-bold"><i class="bi bi-file-earmark-excel me-1"></i> Excel</a>
+    <a href="{{ report_url('profit_report_pdf') }}" class="btn btn-outline-secondary btn-pill fw-bold"><i class="bi bi-file-earmark-pdf me-1"></i> PDF</a>
   {% endset %}
-  {{ ui_header(page_icon, page_title, subtitle=(start_date ~ '  to  ' ~ end_date), toolbar=_toolbar) }}
+  {{ ui_header(page_icon, page_title, subtitle=((start_date or 'Beginning') ~ ' to ' ~ (end_date or 'Today')), toolbar=_toolbar) }}
 
   {% call ui_filter_bar(action=url_for('profit_reports', view='entries')) %}
-    <div class="ui-field ui-col-3">
-      <label class="ui-label">From</label>
-      <input type="date" name="start_date" value="{{ start_date }}" class="form-control">
-    </div>
-    <div class="ui-field ui-col-3">
-      <label class="ui-label">To</label>
-      <input type="date" name="end_date" value="{{ end_date }}" class="form-control">
-    </div>
-    <div class="ui-field ui-col-5">
-      <label class="ui-label">Customer</label>
-      <div class="position-relative">
-        <div class="input-group">
-          <input type="text" name="client" id="profitClientFilter" value="{{ client }}"
-                 placeholder="Customer name or code" autocomplete="off"
-                 onfocus="showCombobox('profitClientFilter', 'profitClientList')"
-                 oninput="filterCombobox('profitClientFilter', 'profitClientList', 'profitClientDisplay')"
-                 class="form-control">
-          <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('profitClientFilter', 'profitClientList')">
-            <i class="bi bi-chevron-down text-warning"></i>
-          </button>
-        </div>
-        <div id="profitClientList" class="combobox-list shadow-lg" style="display: none;">
-          <div class="combobox-item" data-combo-code="" data-combo-name="" data-combo-input="profitClientFilter" data-combo-display="profitClientDisplay">
-            <span class="fw-bold text-danger">All Customers</span>
-          </div>
-          {% for c in clients %}
-          <div class="combobox-item" data-combo-code="{{ c.code }}" data-combo-name="{{ c.name }}" data-combo-input="profitClientFilter" data-combo-display="profitClientDisplay">
-            <span class="fw-bold text-warning code-span">{{ c.code }}</span>
-            <span class="ms-2 text-white-50 small name-span">{{ c.name }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        <div id="profitClientDisplay" class="text-info small mt-1 fw-bold"></div>
-      </div>
-    </div>
-    <div class="ui-actions ui-col-1">
-      <label class="ui-label">&nbsp;</label>
-      <button type="submit" class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button>
-    </div>
-    <div class="ui-actions ui-col-12">
-      <a class="btn btn-outline-secondary btn-sm" href="{{ all_url }}">
-        <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
-      </a>
-    </div>
+    <input type="hidden" name="period" value="custom"><input type="hidden" name="view" value="entries">
+    {% if entry_metric %}<input type="hidden" name="metric" value="{{ entry_metric }}">{% endif %}
+    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    {% if supplier %}<input type="hidden" name="supplier" value="{{ supplier }}">{% endif %}
+    {% if grn_id %}<input type="hidden" name="grn_id" value="{{ grn_id }}">{% endif %}
+    <div class="ui-field ui-col-2"><label class="ui-label">From</label><input type="date" name="start_date" value="{{ start_date }}" class="form-control"></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">To</label><input type="date" name="end_date" value="{{ end_date }}" class="form-control"></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">Customer</label><input type="text" name="client" value="{{ client }}" class="form-control" list="entryClients" autocomplete="off"><datalist id="entryClients">{% for c in clients %}<option value="{{ c.name }}">{{ c.code }}</option>{% endfor %}</datalist></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">Material</label><input type="text" name="material" value="{{ material }}" class="form-control" autocomplete="off"></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">Search</label><input type="text" name="q" value="{{ explorer.q }}" class="form-control" placeholder="Ref, item, note"></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">Cost status</label><select name="cost_status" class="form-select"><option value="">All cost statuses</option>{% for value,label in [('actual','Recorded actual'),('estimated','Estimated'),('missing','Unresolved'),('not_applicable','No product cost')] %}<option value="{{ value }}" {{ 'selected' if explorer.cost_status == value }}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">Source / type</label><select name="entry_type" class="form-select"><option value="">All sources</option>{% for value,label in [('DirectSale','Direct sales'),('Entry','Operational dispatch'),('MaterialReturn','Returns'),('AccountTransaction','Account entries'),('FbmCashDrawerEntry','Drawer expenses'),('WaiveOff','Waive-offs'),('expense','All expenses'),('booking_supply','Booking supply'),('delivery_service','Delivery service')] %}<option value="{{ value }}" {{ 'selected' if explorer.entry_type == value }}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="ui-field ui-col-1"><label class="ui-label">Per page</label><select name="per_page" class="form-select">{% for n in [25,50,100] %}<option value="{{ n }}" {{ 'selected' if pagination.per_page == n }}>{{ n }}</option>{% endfor %}</select></div>
+    <div class="ui-actions ui-col-2"><label class="ui-label">&nbsp;</label><button type="submit" class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button></div>
+    <div class="ui-actions ui-col-12"><a class="btn btn-outline-secondary btn-sm" href="{{ all_url }}">Clear explorer filters</a></div>
   {% endcall %}
 
-  {% if entry_metric in ['profit', 'loss'] %}
   <div class="ui-kpi-grid">
-    {{ ui_tile(href=summary_url, label=kpi_label,
-               value=kpi_value,
-               icon=('bi-arrow-up-circle' if entry_metric == 'profit' else 'bi-arrow-down-circle'),
-               colour=kpi_colour,
-               sub=(transactions|length ~ ' entries shown'),
-               cta='Back to summary') }}
+    {% if entry_metric == 'profit' %}
+      {{ ui_tile(href=summary_url, label='Total Profit', value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))), icon='bi-arrow-up-circle', colour='green', sub=(profit_entry_count ~ ' profitable entries'), cta='Back to summary') }}
+    {% elif entry_metric == 'loss' %}
+      {{ ui_tile(href=summary_url, label='Total Loss', value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))), icon='bi-arrow-down-circle', colour='red', sub=(loss_entry_count ~ ' loss entries'), cta='Back to summary') }}
+    {% else %}
+      {{ ui_tile(href=summary_url, label='Sales (Money In)', value=("Rs. " ~ ("{:,.2f}".format(total_revenue))), icon='bi-bag-cash', colour='sky', sub='Earned revenue, net of returns', cta='Back to summary') }}
+      {{ ui_tile(href=summary_url, label='Cost of Goods (Money Out)', value=("Rs. " ~ ("{:,.2f}".format(total_cogs))), icon='bi-truck', colour='amber', sub='Recognized material + delivery cost', cta='Back to summary') }}
+      {{ ui_tile(href=summary_url, label='Profit (Money Kept)', value=("Rs. " ~ ("{:,.2f}".format(total_profit))), icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'), sub='Qualified net result', cta='Back to summary') }}
+    {% endif %}
   </div>
-  {% else %}
-  <div class="ui-kpi-grid">
-    {{ ui_tile(href=summary_url, label='Sales (Money In)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_revenue))),
-               icon='bi-bag-cash', colour='sky',
-               sub='Value of goods sold',
-               cta='Back to summary') }}
-    {{ ui_tile(href=summary_url, label='Cost of Goods (Money Out)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_cogs))),
-               icon='bi-truck', colour='amber',
-               sub='What we paid for those goods',
-               cta='Back to summary') }}
-    {{ ui_tile(href=summary_url, label='Profit (Money Kept)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_profit))),
-               icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'),
-               sub='Money kept after paying for the goods',
-               cta='Back to summary') }}
-  </div>
-  {% endif %}
 
   <div class="ui-card">
     <div class="ui-card-header">
-      <h5>
-        <i class="bi {{ 'bi-arrow-up-circle' if entry_metric == 'profit' else ('bi-arrow-down-circle' if entry_metric == 'loss' else 'bi-receipt') }}"></i>
-        {{ entry_metric_label or 'Every Sale in This Period' }}
-      </h5>
-      <div class="ui-toolbar">
-        <span class="small text-muted">{{ transactions|length }} entries</span>
-        {% if entry_metric %}
-        <a class="btn btn-outline-secondary btn-sm" href="{{ all_url }}">Show all entries</a>
-        {% endif %}
-      </div>
+      <h5><i class="bi bi-receipt"></i> {{ entry_metric_label or 'Every Sale in This Period' }}</h5>
+      <div class="ui-toolbar"><span class="small text-muted">{{ entries_count }} entries · showing {{ pagination.start }}–{{ pagination.end }}</span>{% if entry_metric %}<a class="btn btn-outline-secondary btn-sm" href="{{ all_url }}">Show all entries</a>{% endif %}</div>
     </div>
     <div class="ui-card-body">
-      {% if entry_metric_help %}
-      <p class="small text-muted mb-3">{{ entry_metric_help }}</p>
-      {% endif %}
+      {% if entry_metric == 'unknown_cost' %}<p class="small text-warning">These rows remain visible for correction, but their result is excluded from net profit. Open a transaction to review its source and cost evidence.</p>{% elif entry_metric == 'profit' %}<p class="small text-muted">All qualified profitable entries in the selected period; paginated for review.</p>{% endif %}
       <div class="d-flex flex-column gap-3">
         {% for t in transactions %}
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 rounded-3"
-             style="background: var(--ui-surface-2); border: 1px solid var(--ui-border);">
-          <div class="min-w-0">
-            <div class="fw-bold text-truncate">{{ t.client or '-' }}</div>
-            <div class="small text-muted">
-              {{ t.date.strftime('%Y-%m-%d') if t.date else '-' }}
-              {% if t.material and t.material != '-' %} · {{ t.material }}{% endif %}
-              {% if t.qty %} · Qty {{ "{:,.2f}".format(t.qty or 0) }}{% endif %}
+        <article class="entry-card">
+          <div class="row g-3 align-items-center">
+            <div class="col-lg-5 min-w-0">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-1"><span class="fw-bold">{{ t.transaction_type }}</span><span class="cost-badge {{ 'text-warning' if t.cost_status == 'missing' else ('text-info' if t.cost_status == 'estimated' else 'text-muted') }}">{{ {'actual':'Recorded cost','estimated':'Estimated cost','missing':'Unresolved cost','not_applicable':'No stock cost'}.get(t.cost_status,t.cost_status) }}</span></div>
+              <div class="fw-bold text-truncate">{{ t.client or t.account or 'Business / Account' }}</div>
+              <div class="small text-muted">{{ t.date.strftime('%Y-%m-%d %H:%M') if t.date else 'Undated' }}{% if t.material and t.material != '-' %} · {{ t.material }}{% endif %}{% if t.booked_material and t.booked_material != t.material %} · booked {{ t.booked_material }}{% endif %}{% if t.qty %} · Qty {{ '{:,.2f}'.format(t.qty) }}{% endif %}</div>
+              {% if t.reference %}<div class="small text-muted">Bill / Ref: <a href="{{ url_for('profit_transaction_detail', document_type=t.document_type, document_id=t.document_id, start_date=start_date, end_date=end_date) }}">{{ t.reference }}</a></div>{% endif %}
+              {% if t.category %}<div class="small text-muted">Category: {{ t.category }}{% if t.subcategory %} / {{ t.subcategory }}{% endif %}</div>{% endif %}
             </div>
-            {% if t.reference %}
-            <div class="small text-muted">Bill / Ref: {{ t.reference }}</div>
-            {% endif %}
+            <div class="col-6 col-lg-2 small text-muted entry-money"><div>Money In: Rs. {{ '{:,.2f}'.format(t.revenue) }}</div><div>Discount: Rs. {{ '{:,.2f}'.format(t.discount) }}</div></div>
+            <div class="col-6 col-lg-2 small text-muted entry-money"><div>Cost of Item: {% if t.include_in_net %}Rs. {{ '{:,.2f}'.format(t.cogs) }}{% else %}&mdash;{% endif %}</div><div>Expense: Rs. {{ '{:,.2f}'.format(t.expense + t.other_loss) }}</div></div>
+            <div class="col-lg-3 text-lg-end entry-money"><div class="small text-muted">Profit</div><div class="fs-5 fw-bold {{ 'pos' if t.profit >= 0 else 'neg' }}" style="{{ 'color:var(--ui-text-muted)' if not t.include_in_net }}">{% if t.include_in_net %}Rs. {{ '{:,.2f}'.format(t.profit) }}{% else %}&mdash;{% endif %}</div><a class="small" href="{{ url_for('profit_transaction_detail', document_type=t.document_type, document_id=t.document_id, start_date=start_date, end_date=end_date) }}">Full history <i class="bi bi-arrow-right"></i></a></div>
+            {% if not t.include_in_net or t.warnings or t.cost_basis %}<div class="col-12"><div class="small {{ 'text-warning' if not t.include_in_net else 'text-muted' }}"><i class="bi bi-info-circle me-1"></i>{{ t.warnings|join(' ') if t.warnings else t.cost_basis }}</div></div>{% endif %}
           </div>
-          <div class="text-end small text-muted d-none d-md-block">
-            Money In: Rs. {{ "{:,.2f}".format(t.revenue or 0) }}<br>
-            Cost of Item:
-            {% if t.cogs_known %}Rs. {{ "{:,.2f}".format(t.cogs or 0) }}
-            {% else %}&mdash;{% endif %}
-          </div>
-          <div class="text-end fw-bold {{ 'pos' if (t.cogs_known and t.profit >= 0) else 'neg' }}"
-               style="{% if not t.cogs_known %}color: var(--ui-text-muted);{% endif %}">
-            {% if t.cogs_known %}Rs. {{ "{:,.2f}".format(t.profit or 0) }}
-            {% else %}&mdash;{% endif %}
-          </div>
-        </div>
-        {% else %}
-        <div class="ui-empty">No entries found for this filter.</div>
-        {% endfor %}
+        </article>
+        {% else %}<div class="ui-empty">No entries found for this filter.</div>{% endfor %}
       </div>
+      {% if pagination.pages > 1 %}
+      <nav class="mt-4" aria-label="Profit transaction pages"><ul class="pagination pagination-sm flex-wrap mb-0">
+        <li class="page-item {{ 'disabled' if pagination.page <= 1 }}"><a class="page-link" href="{{ report_url(view='entries', page=pagination.page-1) if pagination.page > 1 else '#' }}">Previous</a></li>
+        {% for n in range(1, pagination.pages + 1) %}{% if n == 1 or n == pagination.pages or (n >= pagination.page - 2 and n <= pagination.page + 2) %}<li class="page-item {{ 'active' if n == pagination.page }}"><a class="page-link" href="{{ report_url(view='entries', page=n) }}">{{ n }}</a></li>{% elif n == pagination.page - 3 or n == pagination.page + 3 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}{% endfor %}
+        <li class="page-item {{ 'disabled' if pagination.page >= pagination.pages }}"><a class="page-link" href="{{ report_url(view='entries', page=pagination.page+1) if pagination.page < pagination.pages else '#' }}">Next</a></li>
+      </ul></nav>
+      {% endif %}
     </div>
   </div>
-
 </div>
 {% endblock %}
