@@ -20,7 +20,7 @@
 
 <div class="container-fluid">
     <div class="acc-page-header">
-        <div><h2><i class="bi bi-receipt me-2 text-info"></i>Receipts</h2><div class="subtitle">Cash inflow from direct sales and goods receipts (GRN).</div></div>
+        <div><h2><i class="bi bi-receipt me-2 text-info"></i>Receipts</h2><div class="subtitle">Cash received on direct sales and cash paid on goods receipts (GRN).</div></div>
         <a href="{{ url_for('accounts.dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Dashboard</a>
     </div>
 
@@ -28,9 +28,9 @@
     {% set sales_amount = sales|sum(attribute='amount') %}
     {% set grn_paid = grns|sum(attribute='paid_amount') %}
     <div class="row g-3 mb-3">
-        <div class="col-md-4"><div class="card kpi s-cyan"><div class="card-body"><div class="lab">Sales Paid</div><div class="val">Rs. {{ "%.2f"|format(sales_paid) }}</div></div><i class="bi bi-cart-check ico"></i></div></div>
-        <div class="col-md-4"><div class="card kpi s-emerald"><div class="card-body"><div class="lab">GRN Paid</div><div class="val">Rs. {{ "%.2f"|format(grn_paid) }}</div></div><i class="bi bi-box-seam ico"></i></div></div>
-        <div class="col-md-4"><div class="card kpi s-violet"><div class="card-body"><div class="lab">Grand Total Receipts</div><div class="val">Rs. {{ "%.2f"|format(sales_paid + grn_paid) }}</div></div><i class="bi bi-stack ico"></i></div></div>
+        <div class="col-md-4"><div class="card kpi s-cyan"><div class="card-body"><div class="lab">Sales Paid</div><div class="val">Rs. {{ "{:,.2f}".format(sales_paid or 0) }}</div></div><i class="bi bi-cart-check ico"></i></div></div>
+        <div class="col-md-4"><div class="card kpi s-emerald"><div class="card-body"><div class="lab">GRN Paid</div><div class="val">Rs. {{ "{:,.2f}".format(grn_paid or 0) }}</div></div><i class="bi bi-box-seam ico"></i></div></div>
+        <div class="col-md-4"><div class="card kpi s-violet"><div class="card-body"><div class="lab">Total Cash Movement</div><div class="val">Rs. {{ "{:,.2f}".format((sales_paid or 0) + (grn_paid or 0)) }}</div></div><i class="bi bi-stack ico"></i></div></div>
     </div>
 
     <div class="led-card">
@@ -51,8 +51,8 @@
                 <tr>
                     <td class="small">{{ s.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td>{{ s.client_name }}</td>
-                    <td class="text-end">Rs. {{ "%.2f"|format(s.amount) }}</td>
-                    <td class="text-end fw-bold text-success">Rs. {{ "%.2f"|format(s.paid_amount) }}</td>
+                    <td class="text-end">Rs. {{ "{:,.2f}".format(s.amount or 0) }}</td>
+                    <td class="text-end fw-bold text-success">Rs. {{ "{:,.2f}".format(s.paid_amount or 0) }}</td>
                     <td class="small">{{ s.manual_bill_no or s.auto_bill_no or '' }}</td>
                     <td class="small text-muted">{{ s.note or '' }}</td>
                 </tr>
@@ -73,8 +73,8 @@
                     <td class="small">{{ g.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td>{{ g.supplier }}</td>
                     <td class="small">{{ g.manual_bill_no or g.auto_bill_no or '' }}</td>
-                    <td class="text-end">Rs. {{ "%.2f"|format(g.loading_cost + g.freight_cost + g.other_expense + g.adjustment_amount) }}</td>
-                    <td class="text-end fw-bold text-success">Rs. {{ "%.2f"|format(g.paid_amount) }}</td>
+                    <td class="text-end">Rs. {{ "{:,.2f}".format(grn_totals.get(g.id, 0) or 0) }}</td>
+                    <td class="text-end fw-bold text-success">Rs. {{ "{:,.2f}".format(g.paid_amount or 0) }}</td>
                     <td class="small text-muted">{{ g.note or '' }}</td>
                 </tr>
                 {% else %}

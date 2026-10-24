@@ -10,6 +10,7 @@ Nothing in this folder is loaded at runtime.
 
 | Command | Purpose |
 |---------|---------|
+| `python tools/audit_full_cycle.py` | Full wipe + one business cycle acceptance run (throw-away DB) |
 | `python tools/consistency_report.py` | Full data integrity check (read-only) |
 | `python tools/consistency_report.py --json` | Machine-readable JSON output |
 | `python tools/db_write_guard.py --report` | Show write guard log |
@@ -21,6 +22,10 @@ Nothing in this folder is loaded at runtime.
 
 ```
 tools/
+  audit_full_cycle.py         ← END-TO-END acceptance: full wipe, then 1 supplier /
+                                1 client / 1 material / 1 service / 1 cash booking
+                                with a due, a GRN and a dispatch; verifies supplier
+                                ledger, GRN, transactions, P&L and audit trail
   consistency_report.py       ← ONE-COMMAND system health check (read-only)
   db_write_guard.py           ← Write-path safety observer (additive, no blocking by default)
 

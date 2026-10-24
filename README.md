@@ -532,13 +532,31 @@ Still to be verified on the real account, because no automated test can prove it
 Nothing under `tools/` is imported at runtime. Start with:
 
 ```bash
+python tools/audit_full_cycle.py            # full wipe + one complete business cycle
 python tools/consistency_report.py          # read-only integrity
 python tools/health/preflight_check.py      # blockers that stop new sales
 python tools/predator_truth_engine.py --db instance/ahmed_cement_v44_fresh.db --check
 ```
 
+`tools/audit_full_cycle.py` is the acceptance walk-through. On a throw-away
+SQLite file it seeds junk into every module, runs Settings → **Check all** with
+the hard-delete confirmation, proves every business table is empty, that
+identity/settings/audit survive, and that the app still boots and logs in.
+It then creates one supplier, one client, one material and one service
+("Rent"), buys stock on a GRN (partly paid), writes one cash booking that bills
+both the material and the Rent service with cash paid now + a due, supplies the
+booked material, and verifies the figures in the supplier ledger
+(and its PDF), the GRN list, client ledger, pending bills, cash flow, Accounts
+receipts, the Profit & Loss report (and its PDF/Excel exports) and the
+activity / void-audit trail. It finishes by running the consistency report and
+the preflight watch on the same database. Add `--keep` to inspect the file and
+`--skip-wipe` to run only the business cycle. Exit code 0 = every check passed.
+
 Repair scripts in `tools/repair_controlled/` require `--confirm` and take a
 backup first. See `tools/README.md`.
+
+The last full audit (test suite, wipe, one complete business cycle and the
+integrity tools) is written up in [`AUDIT_REPORT.md`](AUDIT_REPORT.md).
 
 ---
 
