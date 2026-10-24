@@ -1,0 +1,93 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% from "_ui/kpi_tile.html" import tile as ui_tile %}
+{% block content %}
+<div class="ui-v2 profit-detail">
+  <style>
+    .profit-detail .trace-table td,.profit-detail .trace-table th{vertical-align:top}
+    .profit-detail .audit-json{white-space:pre-wrap;word-break:break-word;max-width:760px;font-size:.72rem;background:var(--ui-surface-2);padding:.65rem;border-radius:8px}
+    .profit-detail .source-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.75rem}
+    .profit-detail .source-meta>div{padding:.75rem;background:var(--ui-surface-2);border-radius:9px}
+    .profit-detail .formula{display:grid;grid-template-columns:1fr auto;gap:.5rem 1rem;font-size:.88rem}
+  </style>
+  {% set back_url = url_for('profit_reports', view='entries', start_date=start_date_str, end_date=end_date_str, period='custom') %}
+  {% set _toolbar %}
+    <a href="{{ back_url }}" class="btn btn-outline-secondary btn-pill fw-bold"><i class="bi bi-arrow-left me-1"></i> Back to Transactions</a>
+    {% if original_bill_type %}<a href="{{ url_for('view_bill_detail', type=original_bill_type, id=document_id) }}" class="btn btn-warning btn-pill fw-bold"><i class="bi bi-receipt me-1"></i> Original Bill</a>{% endif %}
+    <button type="button" class="btn btn-outline-secondary btn-pill" onclick="window.print()"><i class="bi bi-printer"></i></button>
+  {% endset %}
+  {{ ui_header('bi-diagram-3', reference or (document_type ~ '-' ~ document_id), subtitle=(document_type ~ ' · ' ~ (client or 'Business / Account')), toolbar=_toolbar) }}
+
+  <div class="ui-kpi-grid">
+    {{ ui_tile(href='#lifetime-components', label='Lifetime Recognized Result', value=("Rs. " ~ ("{:,.2f}".format(summary.total_profit))), icon='bi-cash-coin', colour=('green' if summary.total_profit >= 0 else 'red'), sub='All dated supply, return and linked P&L rows', cta='See components') }}
+    {{ ui_tile(href='#period-components', label='Selected-Period Result', value=("Rs. " ~ ("{:,.2f}".format(period_summary.total_profit))), icon='bi-calendar-range', colour='indigo', sub=((start_date_str or 'Beginning') ~ ' to ' ~ (end_date_str or 'Today')), cta='See period rows') }}
+    {{ ui_tile(href='#lifetime-components', label='Lifetime Earned Revenue', value=("Rs. " ~ ("{:,.2f}".format(summary.total_revenue))), icon='bi-bag-cash', colour='sky', sub=(summary.total_material_revenue|round(2)|string ~ ' material · ' ~ summary.total_delivery_revenue|round(2)|string ~ ' delivery'), cta='Trace revenue') }}
+    {{ ui_tile(href='#lifetime-components', label='Lifetime Recognized Cost', value=("Rs. " ~ ("{:,.2f}".format(summary.total_cogs))), icon='bi-truck', colour='amber', sub='Actual + explicitly labelled estimates', cta='Trace cost') }}
+  </div>
+
+  {% if outstanding %}
+  <div class="ui-card"><div class="ui-card-body d-flex flex-wrap justify-content-between align-items-center gap-3"><div><div class="small text-muted">Current source-bill outstanding (position, not profit)</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(outstanding.remaining) }}</div><div class="small text-muted">Original net obligation: Rs. {{ '{:,.2f}'.format(outstanding.gross) }}</div></div><i class="bi bi-wallet2 fs-1 text-warning"></i></div></div>
+  {% endif %}
+
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-file-earmark-text"></i> Current Source Record</h5>{% if related_booking_id %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_transaction_detail', document_type='Booking', document_id=related_booking_id, start_date=start_date_str, end_date=end_date_str) }}">Open linked Booking {{ related_booking_id }}</a>{% endif %}</div>
+    <div class="ui-card-body">
+      <div class="source-meta">
+        <div><div class="small text-muted">Source</div><strong>{{ document_type }} #{{ document_id }}</strong></div>
+        <div><div class="small text-muted">Reference</div><strong>{{ reference or '—' }}</strong></div>
+        <div><div class="small text-muted">Customer / party</div><strong>{{ client or '—' }}</strong><div class="small text-muted">{{ client_code }}</div></div>
+        {% if document_type == 'DirectSale' %}<div><div class="small text-muted">Sale category</div><strong>{{ source.category or '—' }}</strong></div><div><div class="small text-muted">Chargeable bill amount</div><strong>Rs. {{ '{:,.2f}'.format(source.amount or 0) }}</strong></div><div><div class="small text-muted">Paid at posting</div><strong>Rs. {{ '{:,.2f}'.format(source.paid_amount or 0) }}</strong></div><div><div class="small text-muted">Bill discount</div><strong>Rs. {{ '{:,.2f}'.format(source.discount or 0) }}</strong></div><div><div class="small text-muted">Recorded delivery cost</div><strong>Rs. {{ '{:,.2f}'.format(source.delivery_rent_cost or 0) }}</strong></div>{% endif %}
+        {% if document_type == 'Booking' %}<div><div class="small text-muted">Booking amount</div><strong>Rs. {{ '{:,.2f}'.format(source.amount or 0) }}</strong></div><div><div class="small text-muted">Advance at booking</div><strong>Rs. {{ '{:,.2f}'.format(source.paid_amount or 0) }}</strong></div><div><div class="small text-muted">Discount</div><strong>Rs. {{ '{:,.2f}'.format(source.discount or 0) }}</strong></div>{% endif %}
+        {% if document_type == 'MaterialReturn' %}<div><div class="small text-muted">Return type</div><strong>{{ source.return_type }}</strong></div><div><div class="small text-muted">Return credit</div><strong>Rs. {{ '{:,.2f}'.format(source.amount or 0) }}</strong></div>{% endif %}
+        {% if document_type == 'Entry' %}<div><div class="small text-muted">Operational movement</div><strong>{{ source.type }} · {{ source.material }}</strong></div><div><div class="small text-muted">Quantity</div><strong>{{ '{:,.2f}'.format(source.qty or 0) }}</strong></div><div><div class="small text-muted">Booked material</div><strong>{{ source.booked_material or '—' }}</strong></div>{% endif %}
+        {% if document_type == 'AccountTransaction' %}<div><div class="small text-muted">Account type</div><strong>{{ source.transaction_type }}</strong></div><div><div class="small text-muted">Amount</div><strong>Rs. {{ '{:,.2f}'.format(source.amount or 0) }}</strong></div><div><div class="small text-muted">Description</div><strong>{{ source.description or '—' }}</strong></div>{% endif %}
+      </div>
+      {% if source.note %}<p class="small text-muted mt-3 mb-0"><strong>Note:</strong> {{ source.note }}</p>{% endif %}
+      {% if source.photo_url or source.photo_path %}<a class="btn btn-outline-secondary btn-sm mt-3" href="{{ source.photo_url or url_for('static', filename='uploads/' ~ source.photo_path) }}" target="_blank" rel="noopener"><i class="bi bi-paperclip me-1"></i> Source attachment</a>{% endif %}
+      {% if document_type in ['DirectSale','Booking','MaterialReturn'] and source.items %}
+      <div class="ui-table-wrap mt-3"><table class="ui-table trace-table"><thead><tr><th>Stored source line</th><th class="num">Qty</th><th class="num">Unit / booked rate</th>{% if document_type == 'DirectSale' %}<th class="num">Frozen cost</th>{% endif %}{% if document_type == 'MaterialReturn' %}<th class="num">Rent / booked return rate</th>{% endif %}</tr></thead><tbody>
+        {% for item in source.items %}<tr><td>{{ item.product_name if document_type == 'DirectSale' else item.material_name }}</td><td class="num">{{ '{:,.2f}'.format(item.qty or 0) }}</td><td class="num">{{ '{:,.2f}'.format(item.price_at_time or item.unit_rate or 0) }}</td>{% if document_type == 'DirectSale' %}<td class="num">{{ '{:,.2f}'.format(item.cost_rate_at_sale or 0) if item.cost_rate_at_sale is not none else 'Not recorded' }}</td>{% endif %}{% if document_type == 'MaterialReturn' %}<td class="num">{{ '{:,.2f}'.format(item.rent_rate or 0) }}</td>{% endif %}</tr>{% endfor %}
+      </tbody></table></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-xl-7" id="lifetime-components">
+      <div class="ui-card">
+        <div class="ui-card-header"><h5><i class="bi bi-list-columns-reverse"></i> Lifetime P&L Components</h5><span class="small text-muted">{{ rows|length }} rows</span></div>
+        <div class="ui-card-body flush"><div class="ui-table-wrap"><table class="ui-table trace-table"><thead><tr><th>Date / activity</th><th>Item</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Expense / loss</th><th class="num">Gain</th><th class="num">Profit</th><th>Cost evidence</th></tr></thead><tbody>
+          {% for t in rows %}<tr><td>{{ t.date.strftime('%Y-%m-%d') if t.date else 'Undated' }}<br><span class="small text-muted">{{ t.transaction_type }} · {{ t.reference }}</span></td><td>{{ t.material }}{% if t.booked_material and t.booked_material != t.material %}<br><span class="small text-muted">Booked: {{ t.booked_material }}</span>{% endif %}{% if t.qty %}<br><span class="small text-muted">Qty {{ '{:,.2f}'.format(t.qty) }}</span>{% endif %}</td><td class="num">{{ '{:,.2f}'.format(t.revenue) }}</td><td class="num">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.cogs) }}{% else %}—{% endif %}</td><td class="num">{{ '{:,.2f}'.format(t.expense + t.other_loss) }}</td><td class="num">{{ '{:,.2f}'.format(t.other_gain) }}</td><td class="num fw-bold {{ 'pos' if t.profit >= 0 else 'neg' }}">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.profit) }}{% else %}Unresolved{% endif %}</td><td><span class="small {{ 'text-warning' if t.cost_status == 'missing' else 'text-muted' }}">{{ t.cost_basis }}</span>{% for src in t.cost_sources %}<br><span class="small text-muted">{{ src.reference }} @ {{ '{:,.2f}'.format(src.rate) }}</span>{% endfor %}</td></tr>{% else %}<tr><td colspan="8" class="ui-empty">No recognized P&L component. An unfulfilled booking/advance correctly has no revenue or cost.</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      </div>
+    </div>
+    <div class="col-xl-5" id="period-components">
+      <div class="ui-card">
+        <div class="ui-card-header"><h5><i class="bi bi-calculator"></i> Calculation Reconciliation</h5></div>
+        <div class="ui-card-body">
+          <h6>Lifetime</h6><div class="formula"><span>Material + delivery + other income</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_revenue) }}</strong><span>Less material + delivery cost</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_cogs) }}</strong><span>Less expenses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_expenses) }}</strong><span>Less other losses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_other_losses) }}</strong><span>Add other gains</span><strong>+ Rs. {{ '{:,.2f}'.format(summary.total_other_gains) }}</strong><span>Less unresolved-row revenue excluded</span><strong>− Rs. {{ '{:,.2f}'.format(summary.unresolved_revenue) }}</strong><span class="fw-bold">Net recognized result</span><strong class="pos">Rs. {{ '{:,.2f}'.format(summary.total_profit) }}</strong></div>
+          <hr><h6>Selected period</h6><div class="formula"><span>Period rows</span><strong>{{ period_rows|length }}</strong><span>Period earned revenue</span><strong>Rs. {{ '{:,.2f}'.format(period_summary.total_revenue) }}</strong><span>Period recognized result</span><strong>Rs. {{ '{:,.2f}'.format(period_summary.total_profit) }}</strong></div>
+          <p class="small text-muted mt-3 mb-0">Lifetime figures are never overwritten by the dashboard date filter. The selected-period result is calculated from the same source rows.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-wallet2"></i> Customer Settlement History — Not New Profit</h5><span class="small text-muted">{{ payment_history|length }} rows</span></div>
+    <div class="ui-card-body flush"><div class="ui-table-wrap"><table class="ui-table"><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Ledger balance</th></tr></thead><tbody>
+      {% for p in payment_history %}<tr><td>{{ p.date_display }}</td><td>{{ p.type }}</td><td>{{ p.reference }}</td><td>{{ p.description }}</td><td class="num">{{ '{:,.2f}'.format(p.debit) }}</td><td class="num">{{ '{:,.2f}'.format(p.credit) }}</td><td class="num">{{ '{:,.2f}'.format(p.balance) }}</td></tr>{% else %}<tr><td colspan="7" class="ui-empty">No customer settlement rows, or this source is not customer-linked.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+    <div class="ui-card-body"><p class="small text-muted mb-0">This is the complete customer-ledger settlement history for context. Unless a source reference explicitly links a payment, it is not claimed to be earmarked to this bill.</p></div>
+  </div>
+
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-clock-history"></i> Source Audit & Allocation History</h5></div>
+    <div class="ui-card-body">
+      <p class="small text-muted">{{ history_note }}</p>
+      {% for a in audit_rows %}<details class="mb-2"><summary>{{ a.date.strftime('%Y-%m-%d %H:%M') if a.date else 'Undated' }} · {{ a.action }} · {{ a.user }}</summary><div class="row g-2 mt-1">{% if a.before %}<div class="col-md-6"><div class="small text-muted">Before</div><pre class="audit-json">{{ a.before }}</pre></div>{% endif %}{% if a.after %}<div class="col-md-6"><div class="small text-muted">After / details</div><pre class="audit-json">{{ a.after }}</pre></div>{% endif %}</div>{% if a.reason %}<div class="small text-muted mt-1">Reason: {{ a.reason }}</div>{% endif %}</details>{% else %}<div class="ui-empty">No structured or legacy audit event is stored for this source.</div>{% endfor %}
+      {% if archive_rows %}<h6 class="mt-4">Allocation repair archives</h6>{% for a in archive_rows %}<details class="mb-2"><summary>{{ a.date.strftime('%Y-%m-%d %H:%M') if a.date else '' }} · {{ a.reference }} · Qty {{ '{:,.2f}'.format(a.qty) }}</summary><p class="small text-muted">{{ a.reason }} · {{ a.violations }}</p><pre class="audit-json">{{ a.source_json }}</pre>{% if a.booking_snapshot %}<pre class="audit-json">{{ a.booking_snapshot }}</pre>{% endif %}</details>{% endfor %}{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

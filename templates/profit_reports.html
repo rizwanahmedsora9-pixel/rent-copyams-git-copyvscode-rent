@@ -4,183 +4,211 @@
 {% from "_ui/data_table_card.html" import card as ui_table_card %}
 {% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
 {% block content %}
-<div class="ui-v2">
+<div class="ui-v2 profit-center">
+  <style>
+    .profit-center .profit-hero{border:1px solid var(--ui-border);border-radius:18px;padding:1.25rem;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(14,165,233,.06));margin-bottom:1rem}
+    .profit-center .profit-hero-value{font-size:clamp(1.8rem,4vw,3rem);font-weight:800;line-height:1.1}
+    .profit-center .profit-formula{font-size:.82rem;line-height:1.65}
+    .profit-center .formula-row{display:flex;justify-content:space-between;gap:1rem;padding:.42rem 0;border-bottom:1px dashed var(--ui-border)}
+    .profit-center .formula-row:last-child{border-bottom:0}
+    .profit-center .formula-total{font-size:1.05rem;font-weight:800;border-top:2px solid var(--ui-border);margin-top:.35rem;padding-top:.7rem}
+    .profit-center .status-pill{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.3rem .65rem;font-size:.75rem;font-weight:700;background:var(--ui-surface-2);border:1px solid var(--ui-border)}
+    .profit-center .comparison-delta{font-variant-numeric:tabular-nums;font-weight:700}
+    .profit-center .section-note{font-size:.82rem;color:var(--ui-text-muted);margin-bottom:0}
+    .profit-center .position-card{border-left:3px solid var(--ui-sky,#0ea5e9)!important}
+    .profit-center .table-subtotal{font-weight:800;background:var(--ui-surface-2)}
+    .profit-center .warning-list{margin:0;padding-left:1.1rem}
+    .profit-center .warning-list li{margin-bottom:.45rem}
+    .profit-center .filter-hint{font-size:.72rem;color:var(--ui-text-muted);margin-top:.25rem}
+    @media print{.profit-center .no-print{display:none!important}.profit-center .ui-card{break-inside:avoid}}
+  </style>
 
-  {% set entries_url = url_for('profit_reports', view='entries', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
-  {% set profit_url = url_for('profit_reports', view='entries', metric='profit', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
-  {% set loss_url = url_for('profit_reports', view='entries', metric='loss', start_date=start_date, end_date=end_date, client=client, material=material, grn_id=grn_id) %}
-
+  {% set entries_url = report_url(view='entries') %}
+  {% set profit_url = report_url(view='entries', metric='profit') %}
+  {% set loss_url = report_url(view='entries', metric='loss') %}
+  {% set unknown_url = report_url(view='entries', metric='unknown_cost') %}
   {% set _toolbar %}
-    <a href="{{ entries_url }}" class="btn btn-warning btn-pill fw-bold">
-      <i class="bi bi-list-check me-1"></i> View All Transactions
-    </a>
-    <a href="/" class="btn btn-outline-secondary btn-pill fw-bold">
-      <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
-    </a>
-    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
-      <i class="bi bi-printer"></i>
-    </button>
+    <a href="{{ entries_url }}" class="btn btn-warning btn-pill fw-bold"><i class="bi bi-list-check me-1"></i> View All Transactions</a>
+    <a href="{{ report_url('profit_report_excel') }}" class="btn btn-outline-success btn-pill fw-bold"><i class="bi bi-file-earmark-excel me-1"></i> Excel</a>
+    <a href="{{ report_url('profit_report_pdf') }}" class="btn btn-outline-secondary btn-pill fw-bold"><i class="bi bi-file-earmark-pdf me-1"></i> PDF</a>
+    <button type="button" class="btn btn-outline-secondary btn-pill no-print" onclick="window.print()" aria-label="Print"><i class="bi bi-printer"></i></button>
   {% endset %}
-  {{ ui_header('bi-graph-up-arrow', 'Profit Summary', subtitle=(start_date ~ '  to  ' ~ end_date), toolbar=_toolbar) }}
+  {{ ui_header('bi-graph-up-arrow', 'Profit Summary', subtitle=(period_label ~ ' · ' ~ (start_date or 'Beginning') ~ ' to ' ~ (end_date or 'Today')), toolbar=_toolbar) }}
 
   {% call ui_filter_bar(action=url_for('profit_reports')) %}
-    <div class="ui-field ui-col-3">
-      <label class="ui-label">From</label>
-      <input type="date" name="start_date" value="{{ start_date }}" class="form-control">
+    <div class="ui-field ui-col-2">
+      <label class="ui-label" for="profitPeriod">Period</label>
+      <select name="period" id="profitPeriod" class="form-select">
+        {% for value,label in [('this_month','This month to date'),('today','Today'),('yesterday','Yesterday'),('this_week','This week to date'),('last_7_days','Last 7 days'),('last_30_days','Last 30 days'),('last_month','Last full month'),('this_year','This year to date'),('last_year','Last full year'),('all','All dates'),('custom','Custom dates')] %}
+        <option value="{{ value }}" {{ 'selected' if period == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </div>
-    <div class="ui-field ui-col-3">
-      <label class="ui-label">To</label>
-      <input type="date" name="end_date" value="{{ end_date }}" class="form-control">
-    </div>
-    <div class="ui-field ui-col-5">
+    <div class="ui-field ui-col-2"><label class="ui-label">From</label><input type="date" name="start_date" value="{{ start_date }}" class="form-control"></div>
+    <div class="ui-field ui-col-2"><label class="ui-label">To</label><input type="date" name="end_date" value="{{ end_date }}" class="form-control"></div>
+    <div class="ui-field ui-col-2">
       <label class="ui-label">Customer</label>
-      <div class="position-relative">
-        <div class="input-group">
-          <input type="text" name="client" id="profitClientFilter" value="{{ client }}"
-                 placeholder="Customer name or code" autocomplete="off"
-                 onfocus="showCombobox('profitClientFilter', 'profitClientList')"
-                 oninput="filterCombobox('profitClientFilter', 'profitClientList', 'profitClientDisplay')"
-                 class="form-control">
-          <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('profitClientFilter', 'profitClientList')">
-            <i class="bi bi-chevron-down text-warning"></i>
-          </button>
-        </div>
-        <div id="profitClientList" class="combobox-list shadow-lg" style="display: none;">
-          <div class="combobox-item" data-combo-code="" data-combo-name="" data-combo-input="profitClientFilter" data-combo-display="profitClientDisplay">
-            <span class="fw-bold text-danger">All Customers</span>
-          </div>
-          {% for c in clients %}
-          <div class="combobox-item" data-combo-code="{{ c.code }}" data-combo-name="{{ c.name }}" data-combo-input="profitClientFilter" data-combo-display="profitClientDisplay">
-            <span class="fw-bold text-warning code-span">{{ c.code }}</span>
-            <span class="ms-2 text-white-50 small name-span">{{ c.name }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        <div id="profitClientDisplay" class="text-info small mt-1 fw-bold"></div>
-      </div>
+      <input type="text" name="client" value="{{ client }}" list="profitClients" class="form-control" placeholder="Name or code" autocomplete="off">
+      <datalist id="profitClients">{% for c in filter_options.clients %}<option value="{{ c.name }}">{{ c.code }}</option>{% endfor %}</datalist>
     </div>
-    <div class="ui-actions ui-col-1">
-      <label class="ui-label">&nbsp;</label>
-      <button type="submit" class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Material / service</label>
+      <input type="text" name="material" value="{{ material }}" list="profitMaterials" class="form-control" placeholder="All items" autocomplete="off">
+      <datalist id="profitMaterials">{% for m in filter_options.materials %}<option value="{{ m.name }}">{% endfor %}</datalist>
     </div>
-    <div class="ui-actions ui-col-12">
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_reports') }}">
-        <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
-      </a>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Activity</label>
+      <select name="category" class="form-select"><option value="">All recognized activity</option>{% for value,label in filter_options.categories %}<option value="{{ value }}" {{ 'selected' if category == value }}>{{ label }}</option>{% endfor %}</select>
     </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Cost supplier</label>
+      <input type="text" name="supplier" value="{{ supplier }}" list="profitSuppliers" class="form-control" placeholder="All suppliers" autocomplete="off">
+      <datalist id="profitSuppliers">{% for s in filter_options.suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist>
+    </div>
+    {% if grn_id %}<input type="hidden" name="grn_id" value="{{ grn_id }}">{% endif %}
+    <div class="ui-actions ui-col-2"><label class="ui-label">&nbsp;</label><button type="submit" class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button></div>
+    <div class="ui-actions ui-col-12"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_reports') }}"><i class="bi bi-arrow-counterclockwise me-1"></i> Reset</a><span class="small text-muted ms-2">Choose Custom dates to use the From / To fields exactly.</span></div>
   {% endcall %}
 
-  <div class="ui-kpi-grid">
-    {{ ui_tile(href=profit_url, label='Total Profit',
-               value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))),
-               icon='bi-arrow-up-circle', colour='green',
-               sub=(profit_entry_count ~ ' profitable entries'),
-               cta='View profit entries') }}
-    {{ ui_tile(href=loss_url, label='Total Loss',
-               value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))),
-               icon='bi-arrow-down-circle', colour='red',
-               sub=(loss_entry_count ~ ' loss entries'),
-               cta='View loss entries') }}
-    {{ ui_tile(href=entries_url, label='Profit (Money Kept)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_profit))),
-               icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'),
-               sub='Money kept after paying for the goods',
-               cta='See transactions') }}
-    {{ ui_tile(href=entries_url, label='Sales (Money In)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_revenue))),
-               icon='bi-bag-cash', colour='sky',
-               sub='Value of goods sold to customers',
-               cta='See transactions') }}
-    {{ ui_tile(href=entries_url, label='Cost of Goods (Money Out)',
-               value=("Rs. " ~ ("{:,.2f}".format(total_cogs))),
-               icon='bi-truck', colour='amber',
-               sub='What we paid suppliers for those goods',
-               cta='See transactions') }}
-    {{ ui_tile(href=entries_url, label='Money Received',
-               value=("Rs. " ~ ("{:,.2f}".format(payment_received_total))),
-               icon='bi-wallet2', colour='teal',
-               sub='Cash actually collected from customers',
-               cta='See transactions') }}
+  <div class="profit-hero">
+    <div class="row align-items-center g-3">
+      <div class="col-lg-7">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <span class="status-pill"><i class="bi bi-calendar3"></i> {{ period_label }}</span>
+          {% if summary.unknown_cost_rows %}<a class="status-pill text-warning" href="{{ unknown_url }}"><i class="bi bi-exclamation-triangle"></i> {{ summary.unknown_cost_rows }} unresolved-cost rows</a>{% else %}<span class="status-pill text-success"><i class="bi bi-check2-circle"></i> Costs resolved</span>{% endif %}
+          {% if summary.estimated_cost_rows %}<span class="status-pill text-info"><i class="bi bi-info-circle"></i> {{ summary.estimated_cost_rows }} estimated-cost rows</span>{% endif %}
+        </div>
+        <div class="text-muted small fw-bold text-uppercase">Immediate net result · recognized activity</div>
+        <div class="profit-hero-value {{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(total_profit) }}</div>
+        <p class="section-note mt-2">{{ 'Net profit' if total_profit >= 0 else 'Net loss' }} after recognized material and delivery costs, expenses, returns, and supported other gains/losses. Receipts and purchases are not profit.</p>
+      </div>
+      <div class="col-lg-5">
+        <div class="row g-2 text-center">
+          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Net margin</div><div class="fs-4 fw-bold">{{ '{:,.2f}'.format(summary.margin_pct) }}%</div></div></div>
+          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Recognized entries</div><div class="fs-4 fw-bold">{{ summary.row_count }}</div></div></div>
+          <div class="col-12"><a href="{{ entries_url }}" class="btn btn-sm btn-outline-warning w-100">Trace every figure to its source <i class="bi bi-arrow-right ms-1"></i></a></div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  {% if unknown_cost_revenue and unknown_cost_revenue > 0 %}
-  <div class="ui-card" style="border-color: var(--ui-warn) !important;">
-    <div class="ui-card-body d-flex gap-3 align-items-start">
-      <i class="bi bi-info-circle fs-4" style="color: var(--ui-warn);"></i>
-      <div>
-        <div class="fw-bold mb-1">Some items have no purchase cost recorded.</div>
-        <div class="small mb-0">
-          Sales worth Rs. {{ "{:,.2f}".format(unknown_cost_revenue) }} have no purchase
-          cost in the system, so they are not counted in the Profit figure above.
+  <div class="ui-kpi-grid">
+    {{ ui_tile(href=profit_url, label='Total Profit', value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))), icon='bi-arrow-up-circle', colour='green', sub=(profit_entry_count ~ ' profitable entries'), cta='View profit entries') }}
+    {{ ui_tile(href=loss_url, label='Total Loss', value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))), icon='bi-arrow-down-circle', colour='red', sub=(loss_entry_count ~ ' loss entries'), cta='View loss entries') }}
+    {{ ui_tile(href=entries_url, label='Profit (Money Kept)', value=("Rs. " ~ ("{:,.2f}".format(total_profit))), icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'), sub='Qualified net result; unresolved rows disclosed', cta='See transactions') }}
+    {{ ui_tile(href=report_url(view='entries', metric='revenue'), label='Sales (Money In)', value=("Rs. " ~ ("{:,.2f}".format(total_revenue))), icon='bi-bag-cash', colour='sky', sub='Earned material + delivery + other income, net of returns', cta='See revenue entries') }}
+    {{ ui_tile(href=report_url(view='entries', metric='cogs'), label='Cost of Goods (Money Out)', value=("Rs. " ~ ("{:,.2f}".format(total_cogs))), icon='bi-truck', colour='amber', sub='Recognized material + direct delivery cost', cta='See cost entries') }}
+    {{ ui_tile(href=url_for('financial_details', start_date=start_date, end_date=end_date), label='Money Received', value=("Rs. " ~ ("{:,.2f}".format(payment_received_total))), icon='bi-wallet2', colour='teal', sub='Settlement information only — never new profit', cta='Open financial details') }}
+  </div>
+
+  <div class="row g-3">
+    <div class="col-xl-7">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-diagram-3"></i> Traceable Profit Formula</h5><a href="{{ entries_url }}" class="btn btn-outline-secondary btn-sm">Drill down</a></div>
+        <div class="ui-card-body profit-formula">
+          <div class="formula-row"><span>Earned material revenue (after returns)</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_material_revenue) }}</strong></div>
+          <div class="formula-row"><span>Earned delivery revenue (after returns)</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_delivery_revenue) }}</strong></div>
+          <div class="formula-row"><span>Other earned income</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_other_income) }}</strong></div>
+          <div class="formula-row"><span>Less: material cost recognized</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_material_cost) }}</strong></div>
+          <div class="formula-row ps-3"><span class="text-muted">Recorded actual / estimated portions</span><span class="text-muted">Rs. {{ '{:,.2f}'.format(summary.actual_material_cost) }} / Rs. {{ '{:,.2f}'.format(summary.estimated_material_cost) }}</span></div>
+          <div class="formula-row"><span>Less: direct delivery cost</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_delivery_cost) }}</strong></div>
+          <div class="formula-row"><span>Less: operating expenses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_expenses) }}</strong></div>
+          <div class="formula-row"><span>Less: other supported losses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_other_losses) }}</strong></div>
+          <div class="formula-row"><span>Add: other supported gains</span><strong>+ Rs. {{ '{:,.2f}'.format(summary.total_other_gains) }}</strong></div>
+          {% if summary.unknown_cost_rows %}<div class="formula-row text-warning"><span>Less: revenue on unresolved-cost rows excluded from net</span><strong>− Rs. {{ '{:,.2f}'.format(summary.unresolved_revenue) }}</strong></div>{% endif %}
+          <div class="formula-row formula-total {{ 'pos' if total_profit >= 0 else 'neg' }}"><span>Net Profit / Loss</span><span>Rs. {{ '{:,.2f}'.format(total_profit) }}</span></div>
+          <p class="section-note mt-3">Discounts reduce the revenue on their original sale/supply rows; they are not deducted a second time. Return rows carry negative revenue and negative cost on the return date. Formula reconciliation difference: Rs. {{ '{:,.6f}'.format(summary.formula_difference) }}.</p>
         </div>
+      </div>
+    </div>
+    <div class="col-xl-5">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-arrow-left-right"></i> Prior-Equivalent Period</h5></div>
+        <div class="ui-card-body">
+          {% if comparison.available %}
+          <p class="small text-muted">{{ comparison.label }}: {{ comparison.start_date }} to {{ comparison.end_date }}</p>
+          <table class="ui-table">
+            <thead><tr><th>Measure</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead>
+            <tbody>
+              {% for key,label in [('total_revenue','Revenue'),('total_cogs','Cost'),('total_expenses','Expenses'),('total_profit','Net result')] %}
+              {% set c = comparison.metrics[key] %}<tr><td>{{ label }}</td><td class="num">{{ '{:,.2f}'.format(c.current) }}</td><td class="num">{{ '{:,.2f}'.format(c.previous) }}</td><td class="num comparison-delta {{ 'pos' if c.change >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(c.change) }}{% if c.change_pct is not none %}<br><span class="small text-muted">{{ '{:+.1f}'.format(c.change_pct) }}%</span>{% endif %}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}<div class="ui-empty">{{ comparison.label }}.</div>{% endif %}
+          <hr>
+          <div class="small text-muted">Recorded-cost-only result (excludes rows using estimated costs): <strong class="text-white">Rs. {{ '{:,.2f}'.format(summary.recorded_cost_profit) }}</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if summary.unknown_cost_rows or summary.estimated_cost_rows %}
+  <div class="ui-card" style="border-color:var(--ui-warn)!important">
+    <div class="ui-card-body d-flex gap-3 align-items-start">
+      <i class="bi bi-exclamation-triangle fs-4 text-warning"></i>
+      <div class="flex-grow-1">
+        <div class="fw-bold mb-1">Cost qualification — review before relying on the net result.</div>
+        {% if summary.unknown_cost_rows %}<div class="small mb-1">{{ summary.unknown_cost_rows }} rows have no defensible cost. Their revenue is visible, but their result is excluded rather than assuming zero cost. Positive affected revenue: Rs. {{ '{:,.2f}'.format(summary.unknown_cost_revenue) }}.</div>{% endif %}
+        {% if summary.estimated_cost_rows %}<div class="small mb-2">{{ summary.estimated_cost_rows }} rows use clearly labelled GRN/master estimates totaling Rs. {{ '{:,.2f}'.format(summary.estimated_material_cost) }}; these are not represented as frozen actual costs.</div>{% endif %}
+        <a href="{{ unknown_url }}" class="btn btn-outline-warning btn-sm">Review unresolved transactions</a>
       </div>
     </div>
   </div>
   {% endif %}
 
-  {% call ui_table_card('Sales by Customer', icon='bi-people') %}
-    <table class="ui-table">
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th class="num">Sales</th>
-          <th class="num">Profit</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in top_clients %}
-        <tr>
-          <td class="fw-bold">{{ r.client }}</td>
-          <td class="num">{{ "Rs. {:,.2f}".format(r.sold_revenue) }}</td>
-          <td class="num {{ 'pos' if (r.profit_known or 0) >= 0 else 'neg' }}">
-            {{ "Rs. {:,.2f}".format(r.profit_known or 0) }}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td class="ui-empty" colspan="3">No sales recorded for this period.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endcall %}
-
-  {% call ui_table_card('Sales by Item', icon='bi-tags') %}
-    <table class="ui-table">
-      <thead>
-        <tr>
-          <th>Item</th>
-          <th class="num">Qty Sold</th>
-          <th class="num">Sales</th>
-          <th class="num">Profit</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in top_items %}
-        <tr>
-          <td class="fw-bold">{{ r.material }}</td>
-          <td class="num">{{ "{:,.2f}".format(r.sold_qty or 0) }}</td>
-          <td class="num">{{ "Rs. {:,.2f}".format(r.sold_revenue) }}</td>
-          <td class="num {{ 'pos' if (r.profit_known or 0) >= 0 else 'neg' }}">
-            {{ "Rs. {:,.2f}".format(r.profit_known or 0) }}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td class="ui-empty" colspan="4">No items sold in this period.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endcall %}
-
-  <div class="ui-card">
-    <div class="ui-card-header">
-      <h5><i class="bi bi-question-circle"></i> How to read this page</h5>
+  <div class="row g-3">
+    <div class="col-xl-6">
+      {% call ui_table_card('Sales by Customer', icon='bi-people') %}
+        <table class="ui-table"><thead><tr><th>Customer</th><th class="num">Earned revenue</th><th class="num">Recognized profit</th></tr></thead><tbody>
+          {% for r in top_clients[:10] %}<tr><td class="fw-bold">{{ r.client }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.sold_revenue) }}</td><td class="num {{ 'pos' if r.profit_known >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(r.profit_known) }}</td></tr>{% else %}<tr><td class="ui-empty" colspan="3">No earned sales recorded for this period.</td></tr>{% endfor %}
+        </tbody></table>
+      {% endcall %}
     </div>
-    <div class="ui-card-body">
-      <p class="mb-2"><strong>Sales</strong> is everything your customers bought from you in this period.</p>
-      <p class="mb-2"><strong>Cost of Goods</strong> is what those items cost us to buy from our suppliers.</p>
-      <p class="mb-2"><strong>Profit</strong> is the money your company kept after paying for the goods.</p>
-      <p class="mb-0"><strong>Money Received</strong> is the cash and bank money we actually collected from customers in this period.</p>
+    <div class="col-xl-6">
+      {% call ui_table_card('Sales by Item', icon='bi-tags') %}
+        <table class="ui-table"><thead><tr><th>Item</th><th class="num">Net qty</th><th class="num">Earned revenue</th><th class="num">Recognized profit</th></tr></thead><tbody>
+          {% for r in top_items[:10] %}<tr><td class="fw-bold">{{ r.material }}</td><td class="num">{{ '{:,.2f}'.format(r.sold_qty) }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.sold_revenue) }}</td><td class="num {{ 'pos' if r.profit_known >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(r.profit_known) }}</td></tr>{% else %}<tr><td class="ui-empty" colspan="4">No items sold in this period.</td></tr>{% endfor %}
+        </tbody></table>
+      {% endcall %}
     </div>
   </div>
 
+  {% call ui_table_card('Recent Recognized Transactions', icon='bi-receipt') %}
+    <table class="ui-table"><thead><tr><th>Date / reference</th><th>Customer / activity</th><th>Item</th><th class="num">Money in</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead><tbody>
+      {% for t in recent_transactions %}<tr><td>{{ t.date.strftime('%Y-%m-%d') if t.date else 'Undated' }}<br><a href="{{ url_for('profit_transaction_detail', document_type=t.document_type, document_id=t.document_id, start_date=start_date, end_date=end_date) }}">{{ t.reference }}</a></td><td>{{ t.client or t.account or 'Business' }}<br><span class="small text-muted">{{ t.transaction_type }}</span></td><td>{{ t.material }}</td><td class="num">{{ '{:,.2f}'.format(t.revenue) }}</td><td class="num">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.cogs) }}{% else %}Unresolved{% endif %}</td><td class="num {{ 'pos' if t.profit >= 0 else 'neg' }}">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.profit) }}{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="ui-empty">No recognized transactions in this period.</td></tr>{% endfor %}
+    </tbody></table>
+  {% endcall %}
+
+  {% call ui_table_card('Daily & Activity Insights', icon='bi-calendar2-week') %}
+    <table class="ui-table"><thead><tr><th>Day</th><th class="num">Earned revenue</th><th class="num">Recognized cost</th><th class="num">Expenses / losses</th><th class="num">Net result</th><th class="num">Rows</th></tr></thead><tbody>
+      {% for r in daily_insights[:14] %}<tr><td>{{ r.day }}</td><td class="num">{{ '{:,.2f}'.format(r.revenue) }}</td><td class="num">{{ '{:,.2f}'.format(r.cogs) }}</td><td class="num">{{ '{:,.2f}'.format(r.expenses) }}</td><td class="num {{ 'pos' if r.profit >= 0 else 'neg' }}">{{ '{:,.2f}'.format(r.profit) }}</td><td class="num">{{ r.rows }}</td></tr>{% else %}<tr><td colspan="6" class="ui-empty">No activity in this period.</td></tr>{% endfor %}
+    </tbody></table>
+  {% endcall %}
+
+  {% if financial_position %}
+  <div class="ui-page-header mt-4"><div><h2 class="ui-title" style="font-size:1.35rem"><span class="ui-title-icon"><i class="bi bi-safe"></i></span> Financial Position — Not Profit</h2><div class="ui-subtitle">Current balances, stock, purchases and unfulfilled orders are deliberately outside the net-profit formula.</div></div></div>
+  <div class="row g-3">
+    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Customer receivables (current)</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.customer_receivables) }}</div><a href="{{ url_for('unpaid_transactions_page') }}" class="small">Open dues</a></div></div></div>
+    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Supplier payables (current)</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.supplier_payables) }}</div><div class="small text-muted">Supplier advances: Rs. {{ '{:,.2f}'.format(financial_position.supplier_advances) }}</div></div></div></div>
+    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Outstanding booking value</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.outstanding_booking_value) }}</div><div class="small text-muted">Not earned until actual supply</div></div></div></div>
+    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Purchases in selected period</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.purchase_value) }}</div><div class="small text-muted">Inventory, not immediate expense</div></div></div></div>
+  </div>
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-box-seam"></i> Outstanding Booking Supplies</h5><span class="small text-muted">Identifiable booking advances (estimate): Rs. {{ '{:,.2f}'.format(financial_position.customer_advances_estimate) }}</span></div>
+    <div class="ui-card-body flush"><div class="ui-table-wrap"><table class="ui-table"><thead><tr><th>Booking</th><th>Customer</th><th>Material / service</th><th class="num">Booked</th><th class="num">Net supplied</th><th class="num">Remaining</th><th class="num">Unfulfilled value</th></tr></thead><tbody>
+      {% for r in financial_position.outstanding_bookings[:25] %}<tr><td><a href="{{ url_for('profit_transaction_detail', document_type='Booking', document_id=r.booking_id, start_date=start_date, end_date=end_date) }}">{{ r.reference }}</a><br><span class="small text-muted">{{ r.date.strftime('%Y-%m-%d') if r.date else '' }}</span></td><td>{{ r.client }}</td><td>{{ r.material }}</td><td class="num">{{ '{:,.2f}'.format(r.booked_qty) }}</td><td class="num">{{ '{:,.2f}'.format(r.supplied_qty) }}</td><td class="num fw-bold">{{ '{:,.2f}'.format(r.remaining_qty) }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.outstanding_value) }}</td></tr>{% else %}<tr><td colspan="7" class="ui-empty">No unfulfilled booking quantity for the selected customer/material.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+    <div class="ui-card-body"><p class="section-note">{{ financial_position.note }}</p></div>
+  </div>
+  {% endif %}
+
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-shield-check"></i> Accounting Coverage & Data Quality</h5><span class="small text-muted">{{ voided_source_count }} void source documents excluded</span></div>
+    <div class="ui-card-body">
+      {% if warnings %}<ul class="warning-list small text-warning">{% for warning in warnings[:12] %}<li>{{ warning.message }}{% if warning.document_type and warning.document_id %} · <a href="{{ url_for('profit_transaction_detail', document_type=warning.document_type, document_id=warning.document_id, start_date=start_date, end_date=end_date) }}">trace source</a>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="small text-success"><i class="bi bi-check2-circle me-1"></i>No unresolved source-link warnings in the selected result.</p>{% endif %}
+      <details class="mt-3"><summary class="small fw-bold">Supported scope and unavoidable source limitations</summary><ul class="warning-list small text-muted mt-2">{% for note in unsupported %}<li>{{ note }}</li>{% endfor %}</ul></details>
+    </div>
+  </div>
 </div>
 {% endblock %}

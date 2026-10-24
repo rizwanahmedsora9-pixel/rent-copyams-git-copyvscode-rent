@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Profit &amp; Loss Control Center</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#17202a;font-size:9px;line-height:1.35}
+  h1{font-size:18px;margin:0 0 4px;color:#153b5b}h2{font-size:12px;margin:14px 0 5px;color:#153b5b;border-bottom:1px solid #9aa8b5;padding-bottom:3px}
+  p{margin:3px 0}.muted{color:#55616c}.warning{color:#8a4b00}.pos{color:#146c2e}.neg{color:#a12622}
+  table{border-collapse:collapse;width:100%;margin:5px 0 10px;table-layout:fixed}th,td{border:1px solid #aeb8c2;padding:3px;vertical-align:top;word-wrap:break-word}th{background:#e8eef3;font-weight:bold}.num{text-align:right;font-variant-numeric:tabular-nums}.total td{font-weight:bold;background:#eef3f6}.small{font-size:8px}
+</style>
+</head>
+<body>
+<h1>Profit &amp; Loss Control Center</h1>
+<p><strong>Period:</strong> {{ start_date or 'Beginning' }} to {{ end_date or 'Today' }} · {{ period_label }}</p>
+<p><strong>Generated:</strong> {{ generated_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+<p><strong>Filters:</strong> {% set active_filters = [] %}{% if client %}{% set _ = active_filters.append('Customer=' ~ client) %}{% endif %}{% if material %}{% set _ = active_filters.append('Material=' ~ material) %}{% endif %}{% if supplier %}{% set _ = active_filters.append('Supplier=' ~ supplier) %}{% endif %}{% if category %}{% set _ = active_filters.append('Activity=' ~ category) %}{% endif %}{{ active_filters|join('; ') if active_filters else 'None' }}</p>
+
+<h2>Authoritative Summary</h2>
+<table>
+  <thead><tr><th>Metric</th><th class="num">Current (Rs.)</th><th class="num">Previous equivalent (Rs.)</th><th class="num">Change (Rs.)</th></tr></thead>
+  <tbody>
+    {% for key,label in [('total_material_revenue','Earned material revenue, net of returns'),('total_delivery_revenue','Earned delivery revenue, net of returns'),('total_other_income','Other earned income'),('total_revenue','Sales (Money In)'),('actual_material_cost','Recorded actual material cost'),('estimated_material_cost','Estimated material cost'),('total_delivery_cost','Direct delivery cost'),('total_cogs','Cost of Goods (Money Out)'),('total_expenses','Operating expenses'),('total_other_losses','Other supported losses'),('total_other_gains','Other supported gains'),('unresolved_revenue','Unresolved-row revenue excluded from net'),('total_profit','Net Profit / Loss'),('recorded_cost_profit','Recorded-cost-only result')] %}
+    <tr class="{{ 'total' if key == 'total_profit' }}"><td>{{ label }}</td><td class="num">{{ '{:,.2f}'.format(summary[key]) }}</td><td class="num">{% if comparison.available and key in previous_summary %}{{ '{:,.2f}'.format(previous_summary[key]) }}{% else %}N/A{% endif %}</td><td class="num">{% if comparison.available and key in previous_summary %}{{ '{:+,.2f}'.format(summary[key] - previous_summary[key]) }}{% else %}N/A{% endif %}</td></tr>
+    {% endfor %}
+    <tr><td>Net margin</td><td class="num">{{ '{:,.2f}'.format(summary.margin_pct) }}%</td><td class="num">{% if comparison.available %}{{ '{:,.2f}'.format(previous_summary.margin_pct) }}%{% else %}N/A{% endif %}</td><td class="num">{% if comparison.available %}{{ '{:+,.2f}'.format(summary.margin_pct - previous_summary.margin_pct) }} pp{% else %}N/A{% endif %}</td></tr>
+    <tr><td>Money Received (position only; not profit)</td><td class="num">{{ '{:,.2f}'.format(payment_received_total) }}</td><td class="num">N/A</td><td class="num">N/A</td></tr>
+  </tbody>
+</table>
+<p class="small"><strong>Formula:</strong> Net = recognized material + delivery + other income + other gains − material cost − delivery cost − expenses − other losses. Unresolved-cost rows are excluded from net and disclosed. Formula check Rs. {{ '{:,.6f}'.format(summary.formula_check) }}; reconciliation difference Rs. {{ '{:,.6f}'.format(summary.formula_difference) }}.</p>
+{% if comparison.available %}<p class="small muted"><strong>Comparison:</strong> {{ comparison.label }} ({{ comparison.start_date }} to {{ comparison.end_date }}).</p>{% endif %}
+
+<h2>Transaction Detail ({{ export_transactions|length }} filtered rows; no pagination)</h2>
+<table>
+  <thead><tr><th style="width:9%">Date</th><th style="width:13%">Type / ref</th><th style="width:13%">Customer</th><th style="width:13%">Item</th><th class="num" style="width:8%">Qty</th><th class="num" style="width:10%">Revenue</th><th class="num" style="width:9%">Cost</th><th class="num" style="width:9%">Expense / loss</th><th class="num" style="width:8%">Gain</th><th class="num" style="width:8%">Profit</th></tr></thead>
+  <tbody>
+    {% for t in export_transactions %}<tr><td>{{ t.date.strftime('%Y-%m-%d') if t.date else 'Undated' }}</td><td>{{ t.transaction_type }}<br>{{ t.reference }}</td><td>{{ t.client or t.account or 'Business' }}</td><td>{{ t.material }}{% if t.booked_material and t.booked_material != t.material %}<br>Booked: {{ t.booked_material }}{% endif %}<br><span class="small muted">{{ t.cost_status }}</span></td><td class="num">{{ '{:,.2f}'.format(t.qty) }}</td><td class="num">{{ '{:,.2f}'.format(t.revenue) }}</td><td class="num">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.cogs) }}{% else %}N/A{% endif %}</td><td class="num">{{ '{:,.2f}'.format(t.expense + t.other_loss) }}</td><td class="num">{{ '{:,.2f}'.format(t.other_gain) }}</td><td class="num {{ 'pos' if t.profit >= 0 else 'neg' }}">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.profit) }}{% else %}N/A{% endif %}</td></tr>{% else %}<tr><td colspan="10">No transactions match the selected filters.</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<h2>Cost Qualification &amp; Accounting Policy</h2>
+{% if summary.unknown_cost_rows %}<p class="warning">{{ summary.unknown_cost_rows }} unresolved-cost rows are excluded from net. Positive affected revenue: Rs. {{ '{:,.2f}'.format(summary.unknown_cost_revenue) }}.</p>{% endif %}
+{% if summary.estimated_cost_rows %}<p class="warning">{{ summary.estimated_cost_rows }} rows use labelled estimates totaling Rs. {{ '{:,.2f}'.format(summary.estimated_material_cost) }}. They are not presented as frozen actual costs.</p>{% endif %}
+{% for warning in warnings %}<p class="small warning">• {{ warning.message }}</p>{% endfor %}
+{% for note in unsupported %}<p class="small muted">• {{ note }}</p>{% endfor %}
+<p class="small muted">Customer receipts, supplier payments, driver payments and purchases are settlements or inventory/position records, not additional P&amp;L events. Voided source documents are excluded.</p>
+</body>
+</html>
