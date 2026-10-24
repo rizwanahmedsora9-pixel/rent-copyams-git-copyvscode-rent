@@ -362,6 +362,8 @@ def profit_reports():
             sale_ref = (_direct_sale_default_bill_ref(sale) or sale.auto_bill_no or f"DS-{sale.id}").strip()
             sale_waive_map[sale.id] = _waive_for_bill(sale_ref)
 
+    include_rent_variance = (not material_query) or _is_rent_material_name(material_query)
+    rent_sale_discount = {}
     direct_gross_total = 0.0
     for item, sale in direct_rows:
         sale_category = normalize_sale_category(getattr(sale, 'category', None))
@@ -379,6 +381,14 @@ def profit_reports():
         total_adjustment = sale_discount + sale_waive
         discount_share = (gross_revenue / sale_gross) * total_adjustment if sale_gross > 0 else 0
         net_revenue = max(0.0, gross_revenue - discount_share)
+
+        # Rent/service charges are reported together with the delivery charge
+        # in a single "Rent" entry (built below).  They must not also appear as
+        # their own profit line here, otherwise the rent revenue and the
+        # delivery variance are counted twice.
+        if include_rent_variance and _is_rent_material_name(item.product_name):
+            rent_sale_discount[sale.id] = rent_sale_discount.get(sale.id, 0.0) + discount_share
+            continue
 
         tx_date = sale.date_posted.date() if sale.date_posted else None
         frozen_cost = float(getattr(item, 'cost_rate_at_sale', 0) or 0)
@@ -430,7 +440,6 @@ def profit_reports():
     # - Positive difference (client rent charged > delivery rent cost) => company profit
     # - Negative difference (delivery rent cost > client rent charged) => company loss
     # This adjustment is operational and must not affect client ledger due.
-    include_rent_variance = (not material_query) or _is_rent_material_name(material_query)
     if include_rent_variance:
         rent_loss_query = DirectSale.query.filter(
             DirectSale.is_void == False,
@@ -550,31 +559,40 @@ def profit_reports():
             }
             rent_revenue = float(getattr(sale, 'rent_item_revenue', 0) or rent_rec['rent_item_revenue'])
             rent_cost = float(getattr(sale, 'delivery_rent_cost', 0) or rent_rec['delivery_rent_cost'])
-            variance = rent_revenue - rent_cost
-            if abs(variance) <= 0.0001:
+            rent_qty = 0.0
+            for rent_item in sale_items_payload:
+                if _is_rent_material_name(rent_item.get('product_name')):
+                    rent_qty += float(rent_item.get('qty') or 0)
+            rent_discount_share = float(rent_sale_discount.get(sale.id, 0.0) or 0.0)
+            rent_revenue_net = max(0.0, rent_revenue - rent_discount_share)
+            variance = rent_revenue_net - rent_cost
+            if rent_revenue_net <= 0.0 and rent_cost <= 0.0:
                 continue
 
             sale_ref = sale.manual_bill_no or sale.auto_bill_no or f"DS-{sale.id}"
             if getattr(sale, 'invoice', None) and sale.invoice and sale.invoice.invoice_no:
                 sale_ref = sale.invoice.invoice_no
 
+            # One single rent line per sale: the rent charged is "Money In",
+            # the delivery charge paid to the delivery person is "Cost of Item",
+            # and the difference is the rent profit/loss.
             transactions.append({
                 'date': sale.date_posted,
-                'source': ('Delivery Rent Variance (Company Profit)' if variance > 0 else 'Delivery Rent Variance (Company Loss)'),
+                'source': 'Rent',
                 'reference': sale_ref,
                 'client': sale.client_name,
                 '_client_norm': _norm_text(sale.client_name),
                 '_ref_variants': _bill_ref_variants(sale_ref),
-                'material': 'Delivery Rent Difference',
-                'qty': 0.0,
+                'material': 'Rent',
+                'qty': rent_qty,
                 'sale_rate': 0.0,
                 'cost_rate': 0.0,
-                'discount_loss': (abs(variance) if variance < 0 else 0.0),
-                'revenue': 0.0,
-                'cogs': 0.0,
+                'discount_loss': rent_discount_share,
+                'revenue': rent_revenue_net,
+                'cogs': rent_cost,
                 'profit': variance,
                 'is_loss': variance < 0,
-                'cogs_known': True
+                'cogs_known': True,
             })
 
         waive_q = db.session.query(
@@ -739,6 +757,8 @@ def profit_reports():
         'cogs': 'Known COGS Rows',
         'net_profit': 'Net Profit/Loss Rows',
         'unknown_cost': 'Unknown Cost Rows',
+        'profit': 'Profit Entries',
+        'loss': 'Loss Entries',
     }
     metric_help_map = {
         'revenue': 'Shows rows where revenue > 0 from Booking and Direct Sale items.',
@@ -746,6 +766,8 @@ def profit_reports():
         'cogs': 'Shows rows with known material cost used in Estimated COGS.',
         'net_profit': 'Shows rows that contribute to net profit/loss where cost is known (profit = revenue - cogs).',
         'unknown_cost': 'Shows rows with unknown cost (N/A cost), excluded from net profit known-cost calculation.',
+        'profit': 'Every sale that earned more than it cost (profitable entries).',
+        'loss': 'Every sale that cost more than it earned (loss-making entries).',
     }
     metric_filter_map = {
         'revenue': lambda t: float(t.get('revenue') or 0) > 0,
@@ -753,6 +775,8 @@ def profit_reports():
         'cogs': lambda t: bool(t.get('cogs_known')) and float(t.get('cogs') or 0) > 0,
         'net_profit': lambda t: bool(t.get('cogs_known')),
         'unknown_cost': lambda t: not bool(t.get('cogs_known')),
+        'profit': lambda t: bool(t.get('cogs_known')) and float(t.get('profit') or 0) > 0,
+        'loss': lambda t: bool(t.get('cogs_known')) and float(t.get('profit') or 0) < 0,
     }
 
     entries_transactions = transactions
@@ -769,6 +793,14 @@ def profit_reports():
     known_cost_revenue = sum(float(t.get('revenue') or 0) for t in transactions if t.get('cogs_known'))
     unknown_cost_revenue = max(0.0, total_revenue - known_cost_revenue)
     total_profit = sum(float(t.get('profit') or 0) for t in transactions if t.get('cogs_known'))
+    total_profit_sum = sum(float(t.get('profit') or 0) for t in transactions
+                           if t.get('cogs_known') and float(t.get('profit') or 0) > 0)
+    total_loss_sum = -sum(float(t.get('profit') or 0) for t in transactions
+                          if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
+    profit_entry_count = sum(1 for t in transactions
+                             if t.get('cogs_known') and float(t.get('profit') or 0) > 0)
+    loss_entry_count = sum(1 for t in transactions
+                           if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
     unknown_cost_rows = sum(1 for t in transactions if not t.get('cogs_known'))
     profit_rows = sum(1 for t in transactions if t.get('cogs_known') and float(t.get('profit') or 0) >= 0)
     loss_rows = sum(1 for t in transactions if t.get('cogs_known') and float(t.get('profit') or 0) < 0)
@@ -1164,6 +1196,32 @@ def profit_reports():
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     materials = list(Material.query.order_by(Material.name.asc()).all()) + list(Service.query.order_by(Service.name.asc()).all())
 
+    # -------------------- Simple "owner view" summaries --------------------
+    # These feed the plain-language Profit Summary page.  Internal rows that
+    # are not real customers/products (reconciliation entries, rent variances,
+    # unlabelled rows) are filtered out so the owner only sees real trade.
+    _INTERNAL_CLIENTS = {'-', 'Account Reconciliation', 'Account', 'Delivery Rent Waive-Off'}
+    _INTERNAL_MATERIALS = {'-', 'Account Reconciliation', 'Delivery Rent Difference', 'Delivery Rent Waive-Off'}
+
+    def _clean_name(row, key):
+        return (row.get(key) or '').strip()
+
+    def _top(rows, key, internal, limit=10):
+        out = []
+        for row in rows:
+            name = _clean_name(row, key)
+            if not name or name in internal:
+                continue
+            if float(row.get('sold_revenue', 0) or 0) <= 0:
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
+    top_clients = _top(client_summary, 'client', _INTERNAL_CLIENTS)
+    top_items = _top(material_summary, 'material', _INTERNAL_MATERIALS)
+
     return render_template(
         template_name,
         transactions=(entries_transactions if view_mode == 'entries' else transactions),
@@ -1179,6 +1237,10 @@ def profit_reports():
         total_discount_loss=total_discount_loss,
         total_cogs=total_cogs,
         total_profit=total_profit,
+        total_profit_sum=total_profit_sum,
+        total_loss_sum=total_loss_sum,
+        profit_entry_count=profit_entry_count,
+        loss_entry_count=loss_entry_count,
         margin_pct=margin_pct,
         markup_pct=markup_pct,
         profit_rows=profit_rows,
@@ -1211,6 +1273,8 @@ def profit_reports():
         entry_metric=entry_metric,
         entry_metric_label=entry_metric_label,
         entry_metric_help=entry_metric_help,
-        grn_sales_summary=grn_sales_summary
+        grn_sales_summary=grn_sales_summary,
+        top_clients=top_clients,
+        top_items=top_items
     )
 
