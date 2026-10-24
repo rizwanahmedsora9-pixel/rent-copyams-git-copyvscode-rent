@@ -248,6 +248,18 @@ ENDPOINT_PERMISSION_MAP = {
     'toggle_material_category': 'can_manage_materials',
     'delete_material': 'can_manage_materials',
     'activate_all_materials': 'can_manage_materials',
+    # Services & Charges is the charge half of the same master file.  These
+    # routes had no permission mapping at all, so a standard user whose
+    # can_manage_materials is False could still add, rename (which cascades
+    # into historical sales / bookings / entries), merge and delete services
+    # while every material route correctly refused.  Gate them identically.
+    'services': 'can_manage_materials',
+    'add_service': 'can_manage_materials',
+    'edit_service': 'can_manage_materials',
+    'toggle_service': 'can_manage_materials',
+    'delete_service': 'can_manage_materials',
+    'merge_services': 'can_manage_materials',
+    'migrate_rent_to_services': 'can_manage_materials',
     'pending_bills': 'can_manage_pending_bills',
     'add_pending_bill': 'can_manage_pending_bills',
     'edit_pending_bill': 'can_manage_pending_bills',
@@ -259,6 +271,9 @@ ENDPOINT_PERMISSION_MAP = {
     'export_unpaid_transactions': 'can_view_reports',
     'financial_details': 'can_view_reports',
     'profit_reports': 'can_view_reports',
+    # The client 360 summary exposes a client's dues and payment history as
+    # JSON; the same data is gated on the ledger page, so gate it here too.
+    'api_client_financial_summary': 'can_view_client_ledger',
     'mixed_transactions': 'can_view_reports',
     'notifications_page': 'can_manage_notifications',
     'notifications_upcoming': 'can_manage_notifications',
@@ -319,6 +334,11 @@ ENDPOINT_PERMISSION_MAP = {
     'cash_flow_entry_json': 'can_view_cash_flow',
     'cash_flow_differences': 'can_view_cash_flow',
     'cash_flow_reconciliation_detail': 'can_view_cash_flow',
+    # Cash-day board + financial tracker live in the reports blueprint, so the
+    # cash_flow map entries above never covered them.  daily_reconciliation is
+    # not read-only: it saves counted balances and locks/unlocks a cash day.
+    'daily_reconciliation': 'can_view_cash_flow',
+    'financial_tracker': 'can_view_cash_flow',
     'current_payables_api': 'can_view_cash_flow',
     'current_payable_detail_api': 'can_view_cash_flow',
 

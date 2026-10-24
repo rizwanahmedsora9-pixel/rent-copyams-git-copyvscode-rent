@@ -69,8 +69,24 @@ def scalar(con: sqlite3.Connection, sql: str, params=(), default=0):
 
 
 def check_account_balances(con: sqlite3.Connection) -> dict:
-    """Compare stored Account.balance against AccountTransaction ledger sums."""
-    accounts = rows(con, "SELECT id, name, balance FROM account")
+    """Compare stored Account.balance with the reproducible ledger balance.
+
+    The authoritative formula (``payments_crud.ledger_balance``) is::
+
+        balance = opening_balance + incoming - outgoing
+
+    Comparing the stored balance against the raw transaction net alone flags
+    every account opened with an opening balance as "broken" — a fresh Main
+    Cash account with a 200,000 opening and 40,000 of net movement was
+    reported as a 200,000 mismatch even though the ledger agreed with the
+    screen.  Read the stored opening baseline (minor units first, exactly as
+    the service does) and only fall back to inference for legacy rows that
+    never had one.
+    """
+    accounts = rows(
+        con,
+        "SELECT id, name, balance, opening_balance, opening_balance_minor FROM account",
+    )
     tx_sums = {
         r["aid"]: r["net"]
         for r in rows(
@@ -102,13 +118,23 @@ def check_account_balances(con: sqlite3.Connection) -> dict:
     for acc in accounts:
         aid = acc["id"]
         stored = float(acc["balance"] or 0)
-        expected = float(ledger.get(aid, 0.0))
+        movement = float(ledger.get(aid, 0.0))
+        if acc.get("opening_balance_minor") is not None:
+            opening = float(acc["opening_balance_minor"]) / 100.0
+        elif acc.get("opening_balance") is not None:
+            opening = float(acc["opening_balance"] or 0)
+        else:
+            # Legacy row without an opening baseline: the documented inference
+            # is whatever makes the stored balance agree with its own ledger.
+            opening = stored - movement
+        expected = opening + movement
         diff = abs(stored - expected)
         if diff > TOLERANCE:
             mismatches.append({
                 "account_id": aid,
                 "name": acc["name"],
                 "stored_balance": round(stored, 2),
+                "opening_balance": round(opening, 2),
                 "ledger_balance": round(expected, 2),
                 "difference": round(stored - expected, 2),
             })
@@ -400,7 +426,9 @@ def print_report(report: dict) -> None:
                 print(f"    MISMATCHES ({len(chk['mismatches'])}):")
                 for m in chk["mismatches"][:10]:
                     print(f"      • {m['name']} (id={m['account_id']}): "
-                          f"stored={m['stored_balance']:,.2f}  ledger={m['ledger_balance']:,.2f}  "
+                          f"stored={m['stored_balance']:,.2f}  "
+                          f"opening={m['opening_balance']:,.2f}  "
+                          f"ledger(closing)={m['ledger_balance']:,.2f}  "
                           f"diff={m['difference']:+,.2f}")
 
         elif chk["check"] == "material_totals":

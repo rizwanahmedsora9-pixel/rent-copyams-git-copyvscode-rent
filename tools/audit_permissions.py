@@ -65,9 +65,15 @@ with app.app_context():
              if k not in {e for eps in by_view.values() for e in eps['endpoints']}
              and k not in {e.rsplit('.', 1)[-1] for eps in by_view.values() for e in eps['endpoints']}]
 
+    # Guards can also be shared helpers/decorators.  A view that delegates to
+    # one of these is protected just as surely as one that checks the role
+    # inline, yet the first version of this audit reported them as gaps and
+    # buried the real finding (the unprotected Services master).
     CHECK_PATTERNS = re.compile(
         r'_user_can\(|current_user\.role|abort\(403|require_root\(|'
-        r'role\s*==\s*[\'"]admin|role\s+not\s+in|getattr\(current_user,\s*[\'"]role'
+        r'role\s*==\s*[\'\"]admin|role\s+not\s+in|getattr\(current_user,\s*[\'\"]role|'
+        r'guard\(\)|_require_admin_root\(|_profit_permission|'
+        r'_deny_account_master_mutation\('
     )
     ROOT_PATTERN = re.compile(r'require_root\(')
 

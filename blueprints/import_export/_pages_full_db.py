@@ -291,6 +291,12 @@ def full_db_import():
 @import_export_bp.route("/full_db_import_report/<report_name>", methods=["GET"])
 @login_required
 def full_db_import_report(report_name):
+    # The report describes a full database import (table names + row counts)
+    # and its two sibling routes are admin/root only.  Without the same guard
+    # any signed-in LAN user could download it by guessing the filename.
+    err = _require_admin_root()
+    if err:
+        return err
     safe = Path(report_name).name
     if safe != report_name or not safe.endswith(".json"):
         return "Bad report name", 400

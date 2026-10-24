@@ -77,10 +77,21 @@ def scalar(con: sqlite3.Connection, sql: str, default=0):
 
 
 def rows(con: sqlite3.Connection, sql: str):
+    """Run a read-only query, tolerating only a legacy (older) schema.
+
+    The first version swallowed *every* SQLite error and returned ``[]``, so a
+    malformed watch query silently reported "no drift" — the worst possible
+    answer from a safety tool.  A missing table/column on an older database is
+    still a legitimate "this check does not apply"; everything else must
+    surface as a real error (the caller exits 2).
+    """
     try:
         return [dict(r) for r in con.execute(sql).fetchall()]
-    except sqlite3.Error:
-        return []
+    except sqlite3.OperationalError as exc:
+        message = str(exc).lower()
+        if "no such table" in message or "no such column" in message:
+            return []
+        raise
 
 
 def table_exists(con: sqlite3.Connection, name: str) -> bool:
@@ -193,14 +204,27 @@ def run_checks(con: sqlite3.Connection) -> dict:
                       "lookup by name may post to the wrong ledger"})
 
     # ---- w2: duplicate active manual bill numbers ---------------------------
+    # A booking's due is stored as a pending bill that deliberately carries the
+    # booking's own bill number (_sync_booking_pending_bill).  Counting that
+    # mirror as a duplicate made every normal booking-with-a-due appear on the
+    # watch list, which trains operators to ignore the list.  Only count a
+    # pending bill when no active booking/sale owns that same bill reference.
     n = scalar(con, "SELECT COUNT(*) FROM (SELECT b FROM ("
                     "SELECT UPPER(TRIM(manual_bill_no)) AS b FROM direct_sale "
                     "WHERE COALESCE(is_void,0)=0 AND TRIM(COALESCE(manual_bill_no,''))<>'' "
                     "UNION ALL SELECT UPPER(TRIM(manual_bill_no)) FROM booking "
                     "WHERE COALESCE(is_void,0)=0 AND TRIM(COALESCE(manual_bill_no,''))<>'' "
-                    "UNION ALL SELECT UPPER(TRIM(bill_no)) FROM pending_bill "
-                    "WHERE COALESCE(is_void,0)=0 AND TRIM(COALESCE(bill_no,''))<>'') "
-                    "GROUP BY b HAVING COUNT(*) > 1)")
+                    "UNION ALL SELECT UPPER(TRIM(pb.bill_no)) FROM pending_bill pb "
+                    "WHERE COALESCE(pb.is_void,0)=0 AND TRIM(COALESCE(pb.bill_no,''))<>'' "
+                    "  AND NOT EXISTS (SELECT 1 FROM booking bk "
+                    "    WHERE COALESCE(bk.is_void,0)=0 AND ("
+                    "      UPPER(TRIM(COALESCE(bk.manual_bill_no,''))) = UPPER(TRIM(pb.bill_no)) "
+                    "      OR UPPER(TRIM(COALESCE(bk.auto_bill_no,''))) = UPPER(TRIM(pb.bill_no)))) "
+                    "  AND NOT EXISTS (SELECT 1 FROM direct_sale ds "
+                    "    WHERE COALESCE(ds.is_void,0)=0 AND ("
+                    "      UPPER(TRIM(COALESCE(ds.manual_bill_no,''))) = UPPER(TRIM(pb.bill_no)) "
+                    "      OR UPPER(TRIM(COALESCE(ds.auto_bill_no,''))) = UPPER(TRIM(pb.bill_no))))"
+                    ") GROUP BY b HAVING COUNT(*) > 1)")
     if n:
         watch.append({"id": "w2_duplicate_manual_bills",
                       "message": f"{n} manual bill number(s) used more than once across "
@@ -247,17 +271,32 @@ def run_checks(con: sqlite3.Connection) -> dict:
                       "message": f"{n} booking(s) with no pending bill"})
 
     # ---- w7: account ledger drift ---------------------------------------------
-    drift = rows(con, "SELECT a.id, a.name, a.balance AS stored, "
-                      "ROUND((SELECT COALESCE(SUM(CASE WHEN t.to_account_id=a.id THEN t.amount ELSE 0 END),0) "
-                      "     - COALESCE(SUM(CASE WHEN t.from_account_id=a.id THEN t.amount ELSE 0 END),0) "
-                      "FROM account_transaction t WHERE COALESCE(t.is_void,0)=0),2) AS ledger "
-                      "FROM account a "
-                      "WHERE ABS(a.balance - (SELECT COALESCE(SUM(CASE WHEN t.to_account_id=a.id THEN t.amount ELSE 0 END),0) "
-                      "     - COALESCE(SUM(CASE WHEN t.from_account_id=a.id THEN t.amount ELSE 0 END),0) "
-                      "FROM account_transaction t WHERE COALESCE(t.is_void,0)=0)) > 0.01")
+    # The authoritative balance is ``opening_balance + incoming - outgoing``
+    # (see payments_crud.ledger_balance).  Comparing the stored balance with
+    # the raw transaction net alone reported every account opened with an
+    # opening balance as drifting — a healthy Main Cash account with a
+    # 200,000 opening failed this watch on every run.
+    drift = rows(con,
+                 "WITH mv AS ("
+                 "  SELECT a.id AS aid,"
+                 "         COALESCE(SUM(CASE WHEN t.to_account_id = a.id THEN t.amount ELSE 0 END), 0)"
+                 "       - COALESCE(SUM(CASE WHEN t.from_account_id = a.id THEN t.amount ELSE 0 END), 0) AS net"
+                 "  FROM account a"
+                 "  LEFT JOIN account_transaction t"
+                 "    ON (t.to_account_id = a.id OR t.from_account_id = a.id)"
+                 "   AND COALESCE(t.is_void, 0) = 0"
+                 "  GROUP BY a.id"
+                 ") "
+                 "SELECT a.id, a.name, a.balance AS stored, ROUND(mv.net, 2) AS ledger,"
+                 "       ROUND(COALESCE(a.opening_balance_minor / 100.0, a.opening_balance,"
+                 "                     a.balance - mv.net), 2) AS opening "
+                 "FROM account a JOIN mv ON mv.aid = a.id "
+                 "WHERE ABS(a.balance - ("
+                 "      COALESCE(a.opening_balance_minor / 100.0, a.opening_balance, a.balance - mv.net)"
+                 "      + mv.net)) > 0.01")
     if drift:
         watch.append({"id": "w7_account_ledger_drift",
-                      "message": f"{len(drift)} account(s) where balance != transaction net",
+                      "message": f"{len(drift)} account(s) where balance != opening + transaction net",
                       "detail": drift[:10]})
 
     # ---- w8: material ledger drift ---------------------------------------------

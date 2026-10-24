@@ -426,7 +426,16 @@ def receipts():
         GRN.paid_amount > 0
     ).order_by(GRN.date_posted.desc()).all()
 
+    # The receipt line must show what the GRN was actually worth.  Summing only
+    # the landed-cost columns (loading / freight / other / adjustment) ignored
+    # every received material line, so an ordinary purchase of 100 bags showed
+    # "Total Rs. 0.00" while its paid amount was 50,000.  Use the same
+    # authoritative total as the GRN page, ledger and printed bill.
+    from app.services.grn_svc import calculate_grn_total
+    grn_totals = {grn.id: calculate_grn_total(grn) for grn in grns}
+
     return render_template('accounts/receipts.html', sales=sales, grns=grns,
+                           grn_totals=grn_totals,
                            date_from=date_from, date_to=date_to_excl - timedelta(days=1))
 
 

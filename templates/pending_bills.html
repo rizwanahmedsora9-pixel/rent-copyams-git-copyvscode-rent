@@ -145,7 +145,7 @@
                     </td>
                     <td class="text-white-50 small">{{ bill.reason or '---' }}</td>
                     <td class="text-white-50 small"><span class="small text-white-50" title="{{ bill.note or '' }}">{{ bill.note or '—' }}</span></td>
-                    <td class="text-danger fw-bold">{{ "%.2f"|format(bill.amount or 0) }}</td>
+                    <td class="text-danger fw-bold">Rs. {{ "{:,.2f}".format(bill.amount or 0) }}</td>
                     <td>
                         {% if not client or client.category == 'Walking-Customer' or client.category == 'Cash' or client.category == 'Open Khata' %}
                         <div class="form-check form-switch">
