@@ -50,16 +50,46 @@
         color: #eab308 !important;
     }
 
-    /* ---------- GRN stock-consumption indicator ---------- */
-    .grn-item-consume + .grn-item-consume { margin-top: .45rem; padding-top: .45rem; border-top: 1px dashed var(--ui-border, #334155); }
-    .grn-consume-head { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: baseline; margin-bottom: .2rem; }
-    .grn-consume-name { font-weight: 700; color: var(--ui-text, #e2e8f0); }
-    .grn-consume-meta { font-size: .72rem; color: var(--ui-text-muted, #94a3b8); }
-    .grn-consume-meta b { color: var(--ui-text, #e2e8f0); font-variant-numeric: tabular-nums; }
-    .grn-consume { display: flex; align-items: center; gap: .5rem; min-width: 220px; }
-    .grn-consume-track { position: relative; flex: 1 1 auto; height: 10px; min-width: 90px; border-radius: 999px; background: var(--ui-surface-2, #0f1730); border: 1px solid var(--ui-border, #334155); overflow: hidden; }
-    .grn-consume-fill { height: 100%; width: 0; border-radius: 999px; background: #10b981; transition: width .45s ease, background-color .45s ease; }
-    .grn-consume-pct { flex: 0 0 auto; min-width: 46px; text-align: right; font-size: .78rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    /* ==================================================================
+       GRN screen — consumption indicator, records toolbar, row actions
+       ------------------------------------------------------------------
+       Layout only.  Every number on this page comes from the server
+       projection in app/services/grn_consumption.py; CSS never changes a
+       quantity, a percentage or a colour band.
+       ================================================================== */
+    .grn-page {
+        --grn-bar-h: 11px;
+        --grn-radius: 10px;
+    }
+
+    /* ---------- shared bar (per lot + per GRN) ---------- */
+    .grn-consume { display: flex; align-items: center; gap: .55rem; }
+    .grn-consume-track {
+        position: relative;
+        flex: 1 1 auto;
+        height: var(--grn-bar-h);
+        min-width: 70px;
+        border-radius: 999px;
+        background: var(--ui-surface-2, #0f1730);
+        border: 1px solid var(--ui-border, #334155);
+        overflow: hidden;
+    }
+    .grn-consume-fill {
+        height: 100%;
+        width: 0;
+        border-radius: 999px;
+        background: #10b981;
+        transition: width .45s ease, background-color .45s ease;
+    }
+    .grn-consume-pct {
+        flex: 0 0 auto;
+        min-width: 52px;
+        text-align: right;
+        font-size: .8rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        color: var(--ui-text, #e2e8f0);
+    }
     .grn-consume.level-low .grn-consume-pct { color: #34d399; }
     .grn-consume.level-moderate .grn-consume-pct { color: #a3e635; }
     .grn-consume.level-high .grn-consume-pct { color: #fbbf24; }
@@ -70,23 +100,234 @@
     .grn-consume-fill.level-high { background: linear-gradient(90deg, #b45309, #fbbf24); }
     .grn-consume-fill.level-critical { background: linear-gradient(90deg, #c2410c, #fb923c); }
     .grn-consume-fill.level-complete { background: linear-gradient(90deg, #991b1b, #ef4444); }
-    .grn-consume-status { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .05rem .4rem; border: 1px solid var(--ui-border-strong, #334155); color: var(--ui-text-muted, #94a3b8); }
-    .grn-consume-status.is-recorded { border-color: #10b981; color: #059669; }
-    .grn-consume-status.is-reconstructed { border-color: #0ea5e9; color: #0284c7; }
-    .grn-consume-summary { min-width: 190px; }
-    /* Light theme keeps the same five bands but with ink-dark label colours. */
+
+    /* ---------- one lot inside the Items column ---------- */
+    .grn-lot-list { display: flex; flex-direction: column; gap: .5rem; min-width: 330px; }
+    .grn-item-consume {
+        padding: .5rem .6rem;
+        border: 1px solid var(--ui-border, #334155);
+        border-radius: var(--grn-radius);
+        background: var(--ui-surface, #161e33);
+    }
+    .grn-consume-head { display: flex; flex-wrap: wrap; gap: .15rem .55rem; align-items: baseline; }
+    .grn-consume-name { font-weight: 700; color: var(--ui-text, #e2e8f0); }
+    .grn-consume-meta { font-size: .72rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-consume-meta b { color: var(--ui-text, #e2e8f0); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .grn-lot-figures {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .15rem .85rem;
+        margin: .3rem 0 .45rem;
+        font-size: .72rem;
+        color: var(--ui-text-muted, #94a3b8);
+    }
+    .grn-lot-figures b { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    .grn-lot-figures .fig-consumed b { color: #fb923c; }
+    .grn-lot-figures .fig-remaining b { color: #34d399; }
+    .grn-consume-status {
+        font-size: .63rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        border-radius: 999px;
+        padding: .08rem .45rem;
+        border: 1px solid var(--ui-border-strong, #334155);
+        color: var(--ui-text-muted, #94a3b8);
+    }
+    .grn-consume-status.is-recorded { border-color: #10b981; color: #34d399; }
+    .grn-consume-status.is-reconstructed { border-color: #0ea5e9; color: #38bdf8; }
+
+    /* ---------- the overall (per-GRN) meter gets its own column ---------- */
+    .grn-overall { display: flex; flex-direction: column; gap: .32rem; min-width: 220px; max-width: 300px; }
+    .grn-overall .grn-consume-track { height: 14px; }
+    .grn-overall .grn-consume-pct { min-width: 58px; font-size: 1rem; }
+    .grn-overall-figures { display: flex; flex-wrap: wrap; gap: .15rem .75rem; font-size: .71rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overall-figures b { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    .grn-overall-value { font-size: .71rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overall-value b { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+
+    /* ---------- whole-screen overall meter ---------- */
+    .grn-overview {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(240px, 330px);
+        gap: 1rem 1.5rem;
+        align-items: center;
+        padding: .95rem 1.1rem;
+        margin-bottom: 1rem;
+        border: 1px solid var(--ui-border, #334155);
+        border-radius: var(--ui-radius-lg, 16px);
+        background: linear-gradient(135deg, var(--ui-surface-3, #1d2647), var(--ui-surface-2, #0f1730));
+    }
+    /* min-width: 0 keeps a long material/value string from blowing the grid out. */
+    .grn-overview-main { min-width: 0; }
+    .grn-overview-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .6rem; }
+    .grn-overview-title {
+        font-size: .74rem;
+        font-weight: 800;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: var(--ui-text, #e2e8f0);
+    }
+    .grn-overview-scope { font-size: .71rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overview-read { display: flex; align-items: baseline; gap: .5rem; margin: .3rem 0 .55rem; }
+    .grn-overview-pct { font-size: 1.9rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: #34d399; }
+    .grn-overview-caption { font-size: .74rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overview-bar {
+        position: relative;
+        height: 18px;
+        border-radius: 999px;
+        background: var(--ui-surface-2, #0f1730);
+        border: 1px solid var(--ui-border-strong, #334155);
+        overflow: hidden;
+    }
+    .grn-overview-fill {
+        height: 100%;
+        width: 0;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #047857, #10b981);
+        transition: width .5s ease, background .5s ease;
+    }
+    .grn-overview-legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; margin-top: .55rem; font-size: .73rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overview-legend b { color: var(--ui-text, #e2e8f0); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .grn-overview-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin: 0; }
+    .grn-overview-stat {
+        display: flex;
+        flex-direction: column;
+        gap: .1rem;
+        padding: .45rem .6rem;
+        border: 1px solid var(--ui-border, #334155);
+        border-radius: var(--grn-radius);
+        background: var(--ui-surface, #161e33);
+    }
+    .grn-overview-stat .stat-label { font-size: .64rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ui-text-muted, #94a3b8); }
+    .grn-overview-stat .stat-value { font-size: .95rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    .grn-overview.level-moderate .grn-overview-pct { color: #a3e635; }
+    .grn-overview.level-high .grn-overview-pct { color: #fbbf24; }
+    .grn-overview.level-critical .grn-overview-pct { color: #fb923c; }
+    .grn-overview.level-complete .grn-overview-pct { color: #f87171; }
+    .grn-overview.level-moderate .grn-overview-fill { background: linear-gradient(90deg, #65a30d, #a3e635); }
+    .grn-overview.level-high .grn-overview-fill { background: linear-gradient(90deg, #b45309, #fbbf24); }
+    .grn-overview.level-critical .grn-overview-fill { background: linear-gradient(90deg, #c2410c, #fb923c); }
+    .grn-overview.level-complete .grn-overview-fill { background: linear-gradient(90deg, #991b1b, #ef4444); }
+
+    /* ---------- records toolbar ---------- */
+    .grn-records-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem .9rem; }
+    .grn-records-title { display: inline-flex; align-items: center; gap: .5rem; font-weight: 700; }
+    .grn-count-pill {
+        font-size: .68rem;
+        font-weight: 700;
+        padding: .1rem .5rem;
+        border-radius: 999px;
+        background: var(--ui-surface-3, #1d2647);
+        border: 1px solid var(--ui-border-strong, #334155);
+        color: var(--ui-text-muted, #94a3b8);
+        font-variant-numeric: tabular-nums;
+    }
+    .grn-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+    .grn-toolbar .form-control { min-width: 0; }
+    .grn-toolbar-field { width: 158px; }
+    .grn-toolbar-search { width: 210px; }
+    .grn-toolbar-group { display: flex; align-items: center; gap: .35rem; }
+    .grn-toolbar-sep { align-self: stretch; width: 1px; margin: 0 .1rem; background: var(--ui-border-strong, #334155); }
+    .grn-toolbar .btn { white-space: nowrap; }
+
+    /* ---------- table ---------- */
+    .grn-table { margin-bottom: 0; }
+    .grn-table > thead > tr > th {
+        font-size: .72rem;
+        font-weight: 700;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: var(--ui-text-muted, #94a3b8);
+    }
+    .grn-table > tbody > tr > td { vertical-align: middle; }
+    .grn-sort-link { color: var(--ui-text-muted, #94a3b8); text-decoration: none; }
+    .grn-sort-link:hover { color: var(--ui-text, #e2e8f0); text-decoration: underline; }
+    .grn-sort-link.is-active { color: var(--accent, #fbbf24); }
+    .grn-th-sub {
+        display: block;
+        font-size: .62rem;
+        font-weight: 600;
+        letter-spacing: .02em;
+        text-transform: none;
+        opacity: .8;
+    }
+    .grn-th-star, .grn-td-star { width: 42px; text-align: center; }
+    .grn-col-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .grn-qty { font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    .grn-qty-label { display: block; font-size: .64rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ui-text-muted, #94a3b8); }
+    .grn-supplier { font-weight: 600; }
+
+    /* ---------- row actions: one tidy, uniform button strip ---------- */
+    .grn-actions-cell { white-space: nowrap; }
+    .grn-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: nowrap; }
+    /* Higher specificity than the global .btn rules in theme.css, which force a
+       32px min-height and generous padding on every .btn-sm. */
+    .grn-page .grn-row-actions .btn {
+        width: 34px;
+        height: 34px;
+        min-width: 34px;
+        min-height: 34px !important;
+        padding: 0 !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        border-radius: 8px;
+        font-size: .9rem;
+    }
+    .grn-action-form { display: inline-flex; margin: 0; }
+
+    /* ---------- row highlight (the star column) must survive the cards ---------- */
+    .entry-highlighted .grn-item-consume,
+    .entry-highlighted .grn-overall {
+        background: rgba(234, 179, 8, 0.12);
+        border-color: rgba(234, 179, 8, 0.5);
+    }
+    html[data-theme="light"] .entry-highlighted .grn-item-consume,
+    html[data-theme="light"] .entry-highlighted .grn-overall {
+        background: rgba(234, 179, 8, 0.16);
+    }
+
+    /* ---------- refresh affordance ---------- */
+    .grn-refresh-spin { display: inline-block; animation: spin .8s linear infinite; }
+
+    /* ---------- light theme: same five bands, ink-dark labels ---------- */
     html[data-theme="light"] .grn-consume.level-low .grn-consume-pct { color: #047857; }
     html[data-theme="light"] .grn-consume.level-moderate .grn-consume-pct { color: #4d7c0f; }
     html[data-theme="light"] .grn-consume.level-high .grn-consume-pct { color: #b45309; }
     html[data-theme="light"] .grn-consume.level-critical .grn-consume-pct { color: #c2410c; }
     html[data-theme="light"] .grn-consume.level-complete .grn-consume-pct { color: #b91c1c; }
-    .grn-consume-spinning { animation: spin .8s linear infinite; }
+    html[data-theme="light"] .grn-overview.level-low .grn-overview-pct { color: #047857; }
+    html[data-theme="light"] .grn-overview.level-moderate .grn-overview-pct { color: #4d7c0f; }
+    html[data-theme="light"] .grn-overview.level-high .grn-overview-pct { color: #b45309; }
+    html[data-theme="light"] .grn-overview.level-critical .grn-overview-pct { color: #c2410c; }
+    html[data-theme="light"] .grn-overview.level-complete .grn-overview-pct { color: #b91c1c; }
+    html[data-theme="light"] .grn-consume-status.is-recorded { color: #047857; }
+    html[data-theme="light"] .grn-consume-status.is-reconstructed { color: #0369a1; }
+    html[data-theme="light"] .grn-lot-figures .fig-consumed b { color: #c2410c; }
+    html[data-theme="light"] .grn-lot-figures .fig-remaining b { color: #047857; }
+
+    @media (max-width: 1199.98px) {
+        .grn-lot-list { min-width: 300px; }
+    }
+    @media (max-width: 991.98px) {
+        .grn-overview { grid-template-columns: minmax(0, 1fr); }
+        .grn-toolbar-field, .grn-toolbar-search { width: 100%; }
+        .grn-toolbar-group { flex: 1 1 100%; }
+        .grn-toolbar-sep { display: none; }
+    }
     @media (max-width: 767.98px) {
-        .grn-consume { min-width: 150px; }
-        .grn-consume-pct { min-width: 40px; font-size: .72rem; }
+        .grn-lot-list { min-width: 265px; }
+        .grn-overall { min-width: 180px; max-width: 230px; }
+        .grn-consume-pct { min-width: 46px; font-size: .74rem; }
+        .grn-overview-stats { grid-template-columns: minmax(0, 1fr); }
+        /* Thumb-sized tap targets on phones. */
+        .grn-page .grn-row-actions .btn { width: 38px; height: 38px; min-width: 38px; min-height: 38px !important; }
     }
 </style>
-<div class="container-fluid">
+<div class="container-fluid grn-page">
     <div class="row mb-3">
 
         <div class="col-md-6">
@@ -494,31 +735,45 @@
 
     <div class="card">
 
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header grn-records-head">
 
-            <span>GRN Records</span>
+            <span class="grn-records-title">
+                GRN Records
+                <span class="grn-count-pill">{{ grns|length }} on screen</span>
+            </span>
 
-            <form action="{{ url_for('grn') }}" method="GET" class="d-flex gap-2 align-items-center">
+            <form action="{{ url_for('grn') }}" method="GET" class="grn-toolbar">
 
-                <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date or '' }}" title="Start Date">
+                <div class="grn-toolbar-group">
 
-                <span class="text-secondary">-</span>
+                    <label class="visually-hidden" for="grnStartDate">Start date</label>
+                    <input type="date" name="start_date" id="grnStartDate" class="form-control form-control-sm grn-toolbar-field" value="{{ start_date or '' }}" title="Start date">
 
-                <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date or '' }}" title="End Date">
+                    <span class="text-secondary" aria-hidden="true">&ndash;</span>
 
-                <input type="text" name="search" class="form-control form-control-sm" placeholder="Search Supplier or Bill..." value="{{ search or '' }}">
+                    <label class="visually-hidden" for="grnEndDate">End date</label>
+                    <input type="date" name="end_date" id="grnEndDate" class="form-control form-control-sm grn-toolbar-field" value="{{ end_date or '' }}" title="End date">
 
-                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i></button>
+                    <label class="visually-hidden" for="grnSearchBox">Search supplier or bill</label>
+                    <input type="text" name="search" id="grnSearchBox" class="form-control form-control-sm grn-toolbar-search" placeholder="Search supplier or bill..." value="{{ search or '' }}">
 
-                <a href="{{ url_for('export_grn', search=search, start_date=start_date, end_date=end_date) }}" class="btn btn-sm btn-success" title="Export Excel"><i class="bi bi-file-earmark-excel"></i></a>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> Filter</button>
 
-                <button type="button" class="btn btn-sm btn-outline-info" id="grnConsumptionRefresh" title="Recalculate the consumption bars from the stock ledger"><i class="bi bi-arrow-repeat"></i></button>
+                    {% if search or start_date or end_date %}
+                    <a href="{{ url_for('grn') }}" class="btn btn-sm btn-outline-secondary" title="Clear the filter"><i class="bi bi-x-lg"></i> Clear</a>
+                    {% endif %}
 
-                {% if search or start_date or end_date %}
+                </div>
 
-                <a href="{{ url_for('grn') }}" class="btn btn-sm btn-secondary" title="Clear Search"><i class="bi bi-x-lg"></i></a>
+                <span class="grn-toolbar-sep" aria-hidden="true"></span>
 
-                {% endif %}
+                <div class="grn-toolbar-group">
+
+                    <a href="{{ url_for('export_grn', search=search, start_date=start_date, end_date=end_date) }}" class="btn btn-sm btn-outline-success" title="Export these GRNs to Excel"><i class="bi bi-file-earmark-excel"></i> Excel</a>
+
+                    <button type="button" class="btn btn-sm btn-outline-info" id="grnConsumptionRefresh" title="Recalculate the consumption bars from the stock ledger"><i class="bi bi-arrow-repeat"></i> <span data-refresh-label>Recalculate</span></button>
+
+                </div>
 
             </form>
 
@@ -526,29 +781,76 @@
 
         <div class="card-body">
 
+            {% if grn_consumption and grn_consumption['items'] %}
+            {% set ov = namespace(received=0, consumed=0, remaining=0, lots=0, complete=0, replay=0) %}
+            {% for lot in grn_consumption['items'].values() %}
+                {% set ov.received = ov.received + (lot.received_value or 0) %}
+                {% set ov.consumed = ov.consumed + (lot.consumed_value or 0) %}
+                {% set ov.remaining = ov.remaining + (lot.remaining_value or 0) %}
+                {% set ov.lots = ov.lots + 1 %}
+                {% if lot.fully_consumed %}{% set ov.complete = ov.complete + 1 %}{% endif %}
+                {% if lot.status == 'reconstructed' %}{% set ov.replay = ov.replay + 1 %}{% endif %}
+            {% endfor %}
+            {% set ov_pct = ((ov.consumed / ov.received * 100) if ov.received else 0) %}
+            {% set ov_level = ('complete' if ov_pct >= 100 else ('critical' if ov_pct >= 75 else ('high' if ov_pct >= 50 else ('moderate' if ov_pct >= 25 else 'low')))) %}
+            <section class="grn-overview level-{{ ov_level }}" id="grnOverallMeter"
+                     data-received="{{ ov.received }}" data-consumed="{{ ov.consumed }}"
+                     aria-label="Overall stock consumption of the GRNs on this screen">
+                <div class="grn-overview-main">
+                    <div class="grn-overview-head">
+                        <span class="grn-overview-title">Overall consumption</span>
+                        <span class="grn-overview-scope">across the {{ grns|length }} GRNs on this screen &middot; valued at cost</span>
+                    </div>
+                    <div class="grn-overview-read">
+                        <span class="grn-overview-pct" data-overall-pct>{{ '{:,.1f}'.format(ov_pct) }}%</span>
+                        <span class="grn-overview-caption">of the stock these GRNs received has left the warehouse</span>
+                    </div>
+                    <div class="grn-overview-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                         aria-valuenow="{{ '{:,.1f}'.format(ov_pct) }}"
+                         aria-valuetext="{{ '{:,.1f}'.format(ov_pct) }}% of received stock value consumed"
+                         data-overall-bar>
+                        <div class="grn-overview-fill" data-overall-fill style="width: {{ '%.2f'|format(ov_pct) }}%;"></div>
+                    </div>
+                    <div class="grn-overview-legend">
+                        <span>Received <b data-overall-received>Rs {{ '{:,.0f}'.format(ov.received) }}</b></span>
+                        <span>Consumed <b data-overall-consumed>Rs {{ '{:,.0f}'.format(ov.consumed) }}</b></span>
+                        <span>Still in hand <b data-overall-remaining>Rs {{ '{:,.0f}'.format(ov.remaining) }}</b></span>
+                    </div>
+                </div>
+                <div class="grn-overview-stats">
+                    <div class="grn-overview-stat"><span class="stat-label">Lots on screen</span><span class="stat-value" data-overall-lots>{{ ov.lots }}</span></div>
+                    <div class="grn-overview-stat"><span class="stat-label">Fully consumed</span><span class="stat-value" data-overall-complete>{{ ov.complete }}</span></div>
+                    <div class="grn-overview-stat"><span class="stat-label">FIFO replay lots</span><span class="stat-value" data-overall-replay>{{ ov.replay }}</span></div>
+                    <div class="grn-overview-stat"><span class="stat-label">Stock value in hand</span><span class="stat-value" data-overall-value>Rs {{ '{:,.0f}'.format(ov.remaining) }}</span></div>
+                </div>
+            </section>
+            {% endif %}
+
             <div class="table-responsive">
 
-                <table class="table table-hover">
+                <table class="table table-hover grn-table">
 
                     <thead>
 
                         <tr>
 
-                            <th class="text-center" style="width: 42px;"><i class="bi bi-star text-warning" title="Click star to highlight line"></i></th>
+                            <th class="grn-th-star"><i class="bi bi-star text-warning" title="Click star to highlight line"></i></th>
 
                             <th>GRN #</th>
 
-                            <th><a href="{{ url_for('grn', sort='date', search=search, start_date=start_date, end_date=end_date) }}" class="text-decoration-none {{ 'text-warning' if sort == 'date' else 'text-dark' }}">Date &amp; Time <i class="bi bi-arrow-down-up small"></i></a></th>
+                            <th><a href="{{ url_for('grn', sort='date', search=search, start_date=start_date, end_date=end_date) }}" class="grn-sort-link {{ 'is-active' if sort == 'date' }}">Date &amp; Time <i class="bi bi-arrow-down-up small"></i></a></th>
 
-                            <th><a href="{{ url_for('grn', sort='supplier', search=search, start_date=start_date, end_date=end_date) }}" class="text-decoration-none {{ 'text-warning' if sort == 'supplier' else 'text-dark' }}">Supplier <i class="bi bi-arrow-down-up small"></i></a></th>
+                            <th><a href="{{ url_for('grn', sort='supplier', search=search, start_date=start_date, end_date=end_date) }}" class="grn-sort-link {{ 'is-active' if sort == 'supplier' }}">Supplier <i class="bi bi-arrow-down-up small"></i></a></th>
 
-                            <th>Items</th>
+                            <th>Items<span class="grn-th-sub">received / consumed / remaining per lot</span></th>
 
-                            <th>Total Qty</th>
+                            <th class="grn-col-num">Total Qty</th>
 
-                            <th>Discount</th>
+                            <th>Overall consumption<span class="grn-th-sub">all lots of this GRN together</span></th>
 
-                            <th>Actions</th>
+                            <th class="grn-col-num">Discount</th>
+
+                            <th class="text-end grn-actions-cell">Actions</th>
 
                         </tr>
 
@@ -558,9 +860,10 @@
 
                         {% for grn in grns %}
 
+                        {% set live_items = grn.items | rejectattr('is_void') | list %}
                         <tr>
 
-                            <td class="text-center" style="width: 42px;">
+                            <td class="grn-td-star">
                                 <span class="row-star-btn" data-row-id="grn-{{ grn.id }}" title="Highlight entry">
                                     <i class="bi bi-star"></i>
                                 </span>
@@ -579,30 +882,31 @@
                                 {% endif %}
                             </td>
 
-                            <td>{{ grn.supplier }}</td>
+                            <td class="grn-supplier">{{ grn.supplier }}</td>
 
-                            <td style="min-width: 300px;">
+                            <td>
                                 {% set grn_consumption_row = (grn_consumption['grns'].get(grn.id) if grn_consumption else None) %}
-                                {% for item in grn.items if not item.is_void %}
+                                <div class="grn-lot-list">
+                                {% for item in live_items %}
                                 {% set lot = (grn_consumption['items'].get(item.id) if grn_consumption else None) %}
                                 {% set received = lot.received_qty if lot else (item.qty or 0) %}
                                 {% set consumed = lot.consumed_qty if lot else 0 %}
                                 {% set remaining = lot.remaining_qty if lot else (item.qty or 0) %}
                                 {% set pct = lot.consumed_pct if lot else 0 %}
                                 {% set level = lot.level if lot else 'low' %}
-                                <div class="grn-item-consume">
+                                <div class="grn-item-consume" data-grn-scope>
                                     <div class="grn-consume-head">
                                         <span class="grn-consume-name">{{ item.mat_name }}</span>
-                                        {% if item.price_at_time %}<span class="grn-consume-meta">@ Rs. {{ '%.2f'|format(item.price_at_time) }}</span>{% endif %}
+                                        {% if item.price_at_time %}<span class="grn-consume-meta">@ Rs. {{ '{:,.2f}'.format(item.price_at_time) }}</span>{% endif %}
                                         {% if lot and lot.status in ['recorded', 'reconstructed'] %}
                                         <span class="grn-consume-status {{ 'is-recorded' if lot.status == 'recorded' else 'is-reconstructed' }}"
                                               title="{{ 'Consumed through posted FIFO allocations' if lot.status == 'recorded' else 'Consumed through the FIFO movement replay (no posted allocation for this lot)' }}">{{ lot.status }}</span>
                                         {% endif %}
                                     </div>
-                                    <div class="grn-consume-meta mb-1">
-                                        Received: <b data-grn-received>{{ '{:,.2f}'.format(received) }}</b>
-                                        &middot; Consumed: <b data-grn-consumed>{{ '{:,.2f}'.format(consumed) }}</b>
-                                        &middot; Remaining: <b data-grn-remaining>{{ '{:,.2f}'.format(remaining) }}</b>
+                                    <div class="grn-lot-figures">
+                                        <span class="fig-received">Received <b data-grn-received>{{ '{:,.2f}'.format(received) }}</b></span>
+                                        <span class="fig-consumed">Consumed <b data-grn-consumed>{{ '{:,.2f}'.format(consumed) }}</b></span>
+                                        <span class="fig-remaining">Remaining <b data-grn-remaining>{{ '{:,.2f}'.format(remaining) }}</b></span>
                                     </div>
                                     <div class="grn-consume level-{{ level }}" data-grn-consume data-grn-item-id="{{ item.id }}"
                                          data-received="{{ received }}" data-consumed="{{ consumed }}" data-percent="{{ pct }}">
@@ -614,46 +918,74 @@
                                         <span class="grn-consume-pct">{{ '{:,.1f}'.format(pct) }}%</span>
                                     </div>
                                 </div>
+                                {% else %}
+                                <span class="grn-consume-meta">No active lines</span>
                                 {% endfor %}
+                                </div>
+                            </td>
+                            <td class="grn-col-num">
+                                {% set total_qty = namespace(value=0) %}{% for item in live_items %}{% set total_qty.value = total_qty.value + (item.qty or 0) %}{% endfor %}
+                                <span class="grn-qty">{{ '{:,.2f}'.format(total_qty.value) }}</span>
+                                <span class="grn-qty-label">{{ live_items|length }} line{{ '' if live_items|length == 1 else 's' }}</span>
                             </td>
                             <td>
-                                {% set total_qty = namespace(value=0) %}{% for item in grn.items if not item.is_void %}{% set total_qty.value = total_qty.value + (item.qty or 0) %}{% endfor %}
-                                <div class="grn-consume-summary">
-                                    <div class="fw-bold">{{ '{:,.2f}'.format(total_qty.value) }}</div>
-                                    {% if grn_consumption_row %}
+                                {% if grn_consumption_row %}
+                                <div class="grn-overall" data-grn-scope>
                                     <div class="grn-consume level-{{ grn_consumption_row.level }}" data-grn-summary data-grn-id="{{ grn.id }}"
                                          data-received="{{ grn_consumption_row.received_qty }}" data-consumed="{{ grn_consumption_row.consumed_qty }}">
                                         <div class="grn-consume-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
-                                             aria-valuenow="{{ grn_consumption_row.consumed_pct }}" aria-valuetext="{{ grn_consumption_row.consumed_pct }}% consumed">
+                                             aria-valuenow="{{ grn_consumption_row.consumed_pct }}"
+                                             aria-valuetext="{{ grn_consumption_row.consumed_pct }}% of this GRN consumed"
+                                             title="{{ '{:,.2f}'.format(grn_consumption_row.consumed_qty) }} of {{ '{:,.2f}'.format(grn_consumption_row.received_qty) }} consumed">
                                             <div class="grn-consume-fill level-{{ grn_consumption_row.level }}" style="width: {{ grn_consumption_row.consumed_pct }}%;"></div>
                                         </div>
                                         <span class="grn-consume-pct">{{ '{:,.1f}'.format(grn_consumption_row.consumed_pct) }}%</span>
                                     </div>
-                                    <div class="grn-consume-meta">Remaining: <b>{{ '{:,.2f}'.format(grn_consumption_row.remaining_qty) }}</b></div>
-                                    {% endif %}
+                                    <div class="grn-overall-figures">
+                                        <span>Consumed <b data-grn-consumed>{{ '{:,.2f}'.format(grn_consumption_row.consumed_qty) }}</b></span>
+                                        <span>Left <b data-grn-remaining>{{ '{:,.2f}'.format(grn_consumption_row.remaining_qty) }}</b></span>
+                                    </div>
+                                    <div class="grn-overall-value">Stock in hand <b>Rs {{ '{:,.0f}'.format(grn_consumption_row.remaining_value or 0) }}</b></div>
                                 </div>
+                                {% else %}
+                                <span class="grn-consume-meta">&mdash;</span>
+                                {% endif %}
                             </td>
-                            <td>{{ "%.2f"|format(grn.discount or 0) }}</td>
+                            <td class="grn-col-num">{{ '{:,.2f}'.format(grn.discount or 0) }}</td>
 
-                            <td>
+                            <td class="grn-actions-cell">
 
-                                <a href="{{ url_for('view_bill', bill_no=grn.manual_bill_no or grn.auto_bill_no, src='grn', src_id=grn.id) }}" class="btn btn-sm btn-info" title="View"><i class="bi bi-eye"></i></a>
-                                <a href="{{ url_for('download_invoice', bill_no=grn.manual_bill_no or grn.auto_bill_no, src='grn', src_id=grn.id) }}" class="btn btn-sm btn-secondary" target="_blank" title="Print"><i class="bi bi-printer"></i></a>
-                                <a href="{{ url_for('edit_grn', id=grn.id) }}" class="btn btn-sm btn-warning" title="Edit"><i class="bi bi-pencil"></i></a>
+                                <div class="grn-row-actions">
 
-                                <form action="{{ url_for('grn') }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this GRN? This will reverse the stock addition.');">
+                                    <a href="{{ url_for('view_bill', bill_no=grn.manual_bill_no or grn.auto_bill_no, src='grn', src_id=grn.id) }}"
+                                       class="btn btn-sm btn-outline-info"
+                                       title="View this GRN" aria-label="View GRN {{ grn.manual_bill_no or grn.auto_bill_no or grn.id }}"><i class="bi bi-eye"></i></a>
 
-                                    <input type="hidden" name="action" value="delete">
+                                    <a href="{{ url_for('download_invoice', bill_no=grn.manual_bill_no or grn.auto_bill_no, src='grn', src_id=grn.id) }}"
+                                       class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
+                                       title="Print this GRN" aria-label="Print GRN {{ grn.manual_bill_no or grn.auto_bill_no or grn.id }}"><i class="bi bi-printer"></i></a>
 
-                                    <input type="hidden" name="id" value="{{ grn.id }}">
+                                    <a href="{{ url_for('edit_grn', id=grn.id) }}"
+                                       class="btn btn-sm btn-outline-warning"
+                                       title="Edit this GRN" aria-label="Edit GRN {{ grn.manual_bill_no or grn.auto_bill_no or grn.id }}"><i class="bi bi-pencil"></i></a>
 
-                                    <button type="submit" class="btn btn-sm btn-danger" title="Delete">Delete</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                            data-bs-toggle="modal" data-bs-target="#shiftGrnModal{{ grn.id }}"
+                                            title="Shift this GRN to another supplier (preserves inventory &amp; sales)"
+                                            aria-label="Shift GRN {{ grn.manual_bill_no or grn.auto_bill_no or grn.id }} to another supplier"><i class="bi bi-arrow-left-right"></i></button>
 
-                                </form>
+                                    <form action="{{ url_for('grn') }}" method="POST" class="grn-action-form" onsubmit="return confirm('Are you sure you want to delete this GRN? This will reverse the stock addition.');">
 
-                                <button type="button" class="btn btn-sm btn-outline-info ms-1" data-bs-toggle="modal" data-bs-target="#shiftGrnModal{{ grn.id }}" title="Shift this GRN to another supplier (preserves inventory & sales)">
-                                    <i class="bi bi-arrow-right-circle"></i> Shift
-                                </button>
+                                        <input type="hidden" name="action" value="delete">
+
+                                        <input type="hidden" name="id" value="{{ grn.id }}">
+
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                title="Delete this GRN" aria-label="Delete GRN {{ grn.manual_bill_no or grn.auto_bill_no or grn.id }}"><i class="bi bi-trash"></i></button>
+
+                                    </form>
+
+                                </div>
 
                                 <div class="modal fade" id="shiftGrnModal{{ grn.id }}" tabindex="-1" aria-hidden="true">
                                     <div class="modal-dialog">
@@ -1234,27 +1566,52 @@ document.addEventListener('DOMContentLoaded', function() {
     // a dispatch, return or adjustment without reloading the page.
     var consumptionRefreshBtn = document.getElementById('grnConsumptionRefresh');
     if (consumptionRefreshBtn && window.FBMGrnConsumption) {
+        var refreshDefaultTitle = consumptionRefreshBtn.getAttribute('title');
+        var refreshLabel = consumptionRefreshBtn.querySelector('[data-refresh-label]');
         consumptionRefreshBtn.addEventListener('click', function () {
-            var icon = this.querySelector('i');
-            if (icon) icon.classList.add('spin');
-            this.disabled = true;
             var button = this;
+            var icon = button.querySelector('i');
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            // theme.css has no global .spin class; .grn-refresh-spin is defined
+            // in this page's stylesheet, so the icon actually turns now.
+            if (icon) icon.classList.add('grn-refresh-spin');
+            if (refreshLabel) refreshLabel.textContent = 'Working…';
+            // theme.css defines .btn-outline-info after .btn-outline-danger and
+            // .btn-outline-success, so the base class has to come off for the
+            // success/failure colour to be the one that actually paints.
+            button.classList.remove('btn-outline-info');
             window.FBMGrnConsumption.refresh('/api/grn_consumption').then(function (payload) {
                 if (payload === false) {
-                    button.classList.add('btn-danger');
+                    button.classList.add('btn-outline-danger');
                     button.title = 'Could not refresh from the stock ledger — the values on screen are unchanged.';
+                    if (refreshLabel) refreshLabel.textContent = 'Failed';
+                    window.setTimeout(function () {
+                        button.classList.remove('btn-outline-danger');
+                        button.classList.add('btn-outline-info');
+                        button.title = refreshDefaultTitle;
+                        if (refreshLabel) refreshLabel.textContent = 'Recalculate';
+                    }, 2400);
                 } else {
-                    button.classList.add('btn-success');
-                    window.setTimeout(function () { button.classList.remove('btn-success'); }, 1200);
+                    button.classList.add('btn-outline-success');
+                    if (refreshLabel) refreshLabel.textContent = 'Updated';
+                    window.setTimeout(function () {
+                        button.classList.remove('btn-outline-success');
+                        button.classList.add('btn-outline-info');
+                        if (refreshLabel) refreshLabel.textContent = 'Recalculate';
+                    }, 1400);
                 }
+            }).catch(function () {
+                button.classList.add('btn-outline-info');
             }).finally(function () {
                 button.disabled = false;
-                if (icon) icon.classList.remove('spin');
+                button.removeAttribute('aria-busy');
+                if (icon) icon.classList.remove('grn-refresh-spin');
             });
         });
     }
 });
 </script>
-<script src="{{ url_for('static', filename='grn_consumption.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='grn_consumption.js') }}?v=2"></script>
 
 {% endblock %}
