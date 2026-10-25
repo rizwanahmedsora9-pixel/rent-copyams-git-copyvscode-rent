@@ -123,9 +123,17 @@ def _cost_rate_for_material(mat_name, tx_dt=None):
                     rate = float(item.price_at_time or 0)
                     if rate > 0:
                         return rate, True
-            # If no match with tx_dt filter, use the most recent
-            if grn_query:
-                item, grn = grn_query[0]
+            # Nothing was purchased on/before the delivery date.  FIFO values
+            # the issue from the next lot, so the NEAREST later purchase is the
+            # right anchor.  `grn_query[0]` is the newest purchase in the whole
+            # dataset, which can be months in the future and would freeze a
+            # future price into the sale line (and therefore into the P&L).
+            forward = [
+                (item, grn) for item, grn in grn_query
+                if not tx_dt or not grn.date_posted or grn.date_posted.date() > tx_dt
+            ]
+            forward.sort(key=lambda pair: (pair[1].date_posted or datetime.min, pair[1].id))
+            for item, grn in forward:
                 rate = float(item.price_at_time or 0)
                 if rate > 0:
                     return rate, True
@@ -200,8 +208,14 @@ def _grn_consumed_qty_map(grn_item_ids, exclude_sale_id=None):
     return {int(row[0]): float(row[1] or 0) for row in rows if row[0]}
 
 
-def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None):
-    """Oldest open GRN lots first (date, grn id, item id)."""
+def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None, reserved=None):
+    """Oldest open GRN lots first (date, grn id, item id).
+
+    ``reserved`` maps ``grn_item_id -> qty`` for lots already promised to
+    earlier lines of the *same* document.  Without it two lines of one sale
+    would both consume the oldest lot from the same snapshot and promise more
+    of that lot than it holds, which makes FIFO cost (and the P&L) wrong.
+    """
     mat_key = _material_norm_key(mat_name)
     if not mat_key:
         return []
@@ -221,21 +235,25 @@ def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None):
         lots.append(item)
         item_ids.append(item.id)
     consumed = _grn_consumed_qty_map(item_ids, exclude_sale_id=exclude_sale_id)
+    reserved = reserved or {}
     open_lots = []
     for item in lots:
-        available = max(0.0, float(item.qty or 0) - float(consumed.get(item.id, 0) or 0))
+        already = float(consumed.get(item.id, 0) or 0) + float(reserved.get(item.id, 0) or 0)
+        available = max(0.0, float(item.qty or 0) - already)
         if available <= 0:
             continue
         open_lots.append((item, available, float(item.price_at_time or 0)))
     return open_lots
 
 
-def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id=None):
+def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id=None, reserved=None):
     remaining = float(qty_needed or 0)
     if remaining <= 0:
         return []
     plan = []
-    for item, available, rate in _grn_fifo_lots_for_material(mat_name, as_of_dt, exclude_sale_id):
+    for item, available, rate in _grn_fifo_lots_for_material(
+        mat_name, as_of_dt, exclude_sale_id, reserved=reserved
+    ):
         take = min(available, remaining)
         if take <= 0:
             continue
@@ -257,8 +275,14 @@ def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id
 
 
 def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
-    """Split cash/credit lines so each line is one FIFO lot with a frozen cost."""
+    """Split cash/credit lines so each line is one FIFO lot with a frozen cost.
+
+    Lots promised to an earlier line of the same document are treated as taken,
+    so a sale with two lines of one material consumes the oldest lot once and
+    then moves on to the next lot — exactly how the P&L replays it.
+    """
     expanded = []
+    reserved = {}
     for item in (items or []):
         # Services are charges, not stock: never allocate a GRN lot to them.
         if (
@@ -277,6 +301,7 @@ def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
             qty,
             as_of_dt=as_of_dt,
             exclude_sale_id=exclude_sale_id,
+            reserved=reserved,
         )
         if not plan:
             copied = dict(item)
@@ -285,6 +310,10 @@ def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
             expanded.append(copied)
             continue
         for slice_row in plan:
+            if slice_row['grn_item_id']:
+                reserved[slice_row['grn_item_id']] = (
+                    reserved.get(slice_row['grn_item_id'], 0.0) + float(slice_row['qty'] or 0)
+                )
             copied = dict(item)
             copied['qty'] = float(slice_row['qty'])
             copied['grn_item_id'] = slice_row['grn_item_id']
