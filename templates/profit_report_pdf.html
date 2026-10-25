@@ -30,6 +30,94 @@
 <p class="small"><strong>Formula:</strong> Net = recognized material + delivery + other income + other gains − material cost − delivery cost − expenses − other losses. Unresolved-cost rows are excluded from net and disclosed. Formula check Rs. {{ '{:,.6f}'.format(summary.formula_check) }}; reconciliation difference Rs. {{ '{:,.6f}'.format(summary.formula_difference) }}.</p>
 {% if comparison.available %}<p class="small muted"><strong>Comparison:</strong> {{ comparison.label }} ({{ comparison.start_date }} to {{ comparison.end_date }}).</p>{% endif %}
 
+{% if breakdown %}
+{% set bd = breakdown %}
+<h2>Profit &amp; Loss Cards</h2>
+<table>
+  <thead><tr><th style="width:32%">Card</th><th style="width:14%">Nature</th><th class="num" style="width:16%">Amount (Rs.)</th><th>What it is</th></tr></thead>
+  <tbody>
+    {% for card in bd.cards %}
+    <tr><td>{{ card.label }}</td><td>{{ 'Realized profit' if card.realized else ('Estimate — not profit' if card.estimate else 'Balance — not profit') }}</td><td class="num">{{ '{:,.2f}'.format(card.value) }}</td><td class="small">{{ card.sub }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="small"><strong>Reconciliation:</strong> gross profit Rs. {{ '{:,.2f}'.format(bd.reconcile.gross_profit) }} + service margin Rs. {{ '{:,.2f}'.format(bd.reconcile.service_margin) }} + other income Rs. {{ '{:,.2f}'.format(bd.reconcile.other_income) }} + other gains Rs. {{ '{:,.2f}'.format(bd.reconcile.other_gains) }} − operating expenses Rs. {{ '{:,.2f}'.format(bd.reconcile.operating_expenses) }} − other losses Rs. {{ '{:,.2f}'.format(bd.reconcile.other_losses) }} = <strong>Rs. {{ '{:,.2f}'.format(bd.reconcile.net_profit) }}</strong> {% if bd.reconcile.matches %}(matches the transaction ledger){% else %}(REVIEW: difference Rs. {{ '{:,.6f}'.format(bd.reconcile.difference) }}){% endif %}.</p>
+
+{% if bd.by_item %}
+<h2>Sales by Item — FIFO cost and gross profit</h2>
+<table>
+  <thead><tr><th>Item</th><th class="num">Delivered qty</th><th class="num">Goods sales</th><th class="num">FIFO cost</th><th class="num">Gross profit</th><th class="num">Remaining stock value</th></tr></thead>
+  <tbody>
+    {% for row in bd.by_item[:20] %}
+    <tr><td>{{ row.material }}</td><td class="num">{{ '{:,.2f}'.format(row.qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.material_revenue) }}</td><td class="num">{{ '{:,.2f}'.format(row.material_cost) }}</td><td class="num {{ 'pos' if row.gross_profit >= 0 else 'neg' }}">{{ '{:,.2f}'.format(row.gross_profit) }}</td><td class="num">{{ '{:,.2f}'.format(row.remaining_inventory_value) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if bd.by_service %}
+<h2>Service revenue, direct cost and margin</h2>
+<table>
+  <thead><tr><th>Service</th><th class="num">Qty</th><th class="num">Revenue</th><th class="num">Direct cost</th><th class="num">Margin</th></tr></thead>
+  <tbody>
+    {% for row in bd.by_service %}
+    <tr><td>{{ row.service }}</td><td class="num">{{ '{:,.2f}'.format(row.qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.service_revenue) }}</td><td class="num">{{ '{:,.2f}'.format(row.service_cost) }}</td><td class="num {{ 'pos' if row.margin >= 0 else 'neg' }}">{{ '{:,.2f}'.format(row.margin) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if bd.by_customer %}
+<h2>Sales by Customer — profit / loss</h2>
+<table>
+  <thead><tr><th>Customer</th><th>Category</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Profit / loss</th></tr></thead>
+  <tbody>
+    {% for row in bd.by_customer[:25] %}
+    <tr><td>{{ row.client }}</td><td>{{ row.client_category }}</td><td class="num">{{ '{:,.2f}'.format(row.revenue) }}</td><td class="num">{{ '{:,.2f}'.format(row.cost) }}</td><td class="num {{ 'pos' if row.profit >= 0 else 'neg' }}">{{ '{:,.2f}'.format(row.profit) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if bd.payment_summary and bd.payment_summary.document_rows %}
+<h2>Outstanding credit on this period's bills</h2>
+<table>
+  <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th class="num">Bill value</th><th class="num">Outstanding</th><th class="num">On this period's revenue</th></tr></thead>
+  <tbody>
+    {% for row in bd.payment_summary.document_rows[:25] %}
+    <tr><td>{{ row.reference }}</td><td>{{ row.date.strftime('%Y-%m-%d') if row.date else '' }}</td><td>{{ row.client }}</td><td class="num">{{ '{:,.2f}'.format(row.document_gross) }}</td><td class="num">{{ '{:,.2f}'.format(row.document_outstanding) }}</td><td class="num">{{ '{:,.2f}'.format(row.period_outstanding) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if bd.estimated_undelivered and bd.estimated_undelivered.rows %}
+<h2>Estimated profit on undelivered bookings — estimate only, never added to net</h2>
+<table>
+  <thead><tr><th>Booking</th><th>Customer</th><th>Item</th><th class="num">Remaining qty</th><th class="num">Booked rate</th><th class="num">Latest GRN cost</th><th class="num">Estimated profit</th></tr></thead>
+  <tbody>
+    {% for row in bd.estimated_undelivered.rows[:20] %}
+    <tr><td>{{ row.reference }}</td><td>{{ row.client }}</td><td>{{ row.material }}</td><td class="num">{{ '{:,.2f}'.format(row.remaining_qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.rate) }}</td><td class="num">{% if row.cost_known %}{{ '{:,.2f}'.format(row.estimated_cost_rate) }}{% else %}cost unknown{% endif %}</td><td class="num">{% if row.cost_known %}{{ '{:,.2f}'.format(row.estimated_profit) }}{% else %}not estimated{% endif %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">Estimated total (known-cost lines only): Rs. {{ '{:,.2f}'.format(bd.estimated_undelivered.total) }}. {{ bd.estimated_undelivered.note }}</p>
+{% endif %}
+
+{% if bd.grn_section %}
+<h2>GRN purchases and remaining inventory — outside the P&amp;L</h2>
+<p class="small">Purchases in the period: Rs. {{ '{:,.2f}'.format(bd.grn_section.purchase_value) }} across {{ bd.grn_section.purchase_count }} lots. Remaining inventory: qty {{ '{:,.2f}'.format(bd.grn_section.inventory.total_qty) }}, value Rs. {{ '{:,.2f}'.format(bd.grn_section.inventory.total_value) }}. {{ bd.grn_section.note }}</p>
+<table>
+  <thead><tr><th>Material</th><th class="num">Received</th><th class="num">Consumed</th><th class="num">Remaining</th><th class="num">Remaining value</th></tr></thead>
+  <tbody>
+    {% for row in bd.grn_section.inventory_by_material[:20] %}
+    <tr><td>{{ row.material }}</td><td class="num">{{ '{:,.2f}'.format(row.received_qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.consumed_qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.remaining_qty) }}</td><td class="num">{{ '{:,.2f}'.format(row.remaining_value) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+
 <h2>Transaction Detail ({{ export_transactions|length }} filtered rows; no pagination)</h2>
 <table>
   <thead><tr><th style="width:9%">Date</th><th style="width:13%">Type / ref</th><th style="width:13%">Customer</th><th style="width:13%">Item</th><th class="num" style="width:8%">Qty</th><th class="num" style="width:10%">Revenue</th><th class="num" style="width:9%">Cost</th><th class="num" style="width:9%">Expense / loss</th><th class="num" style="width:8%">Gain</th><th class="num" style="width:8%">Profit</th></tr></thead>

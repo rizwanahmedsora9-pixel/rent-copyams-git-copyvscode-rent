@@ -1,5 +1,6 @@
 """grn — split from ops.py."""
 from ._common import *  # noqa
+from app.services.grn_consumption import grn_consumption_for_page
 from app.services.void_rebuild import hard_delete_transaction
 
 
@@ -337,9 +338,18 @@ def grn():
         func.coalesce(Account.is_active, True) == True
     ).order_by(Account.category.asc(), Account.name.asc()).all()
 
+    # Per-lot consumption for the indicator: derived read-only from GRNAllocation
+    # plus the FIFO movement replay (see app/services/grn_consumption.py).
+    try:
+        grn_consumption = grn_consumption_for_page(grns)
+    except Exception:
+        logging.getLogger('grn').exception('GRN consumption projection failed')
+        grn_consumption = None
+
     return render_template(
         'grn_wizard.html',
         grns=grns,
+        grn_consumption=grn_consumption,
         materials=materials,
         settings=settings,
         next_auto=next_auto,

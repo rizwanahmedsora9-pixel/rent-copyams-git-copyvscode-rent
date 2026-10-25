@@ -1,226 +1,271 @@
 {% extends "layout.html" %}
 {% from "_ui/page_header.html" import render as ui_header %}
-{% from "_ui/kpi_tile.html" import tile as ui_tile %}
-{% from "_ui/data_table_card.html" import card as ui_table_card %}
-{% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
 {% block content %}
 <div class="ui-v2 profit-center">
   <style>
     .profit-center .profit-hero{border:1px solid var(--ui-border);border-radius:18px;padding:1.25rem;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(14,165,233,.06));margin-bottom:1rem}
     .profit-center .profit-hero-value{font-size:clamp(1.8rem,4vw,3rem);font-weight:800;line-height:1.1}
-    .profit-center .profit-formula{font-size:.82rem;line-height:1.65}
-    .profit-center .formula-row{display:flex;justify-content:space-between;gap:1rem;padding:.42rem 0;border-bottom:1px dashed var(--ui-border)}
-    .profit-center .formula-row:last-child{border-bottom:0}
-    .profit-center .formula-total{font-size:1.05rem;font-weight:800;border-top:2px solid var(--ui-border);margin-top:.35rem;padding-top:.7rem}
+    .profit-center .section-note{font-size:.82rem;color:var(--ui-text-muted);margin-bottom:0}
     .profit-center .status-pill{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.3rem .65rem;font-size:.75rem;font-weight:700;background:var(--ui-surface-2);border:1px solid var(--ui-border)}
     .profit-center .comparison-delta{font-variant-numeric:tabular-nums;font-weight:700}
-    .profit-center .section-note{font-size:.82rem;color:var(--ui-text-muted);margin-bottom:0}
-    .profit-center .position-card{border-left:3px solid var(--ui-sky,#0ea5e9)!important}
     .profit-center .table-subtotal{font-weight:800;background:var(--ui-surface-2)}
     .profit-center .warning-list{margin:0;padding-left:1.1rem}
     .profit-center .warning-list li{margin-bottom:.45rem}
-    .profit-center .filter-hint{font-size:.72rem;color:var(--ui-text-muted);margin-top:.25rem}
-    @media print{.profit-center .no-print{display:none!important}.profit-center .ui-card{break-inside:avoid}}
+    .profit-center .pos{color:var(--ui-success)}
+    .profit-center .neg{color:var(--ui-danger)}
+
+    /* ---------------- filter bar (automatic, no Apply button) ---------------- */
+    .pl-filters .ui-row{gap:.75rem}
+    .pl-filters .pl-hint{font-size:.72rem;color:var(--ui-text-muted);margin-top:.25rem}
+    .pl-filter-state{font-size:.75rem;color:var(--ui-text-muted)}
+    .pl-filter-state.is-busy i{animation:plspin 1s linear infinite}
+    @keyframes plspin{to{transform:rotate(360deg)}}
+    .pl-combo{position:relative}
+    .pl-combo-input{background:#fff!important;color:#111827!important;border:1px solid var(--ui-border-strong);border-radius:10px}
+    .pl-combo-input::placeholder{color:#6b7280}
+    .pl-combo-menu{position:absolute;z-index:1080;top:calc(100% + 4px);left:0;right:0;background:#fff;color:#111827;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 14px 34px rgba(2,6,23,.35);max-height:280px;overflow-y:auto;padding:.25rem}
+    .pl-combo-menu[hidden]{display:none}
+    .pl-combo-option{display:flex;justify-content:space-between;gap:.5rem;width:100%;background:#fff;color:#111827;border:0;text-align:left;padding:.45rem .55rem;border-radius:8px;font-size:.88rem;cursor:pointer}
+    .pl-combo-option:hover,.pl-combo-option.is-active{background:#e0f2fe;color:#0c4a6e}
+    .pl-combo-option .pl-combo-hint{color:#475569;font-size:.75rem;white-space:nowrap}
+    .pl-combo-empty{padding:.45rem .55rem;font-size:.82rem;color:#475569}
+    .pl-clear-btn{border:0;background:transparent;color:var(--ui-text-muted);cursor:pointer;padding:0 .25rem}
+    html[data-theme="light"] .pl-combo-input{border-color:#94a3b8}
+
+    /* --------------------------- summary cards ------------------------------ */
+    .pl-section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;margin:1.4rem 0 .6rem}
+    .pl-section-head h3{font-size:1.02rem;font-weight:800;margin:0;display:flex;align-items:center;gap:.45rem}
+    .pl-section-head p{margin:.15rem 0 0;font-size:.8rem;color:var(--ui-text-muted)}
+    .pl-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}
+    .pl-card-grid--muted .pl-card{border-style:dashed;opacity:.96}
+    .pl-card{position:relative;display:flex;flex-direction:column;gap:.2rem;padding:.9rem 1rem;border:1px solid var(--ui-border);border-radius:14px;background:linear-gradient(135deg,var(--ui-surface-3),var(--ui-surface-2));color:var(--ui-text);text-decoration:none;overflow:hidden;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+    a.pl-card:hover{transform:translateY(-2px);box-shadow:var(--ui-shadow-2);border-color:var(--ui-border-strong);color:var(--ui-text)}
+    .pl-card--hero{border-color:var(--ui-accent)}
+    .pl-card-label{font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;font-weight:800;color:var(--ui-text-muted)}
+    .pl-card-value{font-size:1.32rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.2}
+    .pl-card-sub{font-size:.75rem;color:var(--ui-text-muted);line-height:1.35}
+    .pl-card-icon{position:absolute;right:.6rem;bottom:.5rem;font-size:2rem;opacity:.12}
+    .pl-badge{font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--ui-border-strong);border-radius:999px;padding:.05rem .4rem;color:var(--ui-text-muted)}
+    .pl-card--sky{border-left:3px solid #0ea5e9}.pl-card--teal{border-left:3px solid #14b8a6}
+    .pl-card--amber{border-left:3px solid #f59e0b}.pl-card--rose{border-left:3px solid #f43f5e}
+    .pl-card--green{border-left:3px solid #10b981}.pl-card--violet{border-left:3px solid #8b5cf6}
+    .pl-card--slate{border-left:3px solid #94a3b8}.pl-card--red{border-left:3px solid #f43f5e}
+    .pl-card--indigo{border-left:3px solid #6366f1}
+
+    /* --------------------------- reconciliation ----------------------------- */
+    .pl-recon{margin-top:1rem}
+    .pl-recon-formula{display:flex;flex-wrap:wrap;gap:.35rem .9rem;font-size:.82rem;color:var(--ui-text-muted)}
+    .pl-recon-formula strong{color:var(--ui-text);font-variant-numeric:tabular-nums}
+    .pl-recon-total{font-weight:800;color:var(--ui-text)}
+
+    /* ------------------------------- tables --------------------------------- */
+    .pl-table{font-size:.82rem}
+    .pl-table th{white-space:nowrap}
+    .pl-table th a{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
+    .pl-table td,.pl-table th{padding:.42rem .5rem;vertical-align:top}
+    .pl-scroll{max-height:420px;overflow-y:auto}
+    .pl-table--transactions td{font-size:.8rem}
+    .pl-pill{display:inline-block;border-radius:999px;border:1px solid var(--ui-border-strong);padding:.05rem .45rem;font-size:.7rem;font-weight:700;color:var(--ui-text-muted)}
+    .pl-status{display:inline-block;border-radius:999px;padding:.05rem .45rem;font-size:.7rem;font-weight:800}
+    .pl-status--paid{background:rgba(16,185,129,.18);color:#34d399}
+    .pl-status--partially_paid{background:rgba(245,158,11,.18);color:#fbbf24}
+    .pl-status--unpaid{background:rgba(244,63,94,.18);color:#fb7185}
+    .pl-status--not_applicable{background:transparent;color:var(--ui-text-muted)}
+    html[data-theme="light"] .pl-status--paid{color:#047857}
+    html[data-theme="light"] .pl-status--partially_paid{color:#b45309}
+    html[data-theme="light"] .pl-status--unpaid{color:#be123c}
+    .pl-mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem}
+    .pl-mini{padding:.6rem .7rem;border:1px solid var(--ui-border);border-radius:12px;background:var(--ui-surface-2);display:flex;flex-direction:column;gap:.15rem}
+    .pl-mini span{font-size:.72rem;color:var(--ui-text-muted)}
+    .pl-mini strong{font-size:1rem;font-variant-numeric:tabular-nums}
+    .pl-mini-row{display:flex;justify-content:space-between;gap:1rem;padding:.38rem 0;border-bottom:1px dashed var(--ui-border);font-size:.84rem}
+    .pl-mini-row:last-of-type{border-bottom:0}
+    .pl-mini-row strong{font-variant-numeric:tabular-nums;white-space:nowrap}
+    .pl-card--estimate{border:1px dashed var(--ui-border-strong)}
+    .pl-card--inventory{border:1px solid var(--ui-border)}
+
+    /* ------------------------------- chart ---------------------------------- */
+    .pl-chart{display:flex;align-items:flex-end;gap:3px;height:130px;padding:.35rem 0;border-bottom:1px solid var(--ui-border);overflow-x:auto}
+    .pl-chart-col{flex:1 0 14px;min-width:14px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+    .pl-chart-bars{display:flex;align-items:flex-end;gap:1px;height:100%;width:100%;justify-content:center}
+    .pl-chart-bar{width:4px;border-radius:2px 2px 0 0;min-height:1px;display:inline-block}
+    .pl-chart-bar--rev{background:#0ea5e9}.pl-chart-bar--cost{background:#f59e0b}
+    .pl-chart-bar--pos{background:#10b981}.pl-chart-bar--neg{background:#f43f5e}
+    .pl-chart-x{font-size:.6rem;color:var(--ui-text-muted);margin-top:.2rem;white-space:nowrap}
+    .pl-chart-legend{display:flex;flex-wrap:wrap;gap:.9rem;font-size:.72rem;color:var(--ui-text-muted);margin-top:.4rem}
+    .pl-legend{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.25rem}
+    .pl-legend--rev{background:#0ea5e9}.pl-legend--cost{background:#f59e0b}
+    .pl-legend--pos{background:#10b981}.pl-legend--neg{background:#f43f5e}
+
+    /* ------------------------- loading / error state ------------------------ */
+    .pl-results{position:relative}
+    .pl-results.is-loading{opacity:.55;transition:opacity .15s ease}
+    .pl-results.is-loading::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(2,6,23,.02),rgba(2,6,23,.06))}
+    .pl-loading-bar{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#f59e0b,#0ea5e9,#f59e0b);background-size:200% 100%;animation:plslide 1.1s linear infinite;z-index:2000;display:none}
+    .pl-loading-bar.is-on{display:block}
+    @keyframes plslide{to{background-position:-200% 0}}
+    .pl-error{border:1px solid var(--ui-danger);border-radius:12px;padding:.7rem .9rem;margin-bottom:.8rem;font-size:.85rem;color:var(--ui-danger)}
+    @media print{.profit-center .no-print{display:none!important}.pl-results.is-loading{opacity:1}.pl-loading-bar{display:none!important}}
   </style>
 
-  {% set entries_url = report_url(view='entries') %}
-  {% set profit_url = report_url(view='entries', metric='profit') %}
-  {% set loss_url = report_url(view='entries', metric='loss') %}
-  {% set unknown_url = report_url(view='entries', metric='unknown_cost') %}
   {% set _toolbar %}
     <a href="{{ entries_url }}" class="btn btn-warning btn-pill fw-bold"><i class="bi bi-list-check me-1"></i> View All Transactions</a>
     <a href="{{ report_url('profit_report_excel') }}" class="btn btn-outline-success btn-pill fw-bold"><i class="bi bi-file-earmark-excel me-1"></i> Excel</a>
     <a href="{{ report_url('profit_report_pdf') }}" class="btn btn-outline-secondary btn-pill fw-bold"><i class="bi bi-file-earmark-pdf me-1"></i> PDF</a>
     <button type="button" class="btn btn-outline-secondary btn-pill no-print" onclick="window.print()" aria-label="Print"><i class="bi bi-printer"></i></button>
   {% endset %}
-  {{ ui_header('bi-graph-up-arrow', 'Profit Summary', subtitle=(period_label ~ ' · ' ~ (start_date or 'Beginning') ~ ' to ' ~ (end_date or 'Today')), toolbar=_toolbar) }}
+  {{ ui_header('bi-graph-up-arrow', 'Profit & Loss', subtitle=(period_label ~ ' · ' ~ (start_date or 'Beginning') ~ ' to ' ~ (end_date or 'Today')), toolbar=_toolbar) }}
 
-  {% call ui_filter_bar(action=url_for('profit_reports')) %}
-    <div class="ui-field ui-col-2">
-      <label class="ui-label" for="profitPeriod">Period</label>
-      <select name="period" id="profitPeriod" class="form-select">
-        {% for value,label in [('this_month','This month to date'),('today','Today'),('yesterday','Yesterday'),('this_week','This week to date'),('last_7_days','Last 7 days'),('last_30_days','Last 30 days'),('last_month','Last full month'),('this_year','This year to date'),('last_year','Last full year'),('all','All dates'),('custom','Custom dates')] %}
-        <option value="{{ value }}" {{ 'selected' if period == value }}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="ui-field ui-col-2"><label class="ui-label">From</label><input type="date" name="start_date" value="{{ start_date }}" class="form-control"></div>
-    <div class="ui-field ui-col-2"><label class="ui-label">To</label><input type="date" name="end_date" value="{{ end_date }}" class="form-control"></div>
-    <div class="ui-field ui-col-2">
-      <label class="ui-label">Customer</label>
-      <input type="text" name="client" value="{{ client }}" list="profitClients" class="form-control" placeholder="Name or code" autocomplete="off">
-      <datalist id="profitClients">{% for c in filter_options.clients %}<option value="{{ c.name }}">{{ c.code }}</option>{% endfor %}</datalist>
-    </div>
-    <div class="ui-field ui-col-2">
-      <label class="ui-label">Material / service</label>
-      <input type="text" name="material" value="{{ material }}" list="profitMaterials" class="form-control" placeholder="All items" autocomplete="off">
-      <datalist id="profitMaterials">{% for m in filter_options.materials %}<option value="{{ m.name }}">{% endfor %}</datalist>
-    </div>
-    <div class="ui-field ui-col-2">
-      <label class="ui-label">Activity</label>
-      <select name="category" class="form-select"><option value="">All recognized activity</option>{% for value,label in filter_options.categories %}<option value="{{ value }}" {{ 'selected' if category == value }}>{{ label }}</option>{% endfor %}</select>
-    </div>
-    <div class="ui-field ui-col-2">
-      <label class="ui-label">Cost supplier</label>
-      <input type="text" name="supplier" value="{{ supplier }}" list="profitSuppliers" class="form-control" placeholder="All suppliers" autocomplete="off">
-      <datalist id="profitSuppliers">{% for s in filter_options.suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist>
-    </div>
-    {% if grn_id %}<input type="hidden" name="grn_id" value="{{ grn_id }}">{% endif %}
-    <div class="ui-actions ui-col-2"><label class="ui-label">&nbsp;</label><button type="submit" class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button></div>
-    <div class="ui-actions ui-col-12"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_reports') }}"><i class="bi bi-arrow-counterclockwise me-1"></i> Reset</a><span class="small text-muted ms-2">Choose Custom dates to use the From / To fields exactly.</span></div>
-  {% endcall %}
+  <div class="pl-loading-bar" id="plLoadingBar" aria-hidden="true"></div>
 
-  <div class="profit-hero">
-    <div class="row align-items-center g-3">
-      <div class="col-lg-7">
-        <div class="d-flex flex-wrap gap-2 mb-2">
-          <span class="status-pill"><i class="bi bi-calendar3"></i> {{ period_label }}</span>
-          {% if summary.unknown_cost_rows %}<a class="status-pill text-warning" href="{{ unknown_url }}"><i class="bi bi-exclamation-triangle"></i> {{ summary.unknown_cost_rows }} unresolved-cost rows</a>{% else %}<span class="status-pill text-success"><i class="bi bi-check2-circle"></i> Costs resolved</span>{% endif %}
-          {% if summary.estimated_cost_rows %}<span class="status-pill text-info"><i class="bi bi-info-circle"></i> {{ summary.estimated_cost_rows }} estimated-cost rows</span>{% endif %}
-        </div>
-        <div class="text-muted small fw-bold text-uppercase">Immediate net result · recognized activity</div>
-        <div class="profit-hero-value {{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(total_profit) }}</div>
-        <p class="section-note mt-2">{{ 'Net profit' if total_profit >= 0 else 'Net loss' }} after recognized material and delivery costs, expenses, returns, and supported other gains/losses. Receipts and purchases are not profit.</p>
-      </div>
-      <div class="col-lg-5">
-        <div class="row g-2 text-center">
-          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Net margin</div><div class="fs-4 fw-bold">{{ '{:,.2f}'.format(summary.margin_pct) }}%</div></div></div>
-          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Recognized entries</div><div class="fs-4 fw-bold">{{ summary.row_count }}</div></div></div>
-          <div class="col-12"><a href="{{ entries_url }}" class="btn btn-sm btn-outline-warning w-100">Trace every figure to its source <i class="bi bi-arrow-right ms-1"></i></a></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="ui-kpi-grid">
-    {{ ui_tile(href=profit_url, label='Total Profit', value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))), icon='bi-arrow-up-circle', colour='green', sub=(profit_entry_count ~ ' profitable entries'), cta='View profit entries') }}
-    {{ ui_tile(href=loss_url, label='Total Loss', value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))), icon='bi-arrow-down-circle', colour='red', sub=(loss_entry_count ~ ' loss entries'), cta='View loss entries') }}
-    {{ ui_tile(href=entries_url, label='Profit (Money Kept)', value=("Rs. " ~ ("{:,.2f}".format(total_profit))), icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'), sub='Qualified net result; unresolved rows disclosed', cta='See transactions') }}
-    {{ ui_tile(href=report_url(view='entries', metric='revenue'), label='Sales (Money In)', value=("Rs. " ~ ("{:,.2f}".format(total_revenue))), icon='bi-bag-cash', colour='sky', sub='Earned material + delivery + other income, net of returns', cta='See revenue entries') }}
-    {{ ui_tile(href=report_url(view='entries', metric='cogs'), label='Cost of Goods (Money Out)', value=("Rs. " ~ ("{:,.2f}".format(total_cogs))), icon='bi-truck', colour='amber', sub='Recognized material + direct delivery cost', cta='See cost entries') }}
-    {{ ui_tile(href=url_for('financial_details', start_date=start_date, end_date=end_date), label='Money Received', value=("Rs. " ~ ("{:,.2f}".format(payment_received_total))), icon='bi-wallet2', colour='teal', sub='Settlement information only — never new profit', cta='Open financial details') }}
-  </div>
-
-  <div class="ui-card">
-    <div class="ui-card-header"><h5><i class="bi bi-lightbulb"></i> Read the result in three steps</h5></div>
+  {# ------------------------------------------------------------------------
+     Automatic filters.  Every change (and every debounced keystroke) updates
+     the report immediately — there is no Apply button.  The values map
+     one-to-one onto build_profit_loss_report's keyword arguments.
+     ------------------------------------------------------------------------ #}
+  <form class="ui-card ui-form pl-filters" id="plFilterForm" method="get" action="{{ url_for('profit_reports') }}" autocomplete="off">
     <div class="ui-card-body">
-      <div class="row g-3">
-        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">1. Sale is earned</div><div class="small text-muted">A sale adds revenue when goods are supplied, even if the customer pays later. A receipt settles a bill; it does not create profit again.</div><div class="small mt-2">This period: earned revenue <strong>Rs. {{ '{:,.2f}'.format(total_revenue) }}</strong>; money received <strong>Rs. {{ '{:,.2f}'.format(payment_received_total) }}</strong>.</div></div></div>
-        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">2. FIFO assigns the GRN cost</div><div class="small text-muted">Each sale uses the oldest available GRN lot first. Example: if the oldest GRN has 6 units left, the first 6 sold use that rate; remaining units continue into the next GRN lot. The sale rate is revenue; the FIFO GRN rate is the item's cost, so the difference (after discounts and other costs) drives its margin. A GRN purchase is stock, not an immediate expense.</div><div class="small mt-2">This period: purchase value <strong>Rs. {{ '{:,.2f}'.format(financial_position.purchase_value if financial_position else 0) }}</strong>; cost assigned to sold goods <strong>Rs. {{ '{:,.2f}'.format(total_cogs) }}</strong>.</div></div></div>
-        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">3. Profit / loss is the net</div><div class="small text-muted">Net result = profitable rows added together − loss-making rows added together, less operating expenses, plus/minus other supported items. “Total Loss” is the sum of loss rows; it is not the final net loss.</div><div class="small mt-2">The final net result for this period is <strong class="{{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(total_profit) }} {{ 'profit' if total_profit >= 0 else 'loss' }}</strong>.</div></div></div>
-      </div>
-      <p class="section-note mt-3">The two comparisons above are intentionally not expected to match: receipts may relate to earlier/later sales, and purchases may remain in stock. Click a transaction to see the exact GRN lot(s), unit rate and quantity used.</p>
-    </div>
-  </div>
+      <div class="ui-row">
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plPeriod">Period</label>
+          <select name="period" id="plPeriod" class="form-select" data-pl-auto>
+            {% for value,label in [('this_month','This month to date'),('today','Today'),('yesterday','Yesterday'),('this_week','This week to date'),('last_7_days','Last 7 days'),('last_30_days','Last 30 days'),('last_month','Last full month'),('this_year','This year to date'),('last_year','Last full year'),('all','All dates'),('custom','Custom dates')] %}
+            <option value="{{ value }}" {{ 'selected' if period == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plStart">Start date</label>
+          <input type="date" name="start_date" id="plStart" value="{{ start_date }}" class="form-control ui-date" data-pl-auto>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plEnd">End date</label>
+          <input type="date" name="end_date" id="plEnd" value="{{ end_date }}" class="form-control ui-date" data-pl-auto>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plEntityType">Entity type</label>
+          <select name="entity_type" id="plEntityType" class="form-select" data-pl-auto>
+            <option value="" {{ 'selected' if not selected.entity_type }}>Customer</option>
+            <option value="category" {{ 'selected' if selected.entity_type == 'category' }}>Client category (group)</option>
+          </select>
+        </div>
+        <div class="ui-field ui-col-4" data-pl-entity-wrap>
+          <label class="ui-label" for="plClientInput">
+            <span data-pl-entity-label>{{ 'Client category' if selected.entity_type == 'category' else 'Customer / company site' }}</span>
+          </label>
+          <div class="pl-combo" data-combo="client">
+            <input type="text" class="form-control pl-combo-input" id="plClientInput" data-combo-input role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="plClientMenu"
+                   placeholder="{{ 'All categories' if selected.entity_type == 'category' else 'All customers — type to search' }}"
+                   value="{{ selected.client_category if selected.entity_type == 'category' else client }}" autocomplete="off">
+            <input type="hidden" name="client" value="{{ client }}" data-combo-value>
+            <input type="hidden" name="client_category" value="{{ selected.client_category }}" data-combo-category>
+            <div class="pl-combo-menu" id="plClientMenu" data-combo-menu hidden role="listbox"></div>
+          </div>
+          <div class="pl-hint">Choose the entity type, then search and pick a value. This application has no separate company-site entity, so sites are grouped as clients / client categories.</div>
+        </div>
 
-  <div class="row g-3">
-    <div class="col-xl-7">
-      <div class="ui-card h-100">
-        <div class="ui-card-header"><h5><i class="bi bi-diagram-3"></i> Traceable Profit Formula</h5><a href="{{ entries_url }}" class="btn btn-outline-secondary btn-sm">Drill down</a></div>
-        <div class="ui-card-body profit-formula">
-          <div class="formula-row"><span>Earned material revenue (after returns)</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_material_revenue) }}</strong></div>
-          <div class="formula-row"><span>Earned delivery revenue (after returns)</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_delivery_revenue) }}</strong></div>
-          <div class="formula-row"><span>Other earned income</span><strong>Rs. {{ '{:,.2f}'.format(summary.total_other_income) }}</strong></div>
-          <div class="formula-row"><span>Less: material cost recognized</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_material_cost) }}</strong></div>
-          <div class="formula-row ps-3"><span class="text-muted">Recorded actual / estimated portions</span><span class="text-muted">Rs. {{ '{:,.2f}'.format(summary.actual_material_cost) }} / Rs. {{ '{:,.2f}'.format(summary.estimated_material_cost) }}</span></div>
-          <div class="formula-row"><span>Less: direct delivery cost</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_delivery_cost) }}</strong></div>
-          <div class="formula-row"><span>Less: operating expenses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_expenses) }}</strong></div>
-          <div class="formula-row"><span>Less: other supported losses</span><strong>− Rs. {{ '{:,.2f}'.format(summary.total_other_losses) }}</strong></div>
-          <div class="formula-row"><span>Add: other supported gains</span><strong>+ Rs. {{ '{:,.2f}'.format(summary.total_other_gains) }}</strong></div>
-          {% if summary.unknown_cost_rows %}<div class="formula-row text-warning"><span>Less: revenue on unresolved-cost rows excluded from net</span><strong>− Rs. {{ '{:,.2f}'.format(summary.unresolved_revenue) }}</strong></div>{% endif %}
-          <div class="formula-row formula-total {{ 'pos' if total_profit >= 0 else 'neg' }}"><span>Net Profit / Loss</span><span>Rs. {{ '{:,.2f}'.format(total_profit) }}</span></div>
-          <p class="section-note mt-3">Discounts reduce the revenue on their original sale/supply rows; they are not deducted a second time. Return rows carry negative revenue and negative cost on the return date. Formula reconciliation difference: Rs. {{ '{:,.6f}'.format(summary.formula_difference) }}.</p>
+        <div class="ui-field ui-col-4">
+          <label class="ui-label" for="plMaterialInput">Item / service</label>
+          <div class="pl-combo" data-combo="material">
+            <input type="text" class="form-control pl-combo-input" id="plMaterialInput" data-combo-input role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="plMaterialMenu"
+                   placeholder="All items and services — type to search" value="{{ material }}" autocomplete="off">
+            <input type="hidden" name="material" value="{{ material }}" data-combo-value>
+            <div class="pl-combo-menu" id="plMaterialMenu" data-combo-menu hidden role="listbox"></div>
+          </div>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plGroup">Transaction type</label>
+          <select name="transaction_group" id="plGroup" class="form-select" data-pl-auto>
+            {% for value,label in transaction_group_choices %}
+            <option value="{{ value }}" {{ 'selected' if selected.transaction_group == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plPayment">Payment status</label>
+          <select name="payment_status" id="plPayment" class="form-select" data-pl-auto>
+            {% for value,label in payment_status_choices %}
+            <option value="{{ value }}" {{ 'selected' if selected.payment_status == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plBookingStatus">Booking status</label>
+          <select name="booking_status" id="plBookingStatus" class="form-select" data-pl-auto>
+            {% for value,label in booking_status_choices %}
+            <option value="{{ value }}" {{ 'selected' if selected.booking_status == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plGrn">GRN / stock batch</label>
+          <select name="grn_id" id="plGrn" class="form-select" data-pl-auto>
+            <option value="">All GRN lots</option>
+            {% for grn in filter_options.grn_choices %}
+            <option value="{{ grn.id }}" {{ 'selected' if (grn_id|string) == (grn.id|string) }}>{{ grn.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plActivity">Activity (advanced)</label>
+          <select name="category" id="plActivity" class="form-select" data-pl-auto>
+            <option value="">All recognized activity</option>
+            {% for value,label in filter_options.categories %}
+            <option value="{{ value }}" {{ 'selected' if category == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plSupplier">Cost supplier</label>
+          <input type="text" name="supplier" id="plSupplier" value="{{ supplier }}" list="profitSuppliers" class="form-control" placeholder="All suppliers" data-pl-debounce>
+          <datalist id="profitSuppliers">{% for s in filter_options.suppliers %}<option value="{{ s.name }}">{% endfor %}</datalist>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plSearch">Search reference / note</label>
+          <input type="text" name="q" id="plSearch" value="{{ explorer.q }}" class="form-control" placeholder="Bill no, note…" data-pl-debounce>
+        </div>
+        <div class="ui-field ui-col-2">
+          <label class="ui-label" for="plPerPage">Rows per page</label>
+          <select name="per_page" id="plPerPage" class="form-select" data-pl-auto>
+            {% for size in [25, 50, 100] %}<option value="{{ size }}" {{ 'selected' if pagination.per_page == size }}>{{ size }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="ui-actions ui-col-4">
+          <label class="ui-label">&nbsp;</label>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_reports') }}" id="plReset"><i class="bi bi-arrow-counterclockwise me-1"></i> Reset filters</a>
+            <span class="pl-filter-state" id="plFilterState"><i class="bi bi-cloud-check"></i> Filters apply automatically</span>
+            <noscript><button type="submit" class="btn btn-warning btn-sm">Apply</button></noscript>
+          </div>
         </div>
       </div>
+      {% if explorer.metric %}<input type="hidden" name="metric" value="{{ explorer.metric }}">{% endif %}
     </div>
-    <div class="col-xl-5">
-      <div class="ui-card h-100">
-        <div class="ui-card-header"><h5><i class="bi bi-arrow-left-right"></i> Prior-Equivalent Period</h5></div>
-        <div class="ui-card-body">
-          {% if comparison.available %}
-          <p class="small text-muted">{{ comparison.label }}: {{ comparison.start_date }} to {{ comparison.end_date }}</p>
-          <table class="ui-table">
-            <thead><tr><th>Measure</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead>
-            <tbody>
-              {% for key,label in [('total_revenue','Revenue'),('total_cogs','Cost'),('total_expenses','Expenses'),('total_profit','Net result')] %}
-              {% set c = comparison.metrics[key] %}<tr><td>{{ label }}</td><td class="num">{{ '{:,.2f}'.format(c.current) }}</td><td class="num">{{ '{:,.2f}'.format(c.previous) }}</td><td class="num comparison-delta {{ 'pos' if c.change >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(c.change) }}{% if c.change_pct is not none %}<br><span class="small text-muted">{{ '{:+.1f}'.format(c.change_pct) }}%</span>{% endif %}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% else %}<div class="ui-empty">{{ comparison.label }}.</div>{% endif %}
-          <hr>
-          <div class="small text-muted">Recorded-cost-only result (excludes rows using estimated costs): <strong class="text-white">Rs. {{ '{:,.2f}'.format(summary.recorded_cost_profit) }}</strong></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  </form>
 
-  {% if summary.unknown_cost_rows or summary.estimated_cost_rows %}
-  <div class="ui-card" style="border-color:var(--ui-warn)!important">
-    <div class="ui-card-body d-flex gap-3 align-items-start">
-      <i class="bi bi-exclamation-triangle fs-4 text-warning"></i>
-      <div class="flex-grow-1">
-        <div class="fw-bold mb-1">Cost qualification — review before relying on the net result.</div>
-        {% if summary.unknown_cost_rows %}<div class="small mb-1">{{ summary.unknown_cost_rows }} rows have no defensible cost. Their revenue is visible, but their result is excluded rather than assuming zero cost. Positive affected revenue: Rs. {{ '{:,.2f}'.format(summary.unknown_cost_revenue) }}.</div>{% endif %}
-        {% if summary.estimated_cost_rows %}<div class="small mb-2">{{ summary.estimated_cost_rows }} rows use clearly labelled GRN/master estimates totaling Rs. {{ '{:,.2f}'.format(summary.estimated_material_cost) }}; these are not represented as frozen actual costs.</div>{% endif %}
-        <a href="{{ unknown_url }}" class="btn btn-outline-warning btn-sm">Review unresolved transactions</a>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-
-  <div class="row g-3">
-    <div class="col-xl-6">
-      {% call ui_table_card('Sales by Customer', icon='bi-people') %}
-        <table class="ui-table"><thead><tr><th>Customer</th><th class="num">Earned revenue</th><th class="num">Recognized profit</th></tr></thead><tbody>
-          {% for r in top_clients[:10] %}<tr><td class="fw-bold">{{ r.client }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.sold_revenue) }}</td><td class="num {{ 'pos' if r.profit_known >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(r.profit_known) }}</td></tr>{% else %}<tr><td class="ui-empty" colspan="3">No earned sales recorded for this period.</td></tr>{% endfor %}
-        </tbody></table>
-      {% endcall %}
-    </div>
-    <div class="col-xl-6">
-      {% call ui_table_card('Sales by Item', icon='bi-tags') %}
-        <table class="ui-table"><thead><tr><th>Item</th><th class="num">Net qty</th><th class="num">Earned revenue</th><th class="num">Recognized profit</th></tr></thead><tbody>
-          {% for r in top_items[:10] %}<tr><td class="fw-bold">{{ r.material }}</td><td class="num">{{ '{:,.2f}'.format(r.sold_qty) }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.sold_revenue) }}</td><td class="num {{ 'pos' if r.profit_known >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(r.profit_known) }}</td></tr>{% else %}<tr><td class="ui-empty" colspan="4">No items sold in this period.</td></tr>{% endfor %}
-        </tbody></table>
-      {% endcall %}
-    </div>
-  </div>
-
-  {% call ui_table_card('Recent Recognized Transactions', icon='bi-receipt') %}
-    <table class="ui-table"><thead><tr><th>Date / reference</th><th>Customer / activity</th><th>Item</th><th class="num">Money in</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead><tbody>
-      {% for t in recent_transactions %}<tr><td>{{ t.date.strftime('%Y-%m-%d') if t.date else 'Undated' }}<br><a href="{{ url_for('profit_transaction_detail', document_type=t.document_type, document_id=t.document_id, start_date=start_date, end_date=end_date) }}">{{ t.reference }}</a></td><td>{{ t.client or t.account or 'Business' }}<br><span class="small text-muted">{{ t.transaction_type }}</span></td><td>{{ t.material }}</td><td class="num">{{ '{:,.2f}'.format(t.revenue) }}</td><td class="num">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.cogs) }}{% else %}Unresolved{% endif %}</td><td class="num {{ 'pos' if t.profit >= 0 else 'neg' }}">{% if t.include_in_net %}{{ '{:,.2f}'.format(t.profit) }}{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="ui-empty">No recognized transactions in this period.</td></tr>{% endfor %}
-    </tbody></table>
-  {% endcall %}
-
-  {% call ui_table_card('Daily & Activity Insights', icon='bi-calendar2-week') %}
-    <table class="ui-table"><thead><tr><th>Day</th><th class="num">Earned revenue</th><th class="num">Recognized cost</th><th class="num">Expenses / losses</th><th class="num">Net result</th><th class="num">Rows</th></tr></thead><tbody>
-      {% for r in daily_insights[:14] %}<tr><td>{{ r.day }}</td><td class="num">{{ '{:,.2f}'.format(r.revenue) }}</td><td class="num">{{ '{:,.2f}'.format(r.cogs) }}</td><td class="num">{{ '{:,.2f}'.format(r.expenses) }}</td><td class="num {{ 'pos' if r.profit >= 0 else 'neg' }}">{{ '{:,.2f}'.format(r.profit) }}</td><td class="num">{{ r.rows }}</td></tr>{% else %}<tr><td colspan="6" class="ui-empty">No activity in this period.</td></tr>{% endfor %}
-    </tbody></table>
-  {% endcall %}
-
-  {% if financial_position %}
-  <div class="ui-page-header mt-4"><div><h2 class="ui-title" style="font-size:1.35rem"><span class="ui-title-icon"><i class="bi bi-safe"></i></span> Financial Position — Not Profit</h2><div class="ui-subtitle">Current balances, stock, purchases and unfulfilled orders are deliberately outside the net-profit formula.</div></div></div>
-  <div class="row g-3">
-    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Customer receivables (current)</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.customer_receivables) }}</div><a href="{{ url_for('unpaid_transactions_page') }}" class="small">Open dues</a></div></div></div>
-    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Supplier payables (current)</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.supplier_payables) }}</div><div class="small text-muted">Supplier advances: Rs. {{ '{:,.2f}'.format(financial_position.supplier_advances) }}</div></div></div></div>
-    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Outstanding booking value</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.outstanding_booking_value) }}</div><div class="small text-muted">Not earned until actual supply</div></div></div></div>
-    <div class="col-md-6 col-xl-3"><div class="ui-card position-card h-100"><div class="ui-card-body"><div class="small text-muted">Purchases in selected period</div><div class="fs-4 fw-bold">Rs. {{ '{:,.2f}'.format(financial_position.purchase_value) }}</div><div class="small text-muted">Inventory, not immediate expense</div></div></div></div>
-  </div>
-  <div class="ui-card">
-    <div class="ui-card-header"><h5><i class="bi bi-box-seam"></i> Outstanding Booking Supplies</h5><span class="small text-muted">Identifiable booking advances (estimate): Rs. {{ '{:,.2f}'.format(financial_position.customer_advances_estimate) }}</span></div>
-    <div class="ui-card-body flush"><div class="ui-table-wrap"><table class="ui-table"><thead><tr><th>Booking</th><th>Customer</th><th>Material / service</th><th class="num">Booked</th><th class="num">Net supplied</th><th class="num">Remaining</th><th class="num">Unfulfilled value</th></tr></thead><tbody>
-      {% for r in financial_position.outstanding_bookings[:25] %}<tr><td><a href="{{ url_for('profit_transaction_detail', document_type='Booking', document_id=r.booking_id, start_date=start_date, end_date=end_date) }}">{{ r.reference }}</a><br><span class="small text-muted">{{ r.date.strftime('%Y-%m-%d') if r.date else '' }}</span></td><td>{{ r.client }}</td><td>{{ r.material }}</td><td class="num">{{ '{:,.2f}'.format(r.booked_qty) }}</td><td class="num">{{ '{:,.2f}'.format(r.supplied_qty) }}</td><td class="num fw-bold">{{ '{:,.2f}'.format(r.remaining_qty) }}</td><td class="num">Rs. {{ '{:,.2f}'.format(r.outstanding_value) }}</td></tr>{% else %}<tr><td colspan="7" class="ui-empty">No unfulfilled booking quantity for the selected customer/material.</td></tr>{% endfor %}
-    </tbody></table></div></div>
-    <div class="ui-card-body"><p class="section-note">{{ financial_position.note }}</p></div>
-  </div>
-  {% endif %}
-
-  <div class="ui-card">
-    <div class="ui-card-header"><h5><i class="bi bi-shield-check"></i> Accounting Coverage & Data Quality</h5><span class="small text-muted">{{ voided_source_count }} void source documents excluded</span></div>
-    <div class="ui-card-body">
-      {% if warnings %}<ul class="warning-list small text-warning">{% for warning in warnings[:12] %}<li>{{ warning.message }}{% if warning.document_type and warning.document_id %} · <a href="{{ url_for('profit_transaction_detail', document_type=warning.document_type, document_id=warning.document_id, start_date=start_date, end_date=end_date) }}">trace source</a>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="small text-success"><i class="bi bi-check2-circle me-1"></i>No unresolved source-link warnings in the selected result.</p>{% endif %}
-      <details class="mt-3"><summary class="small fw-bold">Supported scope and unavoidable source limitations</summary><ul class="warning-list small text-muted mt-2">{% for note in unsupported %}<li>{{ note }}</li>{% endfor %}</ul></details>
-    </div>
+  <div id="plResultsRegion" data-pl-region>
+    {% include "partials/profit_loss_results.html" %}
   </div>
 </div>
+
+<script src="{{ url_for('static', filename='profit_report.js') }}?v=1"></script>
+<script>
+  window.PL_FILTER_DATA = {
+    entityType: {{ (selected.entity_type or '')|tojson }},
+    customers: {{ (filter_options.clients|map(attribute='name')|list)[:1200]|tojson }},
+    customerCodes: {{ (filter_options.clients|map(attribute='code')|list)[:1200]|tojson }},
+    categories: {{ (filter_options.client_categories or [])|tojson }},
+    materials: {{ ((filter_options.materials|map(attribute='name')|list) + (filter_options.services|default([])|map(attribute='name')|list))|tojson }}
+  };
+  if (window.FBMProfitFilters) {
+    window.FBMProfitFilters.init({
+      form: '#plFilterForm',
+      region: '#plResultsRegion',
+      partialParam: 'partial',
+      loadingBar: '#plLoadingBar',
+      stateLabel: '#plFilterState',
+      data: window.PL_FILTER_DATA
+    });
+  }
+</script>
 {% endblock %}

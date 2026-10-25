@@ -49,6 +49,42 @@
     .row-star-btn.starred {
         color: #eab308 !important;
     }
+
+    /* ---------- GRN stock-consumption indicator ---------- */
+    .grn-item-consume + .grn-item-consume { margin-top: .45rem; padding-top: .45rem; border-top: 1px dashed var(--ui-border, #334155); }
+    .grn-consume-head { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: baseline; margin-bottom: .2rem; }
+    .grn-consume-name { font-weight: 700; color: var(--ui-text, #e2e8f0); }
+    .grn-consume-meta { font-size: .72rem; color: var(--ui-text-muted, #94a3b8); }
+    .grn-consume-meta b { color: var(--ui-text, #e2e8f0); font-variant-numeric: tabular-nums; }
+    .grn-consume { display: flex; align-items: center; gap: .5rem; min-width: 220px; }
+    .grn-consume-track { position: relative; flex: 1 1 auto; height: 10px; min-width: 90px; border-radius: 999px; background: var(--ui-surface-2, #0f1730); border: 1px solid var(--ui-border, #334155); overflow: hidden; }
+    .grn-consume-fill { height: 100%; width: 0; border-radius: 999px; background: #10b981; transition: width .45s ease, background-color .45s ease; }
+    .grn-consume-pct { flex: 0 0 auto; min-width: 46px; text-align: right; font-size: .78rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ui-text, #e2e8f0); }
+    .grn-consume.level-low .grn-consume-pct { color: #34d399; }
+    .grn-consume.level-moderate .grn-consume-pct { color: #a3e635; }
+    .grn-consume.level-high .grn-consume-pct { color: #fbbf24; }
+    .grn-consume.level-critical .grn-consume-pct { color: #fb923c; }
+    .grn-consume.level-complete .grn-consume-pct { color: #f87171; }
+    .grn-consume-fill.level-low { background: linear-gradient(90deg, #047857, #10b981); }
+    .grn-consume-fill.level-moderate { background: linear-gradient(90deg, #65a30d, #a3e635); }
+    .grn-consume-fill.level-high { background: linear-gradient(90deg, #b45309, #fbbf24); }
+    .grn-consume-fill.level-critical { background: linear-gradient(90deg, #c2410c, #fb923c); }
+    .grn-consume-fill.level-complete { background: linear-gradient(90deg, #991b1b, #ef4444); }
+    .grn-consume-status { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .05rem .4rem; border: 1px solid var(--ui-border-strong, #334155); color: var(--ui-text-muted, #94a3b8); }
+    .grn-consume-status.is-recorded { border-color: #10b981; color: #059669; }
+    .grn-consume-status.is-reconstructed { border-color: #0ea5e9; color: #0284c7; }
+    .grn-consume-summary { min-width: 190px; }
+    /* Light theme keeps the same five bands but with ink-dark label colours. */
+    html[data-theme="light"] .grn-consume.level-low .grn-consume-pct { color: #047857; }
+    html[data-theme="light"] .grn-consume.level-moderate .grn-consume-pct { color: #4d7c0f; }
+    html[data-theme="light"] .grn-consume.level-high .grn-consume-pct { color: #b45309; }
+    html[data-theme="light"] .grn-consume.level-critical .grn-consume-pct { color: #c2410c; }
+    html[data-theme="light"] .grn-consume.level-complete .grn-consume-pct { color: #b91c1c; }
+    .grn-consume-spinning { animation: spin .8s linear infinite; }
+    @media (max-width: 767.98px) {
+        .grn-consume { min-width: 150px; }
+        .grn-consume-pct { min-width: 40px; font-size: .72rem; }
+    }
 </style>
 <div class="container-fluid">
     <div class="row mb-3">
@@ -476,6 +512,8 @@
 
                 <a href="{{ url_for('export_grn', search=search, start_date=start_date, end_date=end_date) }}" class="btn btn-sm btn-success" title="Export Excel"><i class="bi bi-file-earmark-excel"></i></a>
 
+                <button type="button" class="btn btn-sm btn-outline-info" id="grnConsumptionRefresh" title="Recalculate the consumption bars from the stock ledger"><i class="bi bi-arrow-repeat"></i></button>
+
                 {% if search or start_date or end_date %}
 
                 <a href="{{ url_for('grn') }}" class="btn btn-sm btn-secondary" title="Clear Search"><i class="bi bi-x-lg"></i></a>
@@ -543,8 +581,58 @@
 
                             <td>{{ grn.supplier }}</td>
 
-                            <td>{{ grn.items|selectattr('is_void', 'equalto', False)|list|length }}</td>
-                            <td>{% set total_qty = namespace(value=0) %}{% for item in grn.items if not item.is_void %}{% set total_qty.value = total_qty.value + (item.qty or 0) %}{% endfor %}{{ total_qty.value }}</td>
+                            <td style="min-width: 300px;">
+                                {% set grn_consumption_row = (grn_consumption['grns'].get(grn.id) if grn_consumption else None) %}
+                                {% for item in grn.items if not item.is_void %}
+                                {% set lot = (grn_consumption['items'].get(item.id) if grn_consumption else None) %}
+                                {% set received = lot.received_qty if lot else (item.qty or 0) %}
+                                {% set consumed = lot.consumed_qty if lot else 0 %}
+                                {% set remaining = lot.remaining_qty if lot else (item.qty or 0) %}
+                                {% set pct = lot.consumed_pct if lot else 0 %}
+                                {% set level = lot.level if lot else 'low' %}
+                                <div class="grn-item-consume">
+                                    <div class="grn-consume-head">
+                                        <span class="grn-consume-name">{{ item.mat_name }}</span>
+                                        {% if item.price_at_time %}<span class="grn-consume-meta">@ Rs. {{ '%.2f'|format(item.price_at_time) }}</span>{% endif %}
+                                        {% if lot and lot.status in ['recorded', 'reconstructed'] %}
+                                        <span class="grn-consume-status {{ 'is-recorded' if lot.status == 'recorded' else 'is-reconstructed' }}"
+                                              title="{{ 'Consumed through posted FIFO allocations' if lot.status == 'recorded' else 'Consumed through the FIFO movement replay (no posted allocation for this lot)' }}">{{ lot.status }}</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="grn-consume-meta mb-1">
+                                        Received: <b data-grn-received>{{ '{:,.2f}'.format(received) }}</b>
+                                        &middot; Consumed: <b data-grn-consumed>{{ '{:,.2f}'.format(consumed) }}</b>
+                                        &middot; Remaining: <b data-grn-remaining>{{ '{:,.2f}'.format(remaining) }}</b>
+                                    </div>
+                                    <div class="grn-consume level-{{ level }}" data-grn-consume data-grn-item-id="{{ item.id }}"
+                                         data-received="{{ received }}" data-consumed="{{ consumed }}" data-percent="{{ pct }}">
+                                        <div class="grn-consume-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                             aria-valuenow="{{ pct }}" aria-valuetext="{{ pct }}% consumed"
+                                             title="{{ '%.2f'|format(consumed) }} of {{ '%.2f'|format(received) }} consumed">
+                                            <div class="grn-consume-fill level-{{ level }}" style="width: {{ pct }}%;"></div>
+                                        </div>
+                                        <span class="grn-consume-pct">{{ '{:,.1f}'.format(pct) }}%</span>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                {% set total_qty = namespace(value=0) %}{% for item in grn.items if not item.is_void %}{% set total_qty.value = total_qty.value + (item.qty or 0) %}{% endfor %}
+                                <div class="grn-consume-summary">
+                                    <div class="fw-bold">{{ '{:,.2f}'.format(total_qty.value) }}</div>
+                                    {% if grn_consumption_row %}
+                                    <div class="grn-consume level-{{ grn_consumption_row.level }}" data-grn-summary data-grn-id="{{ grn.id }}"
+                                         data-received="{{ grn_consumption_row.received_qty }}" data-consumed="{{ grn_consumption_row.consumed_qty }}">
+                                        <div class="grn-consume-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                             aria-valuenow="{{ grn_consumption_row.consumed_pct }}" aria-valuetext="{{ grn_consumption_row.consumed_pct }}% consumed">
+                                            <div class="grn-consume-fill level-{{ grn_consumption_row.level }}" style="width: {{ grn_consumption_row.consumed_pct }}%;"></div>
+                                        </div>
+                                        <span class="grn-consume-pct">{{ '{:,.1f}'.format(grn_consumption_row.consumed_pct) }}%</span>
+                                    </div>
+                                    <div class="grn-consume-meta">Remaining: <b>{{ '{:,.2f}'.format(grn_consumption_row.remaining_qty) }}</b></div>
+                                    {% endif %}
+                                </div>
+                            </td>
                             <td>{{ "%.2f"|format(grn.discount or 0) }}</td>
 
                             <td>
@@ -1139,7 +1227,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+    // ---- Stock-consumption indicator: server data, JS rendering ----
+    // The bars are already rendered from the authoritative server projection;
+    // this only repaints them and lets the operator pull a fresh replay after
+    // a dispatch, return or adjustment without reloading the page.
+    var consumptionRefreshBtn = document.getElementById('grnConsumptionRefresh');
+    if (consumptionRefreshBtn && window.FBMGrnConsumption) {
+        consumptionRefreshBtn.addEventListener('click', function () {
+            var icon = this.querySelector('i');
+            if (icon) icon.classList.add('spin');
+            this.disabled = true;
+            var button = this;
+            window.FBMGrnConsumption.refresh('/api/grn_consumption').then(function (payload) {
+                if (payload === false) {
+                    button.classList.add('btn-danger');
+                    button.title = 'Could not refresh from the stock ledger — the values on screen are unchanged.';
+                } else {
+                    button.classList.add('btn-success');
+                    window.setTimeout(function () { button.classList.remove('btn-success'); }, 1200);
+                }
+            }).finally(function () {
+                button.disabled = false;
+                if (icon) icon.classList.remove('spin');
+            });
+        });
+    }
 });
 </script>
+<script src="{{ url_for('static', filename='grn_consumption.js') }}?v=1"></script>
 
 {% endblock %}

@@ -172,6 +172,172 @@ def build_profit_loss_excel(report):
     quality_rows += [["POLICY", "", message, 0.0] for message in report["unsupported"]]
     _write_table(quality_ws, ["Code", "Reference", "Warning / Accounting Policy", "Amount"], quality_rows, {"Warning / Accounting Policy": 110, "Reference": 25})
 
+    # ------------------------------------------------------------------ #
+    # Enhanced breakdown (same view model as the on-screen report).
+    # Added as extra sheets so every existing sheet keeps its name/order.
+    # ------------------------------------------------------------------ #
+    breakdown = report.get("breakdown")
+    if breakdown:
+        cards = breakdown.get("cards") or []
+        reconcile = breakdown.get("reconcile") or {}
+        cards_ws = wb.create_sheet("P&L Cards")
+        _write_table(
+            cards_ws,
+            ["Card", "Nature", "Amount", "What it is"],
+            [
+                [
+                    card["label"],
+                    "Realized profit" if card.get("realized") else (
+                        "Estimate (not profit)" if card.get("estimate") else "Balance (not profit)"
+                    ),
+                    _value(card["value"]),
+                    card.get("sub", ""),
+                ]
+                for card in cards
+            ],
+            {"What it is": 80, "Card": 40, "Nature": 22},
+        )
+        for row in cards_ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            for cell in row:
+                cell.number_format = '#,##0.00;[Red]-#,##0.00'
+        first_row = 2 + len(cards) + 1
+        cards_ws.cell(first_row, 1, "Reconciliation").font = Font(bold=True)
+        for offset, (label, key) in enumerate(
+            [
+                ("Gross profit (delivered goods)", "gross_profit"),
+                ("+ Service margin", "service_margin"),
+                ("+ Other income", "other_income"),
+                ("+ Other gains", "other_gains"),
+                ("- Operating expenses", "operating_expenses"),
+                ("- Other losses", "other_losses"),
+                ("= Net profit / loss", "net_profit"),
+                ("Ledger profit (must match)", "report_profit"),
+                ("Difference", "difference"),
+            ],
+            first_row + 1,
+        ):
+            cards_ws.cell(offset, 1, label)
+            cards_ws.cell(offset, 2, _value(reconcile.get(key)))
+            cards_ws.cell(offset, 2).number_format = '#,##0.00;[Red]-#,##0.00'
+        cards_ws.cell(first_row + 11, 1, "Reconciles exactly" if reconcile.get("matches") else "REVIEW REQUIRED")
+        cards_ws.column_dimensions["A"].width = 40
+        cards_ws.column_dimensions["B"].width = 22
+
+        item_ws = wb.create_sheet("By Item")
+        _write_table(
+            item_ws,
+            ["Item", "Delivered qty", "Goods sales", "FIFO cost of goods sold", "Gross profit", "Margin",
+             "Remaining stock qty", "Remaining stock value"],
+            [
+                [
+                    row["material"], _value(row["qty"]), _value(row["material_revenue"]),
+                    _value(row["material_cost"]), _value(row["gross_profit"]), _value(row["margin_pct"]),
+                    _value(row.get("remaining_inventory_qty")), _value(row.get("remaining_inventory_value")),
+                ]
+                for row in breakdown.get("by_item", [])
+            ],
+        )
+        service_ws = wb.create_sheet("By Service")
+        _write_table(
+            service_ws,
+            ["Service", "Qty", "Revenue earned", "Direct cost", "Margin", "Margin percent"],
+            [
+                [
+                    row["service"], _value(row["qty"]), _value(row["service_revenue"]),
+                    _value(row["service_cost"]), _value(row["margin"]), _value(row["margin_pct"]),
+                ]
+                for row in breakdown.get("by_service", [])
+            ],
+        )
+        customer_ws = wb.create_sheet("By Customer")
+        _write_table(
+            customer_ws,
+            ["Customer", "Category", "Revenue", "Cost", "Profit / loss", "Margin percent"],
+            [
+                [
+                    row["client"], row.get("client_category", ""), _value(row["revenue"]),
+                    _value(row["cost"]), _value(row["profit"]), _value(row["margin_pct"]),
+                ]
+                for row in breakdown.get("by_customer", [])
+            ],
+            {"Customer": 40, "Category": 18},
+        )
+        day_ws = wb.create_sheet("By Day")
+        _write_table(
+            day_ws,
+            ["Day", "Revenue", "FIFO cost", "Expenses / losses", "Net result", "Rows"],
+            [
+                [
+                    row["day"], _value(row["revenue"]), _value(row["cost"]),
+                    _value(row["expenses"] + row["other_loss"]), _value(row["profit"]), row.get("rows", 0),
+                ]
+                for row in breakdown.get("by_day", [])
+            ],
+        )
+
+        payment_summary = breakdown.get("payment_summary") or {}
+        credit_ws = wb.create_sheet("Outstanding Credit")
+        _write_table(
+            credit_ws,
+            ["Document", "Reference", "Date", "Customer", "Payment status", "Bill value", "Collected",
+             "Outstanding", "Outstanding on this period's revenue"],
+            [
+                [
+                    row["document_type"], row["reference"],
+                    row["date"].strftime("%Y-%m-%d") if row.get("date") else "",
+                    row.get("client", ""), row.get("payment_status_label", ""),
+                    _value(row.get("document_gross")), _value(row.get("document_collected")),
+                    _value(row.get("document_outstanding")), _value(row.get("period_outstanding")),
+                ]
+                for row in payment_summary.get("top_credit_rows", payment_summary.get("document_rows", []))
+            ],
+            {"Reference": 28, "Customer": 34, "Document": 16},
+        )
+        advance_ws = wb.create_sheet("Customer Advances")
+        _write_table(
+            advance_ws,
+            ["Booking", "Customer", "Material", "Remaining qty", "Unfulfilled value", "Advance (not revenue)"],
+            [
+                [
+                    row["reference"], row["client"], row["material"], _value(row["remaining_qty"]),
+                    _value(row["outstanding_value"]), _value(row["advance_value"]),
+                ]
+                for row in payment_summary.get("advance_rows", [])
+            ],
+            {"Customer": 34},
+        )
+
+        grn_section = breakdown.get("grn_section")
+        stock_ws = wb.create_sheet("GRN & Inventory")
+        stock_rows = []
+        for row in (grn_section or {}).get("purchase_rows", []):
+            lot = row.get("consumption") or {}
+            stock_rows.append([
+                "Purchase", row["reference"], row["material"],
+                row["date"].strftime("%Y-%m-%d") if row.get("date") else "",
+                _value(row["qty"]), _value(lot.get("consumed_qty")), _value(lot.get("remaining_qty")),
+                _value(lot.get("consumed_pct")), _value(row["rate"]), _value(row["amount"]),
+                _value(lot.get("remaining_value")), lot.get("status", ""),
+            ])
+        for row in (grn_section or {}).get("inventory_by_material", []):
+            stock_rows.append([
+                "Inventory", "", row["material"], "", _value(row["received_qty"]),
+                _value(row["consumed_qty"]), _value(row["remaining_qty"]), "", "",
+                _value(row.get("average_remaining_rate")), _value(row["remaining_value"]), "",
+            ])
+        _write_table(
+            stock_ws,
+            ["Section", "Reference", "Material", "GRN date", "Received qty", "Consumed qty", "Remaining qty",
+             "Consumed percent", "Rate", "Purchase value", "Remaining value", "Lot status"],
+            stock_rows,
+            {"Reference": 24, "Section": 14},
+        )
+        if grn_section:
+            note_row = len(stock_rows) + 3
+            stock_ws.cell(note_row, 1, "Purchases in period (inventory, not expense)")
+            stock_ws.cell(note_row, 2, _value(grn_section.get("purchase_value"))).number_format = '#,##0.00;[Red]-#,##0.00'
+            stock_ws.cell(note_row + 1, 1, grn_section.get("note", ""))
+
     buffer = BytesIO()
     wb.save(buffer)
     buffer.seek(0)

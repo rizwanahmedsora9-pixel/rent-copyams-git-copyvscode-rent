@@ -1,0 +1,642 @@
+{# ---------------------------------------------------------------------------
+   Profit & Loss results region.
+
+   Rendered inside profit_reports.html and re-rendered on its own
+   (?partial=1) when a filter changes, so the automatic filters never reload
+   the whole page.  Every figure comes from build_profit_loss_report; nothing
+   is recalculated in the browser.
+   --------------------------------------------------------------------------- #}
+{% macro money(value) -%}
+{{ '{:,.2f}'.format(value if value is not none else 0) }}
+{%- endmacro %}
+{% macro signed(value) -%}
+<span class="{{ 'pos' if (value or 0) >= 0 else 'neg' }}">{{ '{:,.2f}'.format(value or 0) }}</span>
+{%- endmacro %}
+{% from "_ui/kpi_tile.html" import tile as ui_tile %}
+{% set bd = breakdown %}
+<div id="plResults" class="pl-results" data-pl-results aria-live="polite"
+     data-pl-start="{{ start_date or '' }}" data-pl-end="{{ end_date or '' }}">
+
+  {# ------------------------------- NET RESULT ------------------------------- #}
+  <div class="profit-hero">
+    <div class="row align-items-center g-3">
+      <div class="col-lg-7">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <span class="status-pill"><i class="bi bi-calendar3"></i> {{ period_label }}</span>
+          <span class="status-pill"><i class="bi bi-calendar-range"></i> {{ start_date or 'Beginning' }} → {{ end_date or 'Today' }}</span>
+          {% if summary.unknown_cost_rows %}<a class="status-pill text-warning" href="{{ unknown_url }}"><i class="bi bi-exclamation-triangle"></i> {{ summary.unknown_cost_rows }} unresolved-cost rows</a>{% else %}<span class="status-pill text-success"><i class="bi bi-check2-circle"></i> Costs resolved</span>{% endif %}
+          {% if summary.estimated_cost_rows %}<span class="status-pill text-info"><i class="bi bi-info-circle"></i> {{ summary.estimated_cost_rows }} estimated-cost rows</span>{% endif %}
+          <span class="status-pill"><i class="bi bi-list-ol"></i> {{ entries_count }} matching entries</span>
+        </div>
+        <div class="text-muted small fw-bold text-uppercase">Net Profit / Loss for the selected period</div>
+        <div class="profit-hero-value {{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ money(total_profit) }}</div>
+        <p class="section-note mt-2">
+          {{ 'Net profit' if total_profit >= 0 else 'Net loss' }} after FIFO cost of the goods actually delivered,
+          direct service costs, operating expenses, returns and supported other gains/losses.
+          Receipts, advances and purchases are never counted as profit.
+        </p>
+      </div>
+      <div class="col-lg-5">
+        <div class="row g-2 text-center">
+          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Net margin</div><div class="fs-4 fw-bold">{{ '{:,.2f}'.format(summary.margin_pct) }}%</div></div></div>
+          <div class="col-6"><div class="p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="small text-muted">Recognized entries</div><div class="fs-4 fw-bold">{{ summary.row_count }}</div></div></div>
+          <div class="col-12"><a href="{{ entries_url }}" class="btn btn-sm btn-outline-warning w-100">Trace every figure to its source <i class="bi bi-arrow-right ms-1"></i></a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ---------------------- PLAIN-LANGUAGE SUMMARY STRIP --------------------- #}
+  {# The owner's one-glance figures.  They are the same numbers as the detailed
+     cards below, worded without accounting jargon. #}
+  <div class="pl-section-head">
+    <div>
+      <h3><i class="bi bi-card-list"></i> Profit Summary</h3>
+      <p>Money in, money out and what is kept. Every value is clickable and opens the matching entries.</p>
+    </div>
+  </div>
+  <div class="ui-kpi-grid">
+    {{ ui_tile(href=profit_url, label='Total Profit', value=("Rs. " ~ ("{:,.2f}".format(total_profit_sum))), icon='bi-arrow-up-circle', colour='green', sub=(profit_entry_count ~ ' profitable entries'), cta='View profit entries') }}
+    {{ ui_tile(href=loss_url, label='Total Loss', value=("Rs. " ~ ("{:,.2f}".format(total_loss_sum))), icon='bi-arrow-down-circle', colour='red', sub=(loss_entry_count ~ ' loss entries'), cta='View loss entries') }}
+    {{ ui_tile(href=entries_url, label='Profit (Money Kept)', value=("Rs. " ~ ("{:,.2f}".format(total_profit))), icon='bi-cash-coin', colour=('green' if total_profit >= 0 else 'red'), sub='Net result after FIFO cost, service cost and expenses', cta='See transactions') }}
+    {{ ui_tile(href=report_url(view='entries', metric='revenue'), label='Sales (Money In)', value=("Rs. " ~ ("{:,.2f}".format(total_revenue))), icon='bi-bag-cash', colour='sky', sub='Earned material + delivery + other income, net of returns', cta='See revenue entries') }}
+    {{ ui_tile(href=report_url(view='entries', metric='cogs'), label='Cost of Goods (Money Out)', value=("Rs. " ~ ("{:,.2f}".format(total_cogs))), icon='bi-truck', colour='amber', sub='Recognized material + direct delivery cost', cta='See cost entries') }}
+    {{ ui_tile(href=url_for('financial_details', start_date=start_date, end_date=end_date), label='Money Received', value=("Rs. " ~ ("{:,.2f}".format(payment_received_total))), icon='bi-wallet2', colour='teal', sub='Settlement information only — never new profit', cta='Open financial details') }}
+  </div>
+
+{% if bd %}
+  {# ------------------------- REALIZED PROFIT & LOSS ------------------------- #}
+  <div class="pl-section-head">
+    <div>
+      <h3><i class="bi bi-check2-circle"></i> Realized profit &amp; loss</h3>
+      <p>Recognized on the delivery date for goods and the earning date for services. Filters above change which rows are included, never the arithmetic.</p>
+    </div>
+  </div>
+  <div class="pl-card-grid">
+    {% for card in bd.cards if card.realized %}
+    <a class="pl-card pl-card--{{ card.colour }}{% if card.hero %} pl-card--hero{% endif %}" href="{{ pl_card_links[card.key] }}" title="{{ card.sub }}">
+      <span class="pl-card-label">{{ card.label }}</span>
+      <span class="pl-card-value {{ 'pos' if card.value >= 0 else 'neg' }}">Rs. {{ money(card.value) }}</span>
+      <span class="pl-card-sub">{{ card.sub }}</span>
+      <i class="bi {{ card.icon }} pl-card-icon"></i>
+    </a>
+    {% endfor %}
+  </div>
+
+  {# ------------------------ POSITION AND ESTIMATES ------------------------- #}
+  <div class="pl-section-head pl-section-head--split">
+    <div>
+      <h3><i class="bi bi-safe"></i> Position &amp; estimates — not profit</h3>
+      <p>These are balances and forecasts. They are shown separately and are never added into net profit.</p>
+    </div>
+  </div>
+  <div class="pl-card-grid pl-card-grid--muted">
+    {% for card in bd.cards if not card.realized %}
+    <div class="pl-card pl-card--{{ card.colour }}"{% if card.key == 'estimated_undelivered_profit' %} id="pl-undelivered-estimate"{% endif %}>
+      <span class="pl-card-label">{{ card.label }}{% if card.estimate %} <span class="pl-badge">estimate</span>{% else %} <span class="pl-badge">balance</span>{% endif %}</span>
+      <span class="pl-card-value {{ 'pos' if card.value >= 0 else 'neg' }}">Rs. {{ money(card.value) }}</span>
+      <span class="pl-card-sub">{{ card.sub }}</span>
+      <i class="bi {{ card.icon }} pl-card-icon"></i>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ---------------------------- RECONCILIATION ---------------------------- #}
+  <div class="ui-card pl-recon">
+    <div class="ui-card-body">
+      <div class="pl-recon-formula">
+        <span>Gross profit <strong>Rs. {{ money(bd.reconcile.gross_profit) }}</strong></span>
+        <span>+ Service margin <strong>Rs. {{ money(bd.reconcile.service_margin) }}</strong></span>
+        <span>+ Other income <strong>Rs. {{ money(bd.reconcile.other_income) }}</strong></span>
+        <span>+ Other gains <strong>Rs. {{ money(bd.reconcile.other_gains) }}</strong></span>
+        <span>− Operating expenses <strong>Rs. {{ money(bd.reconcile.operating_expenses) }}</strong></span>
+        <span>− Other losses <strong>Rs. {{ money(bd.reconcile.other_losses) }}</strong></span>
+        <span class="pl-recon-total">= Net {{ 'profit' if bd.reconcile.net_profit >= 0 else 'loss' }} <strong>Rs. {{ money(bd.reconcile.net_profit) }}</strong></span>
+      </div>
+      <p class="section-note mt-2 mb-0">
+        {% if bd.reconcile.matches %}
+        <i class="bi bi-check2-circle text-success"></i> Reconciles exactly with the transaction ledger (difference Rs. {{ '{:,.6f}'.format(bd.reconcile.difference) }}).
+        {% else %}
+        <i class="bi bi-exclamation-triangle text-warning"></i> Reconciliation difference of Rs. {{ money(bd.reconcile.difference) }} — please review the warnings below.
+        {% endif %}
+        {% if summary.unknown_cost_rows %}
+        {{ summary.unknown_cost_rows }} rows (revenue Rs. {{ money(summary.unresolved_revenue) }}) have no defensible cost and are excluded from net rather than valued at zero.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {# ------------------------------- BY ITEM -------------------------------- #}
+  <div class="ui-card">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-tags"></i> Sales by Item — FIFO cost and gross profit</h5>
+      <span class="small text-muted">Delivered quantity only · oldest GRN lot costed first</span>
+    </div>
+    <div class="ui-card-body flush">
+      <div class="ui-table-wrap">
+        <table class="ui-table pl-table">
+          <thead><tr>
+            <th>Item</th><th class="num">Delivered qty</th><th class="num">Goods sales</th>
+            <th class="num">FIFO cost of goods sold</th><th class="num">Gross profit</th><th class="num">Margin</th>
+            <th class="num">Remaining stock (FIFO value)</th>
+          </tr></thead>
+          <tbody>
+            {% for row in bd.by_item %}
+            <tr>
+              <td class="fw-bold"><a href="{{ report_url(view='entries', material=row.material, page=None) }}">{{ row.material }}</a></td>
+              <td class="num">{{ '{:,.2f}'.format(row.qty) }}</td>
+              <td class="num">Rs. {{ money(row.material_revenue) }}</td>
+              <td class="num">Rs. {{ money(row.material_cost) }}</td>
+              <td class="num">{{ signed(row.gross_profit) }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.margin_pct) }}%</td>
+              <td class="num text-muted">{% if row.remaining_inventory_value %}Rs. {{ money(row.remaining_inventory_value) }}<br><span class="small">{{ '{:,.2f}'.format(row.remaining_inventory_qty) }} left</span>{% else %}—{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="ui-empty">No delivered goods match these filters.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="table-subtotal">
+              <td>Total</td>
+              <td class="num">{{ '{:,.2f}'.format(bd.by_item|sum(attribute='qty')) }}</td>
+              <td class="num">Rs. {{ money(bd.by_item|sum(attribute='material_revenue')) }}</td>
+              <td class="num">Rs. {{ money(bd.by_item|sum(attribute='material_cost')) }}</td>
+              <td class="num">{{ signed(bd.by_item|sum(attribute='gross_profit')) }}</td>
+              <td class="num">—</td>
+              <td class="num">—</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# --------------------------- SERVICES / MARGIN -------------------------- #}
+  <div class="row g-3">
+    <div class="col-xl-7">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-truck"></i> Service revenue, direct cost and margin</h5></div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap">
+            <table class="ui-table pl-table">
+              <thead><tr><th>Service</th><th class="num">Qty</th><th class="num">Revenue earned</th><th class="num">Direct cost</th><th class="num">Margin (Rs.)</th><th class="num">Margin (%)</th></tr></thead>
+              <tbody>
+                {% for row in bd.by_service %}
+                <tr>
+                  <td class="fw-bold">{{ row.service }}</td>
+                  <td class="num">{{ '{:,.2f}'.format(row.qty) }}</td>
+                  <td class="num">Rs. {{ money(row.service_revenue) }}</td>
+                  <td class="num">Rs. {{ money(row.service_cost) }}</td>
+                  <td class="num">{{ signed(row.margin) }}</td>
+                  <td class="num">{{ '{:,.2f}'.format(row.margin_pct) }}%</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="ui-empty">No service charges earned in this period.</td></tr>
+                {% endfor %}
+              </tbody>
+              <tfoot><tr class="table-subtotal">
+                <td>Total</td><td class="num">—</td>
+                <td class="num">Rs. {{ money(bd.by_service|sum(attribute='service_revenue')) }}</td>
+                <td class="num">Rs. {{ money(bd.direct_service_cost_total) }}</td>
+                <td class="num">{{ signed(bd.by_service|sum(attribute='service_revenue') - bd.direct_service_cost_total) }}</td>
+                <td class="num">—</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-5">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-person-badge"></i> Delivery-person / direct service costs</h5></div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap pl-scroll">
+            <table class="ui-table pl-table">
+              <thead><tr><th>Date</th><th>Reference</th><th>Service</th><th class="num">Cost</th></tr></thead>
+              <tbody>
+                {% for row in bd.delivery_cost_rows[:25] %}
+                <tr>
+                  <td>{{ row.date.strftime('%Y-%m-%d') if row.date else '—' }}</td>
+                  <td>{% if row.document_type and row.document_id %}<a href="{{ url_for('profit_transaction_detail', document_type=row.document_type, document_id=row.document_id, start_date=start_date, end_date=end_date) }}">{{ row.reference }}</a>{% else %}{{ row.reference }}{% endif %}</td>
+                  <td>{{ row.material }}</td>
+                  <td class="num">Rs. {{ money(row.cost) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="ui-empty">No direct service cost recorded for these filters.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="ui-card-body pt-0"><p class="section-note mb-0">Driver settlements (payments) are cash movements and are not deducted here a second time.</p></div>
+      </div>
+    </div>
+  </div>
+
+  {# --------------------------- OPERATING EXPENSES ------------------------- #}
+  <div class="row g-3">
+    <div class="col-xl-5">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-receipt"></i> Operating expenses by category</h5></div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap">
+            <table class="ui-table pl-table">
+              <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Entries</th></tr></thead>
+              <tbody>
+                {% for row in bd.by_expense_category %}
+                <tr><td class="fw-bold">{{ row.category }}</td><td class="num">Rs. {{ money(row.expenses) }}</td><td class="num">{{ row.rows }}</td></tr>
+                {% else %}
+                <tr><td colspan="3" class="ui-empty">No operating expenses recorded in this period.</td></tr>
+                {% endfor %}
+              </tbody>
+              <tfoot><tr class="table-subtotal"><td>Total</td><td class="num">Rs. {{ money(bd.reconcile.operating_expenses) }}</td><td class="num">—</td></tr></tfoot>
+            </table>
+          </div>
+        </div>
+        <div class="ui-card-body pt-0"><p class="section-note mb-0">Other direct costs (discounts, waive-offs, reconciliation differences): Rs. {{ money(bd.other_direct_cost_total) }}.</p></div>
+      </div>
+    </div>
+    <div class="col-xl-7">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-people"></i> Sales by Customer — profit / loss</h5><span class="small text-muted">Grouped by client · pages to the transaction list</span></div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap pl-scroll">
+            <table class="ui-table pl-table">
+              <thead><tr><th>Customer</th><th>Category</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Profit / loss</th></tr></thead>
+              <tbody>
+                {% for row in bd.by_customer[:40] %}
+                <tr>
+                  <td class="fw-bold"><a href="{{ report_url(view='entries', client=row.client, page=None) }}">{{ row.client }}</a>{% if row.client_code %}<br><span class="small text-muted">{{ row.client_code }}</span>{% endif %}</td>
+                  <td class="small text-muted">{{ row.client_category or '—' }}</td>
+                  <td class="num">Rs. {{ money(row.revenue) }}</td>
+                  <td class="num">Rs. {{ money(row.cost) }}</td>
+                  <td class="num">{{ signed(row.profit) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="ui-empty">No customer activity matches these filters.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="ui-card-body pt-0"><p class="section-note mb-0">This application has no separate company-site dimension, so profit is reported per customer only. Internal stock transfers are never treated as sales.</p></div>
+      </div>
+    </div>
+  </div>
+
+  {# ----------------------------- PROFIT BY DATE --------------------------- #}
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-calendar2-week"></i> Profit / loss by delivery date</h5><span class="small text-muted">Revenue versus cost per day</span></div>
+    <div class="ui-card-body">
+      {% if bd.by_day %}
+      {% set max_rev = (bd.by_day|map(attribute='revenue')|map('abs')|max) or 1 %}
+      <div class="pl-chart" role="img" aria-label="Daily revenue, cost and profit">
+        {% for row in bd.by_day[-45:] %}
+        <div class="pl-chart-col" title="{{ row.day }} · revenue Rs. {{ money(row.revenue) }} · cost Rs. {{ money(row.cost) }} · profit Rs. {{ money(row.profit) }}">
+          <div class="pl-chart-bars">
+            <span class="pl-chart-bar pl-chart-bar--rev" style="height:{{ (row.revenue|abs / max_rev * 100)|round(1) }}%"></span>
+            <span class="pl-chart-bar pl-chart-bar--cost" style="height:{{ (row.cost|abs / max_rev * 100)|round(1) }}%"></span>
+            <span class="pl-chart-bar {{ 'pl-chart-bar--pos' if row.profit >= 0 else 'pl-chart-bar--neg' }}" style="height:{{ (row.profit|abs / max_rev * 100)|round(1) }}%"></span>
+          </div>
+          <span class="pl-chart-x">{{ row.day[5:] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="pl-chart-legend">
+        <span><i class="pl-legend pl-legend--rev"></i> Revenue</span>
+        <span><i class="pl-legend pl-legend--cost"></i> FIFO cost</span>
+        <span><i class="pl-legend pl-legend--pos"></i> Profit</span>
+        <span><i class="pl-legend pl-legend--neg"></i> Loss</span>
+        <span class="text-muted">Last {{ [bd.by_day|length, 45]|min }} active days of the selection</span>
+      </div>
+      {% endif %}
+      <div class="ui-table-wrap pl-scroll mt-3">
+        <table class="ui-table pl-table">
+          <thead><tr><th>Day</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Expenses / losses</th><th class="num">Net result</th><th class="num">Entries</th></tr></thead>
+          <tbody>
+            {% for row in bd.by_day|reverse %}
+            <tr>
+              <td>{{ row.day }}</td>
+              <td class="num">Rs. {{ money(row.revenue) }}</td>
+              <td class="num">Rs. {{ money(row.cost) }}</td>
+              <td class="num">Rs. {{ money(row.expenses + row.other_loss) }}</td>
+              <td class="num">{{ signed(row.profit) }}</td>
+              <td class="num">{{ row.rows }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="ui-empty">No activity in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ------------------------- TRANSACTIONS (PAGINATED) --------------------- #}
+  <div class="ui-card">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-receipt"></i> Profit / loss by sales transaction</h5>
+      <div class="ui-toolbar">
+        <span class="small text-muted">Showing {{ pagination.start }}–{{ pagination.end }} of {{ pagination.total }} matching entries{% if pagination.pages > 1 %} · page {{ pagination.page }} of {{ pagination.pages }}{% endif %}</span>
+      </div>
+    </div>
+    <div class="ui-card-body flush">
+      <div class="ui-table-wrap">
+        <table class="ui-table pl-table pl-table--transactions">
+          <thead>
+            <tr>
+              <th><a href="{{ sort_url(sort='date', order=('asc' if sort == 'date' and order == 'desc' else 'desc')) }}" data-pl-nav>Date</a></th>
+              <th><a href="{{ sort_url(sort='reference', order=('asc' if sort == 'reference' and order == 'desc' else 'desc')) }}" data-pl-nav>Reference</a></th>
+              <th><a href="{{ sort_url(sort='customer', order=('asc' if sort == 'customer' and order == 'desc' else 'desc')) }}" data-pl-nav>Customer</a></th>
+              <th>Type</th>
+              <th><a href="{{ sort_url(sort='material', order=('asc' if sort == 'material' and order == 'desc' else 'desc')) }}" data-pl-nav>Item / service</a></th>
+              <th class="num"><a href="{{ sort_url(sort='qty', order=('asc' if sort == 'qty' and order == 'desc' else 'desc')) }}" data-pl-nav>Qty</a></th>
+              <th class="num">Rate</th>
+              <th class="num"><a href="{{ sort_url(sort='revenue', order=('asc' if sort == 'revenue' and order == 'desc' else 'desc')) }}" data-pl-nav>Revenue</a></th>
+              <th class="num"><a href="{{ sort_url(sort='cost', order=('asc' if sort == 'cost' and order == 'desc' else 'desc')) }}" data-pl-nav>FIFO cost</a></th>
+              <th class="num"><a href="{{ sort_url(sort='profit', order=('asc' if sort == 'profit' and order == 'desc' else 'desc')) }}" data-pl-nav>Profit / loss</a></th>
+              <th>Payment</th>
+              <th class="num">Collected</th>
+              <th class="num">Outstanding</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in transactions %}
+            <tr>
+              <td class="nowrap">{{ t.date.strftime('%Y-%m-%d') if t.date else 'Undated' }}</td>
+              <td>{% if t.document_type and t.document_id %}<a href="{{ url_for('profit_transaction_detail', document_type=t.document_type, document_id=t.document_id, start_date=start_date, end_date=end_date) }}">{{ t.reference }}</a>{% else %}{{ t.reference }}{% endif %}
+                  {% if t.booking_id %}<br><span class="small text-muted">Booking #{{ t.booking_id }}</span>{% endif %}</td>
+              <td>{{ t.client or t.account or 'Business' }}{% if t.client_code %}<br><span class="small text-muted">{{ t.client_code }}</span>{% endif %}</td>
+              <td><span class="pl-pill">{{ t.transaction_group_label }}</span>{% if t.booking_status_label %}<br><span class="small text-muted">{{ t.booking_status_label }}</span>{% endif %}</td>
+              <td>{{ t.material }}{% if t.booked_material and t.booked_material != t.material %}<br><span class="small text-muted">booked {{ t.booked_material }}</span>{% endif %}</td>
+              <td class="num">{% if t.qty %}{{ '{:,.2f}'.format(t.qty) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.sale_rate %}Rs. {{ money(t.sale_rate) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.revenue or t.entry_type == 'material_sale' or t.entry_type == 'booking_supply' %}Rs. {{ money(t.revenue) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.include_in_net %}{% if t.cogs or t.material_cost or t.delivery_cost %}Rs. {{ money(t.cogs) }}{% else %}—{% endif %}{% else %}<span class="text-warning">Unresolved</span>{% endif %}</td>
+              <td class="num">{% if t.include_in_net %}{{ signed(t.profit) }}{% else %}<span class="text-warning">—</span>{% endif %}</td>
+              <td>{% if t.payment_status_key and t.payment_status_key != 'not_applicable' %}<span class="pl-status pl-status--{{ t.payment_status_key }}">{{ t.payment_status_label }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+              <td class="num">{% if t.document_collected %}Rs. {{ money(t.document_collected) }}{% else %}—{% endif %}</td>
+              <td class="num">{% if t.document_outstanding %}Rs. {{ money(t.document_outstanding) }}{% else %}—{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="13" class="ui-empty">No transactions match these filters. Try a wider date range or reset the filters.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% if pagination.pages > 1 %}
+    <div class="ui-card-body">
+      <nav aria-label="Transaction pages">
+        <ul class="pagination pagination-sm mb-0 flex-wrap">
+          <li class="page-item {{ 'disabled' if pagination.page <= 1 }}"><a class="page-link" data-pl-nav href="{{ report_url(view='entries', page=pagination.page-1) if pagination.page > 1 else '#' }}">Previous</a></li>
+          {% for n in range(1, pagination.pages + 1) %}
+          {% if n == 1 or n == pagination.pages or (n >= pagination.page - 2 and n <= pagination.page + 2) %}
+          <li class="page-item {{ 'active' if n == pagination.page }}"><a class="page-link" data-pl-nav href="{{ report_url(view='entries', page=n) }}">{{ n }}</a></li>
+          {% elif n == pagination.page - 3 or n == pagination.page + 3 %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% endif %}
+          {% endfor %}
+          <li class="page-item {{ 'disabled' if pagination.page >= pagination.pages }}"><a class="page-link" data-pl-nav href="{{ report_url(view='entries', page=pagination.page+1) if pagination.page < pagination.pages else '#' }}">Next</a></li>
+        </ul>
+      </nav>
+      <p class="section-note mb-0 mt-2">Totals above cover every matching entry, not just this page. Filters are kept while paging.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {# --------------------------- PAYMENT & CREDIT --------------------------- #}
+  <div class="row g-3">
+    <div class="col-xl-5">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-wallet2"></i> Collections &amp; credit</h5></div>
+        <div class="ui-card-body">
+          <div class="pl-mini-row"><span>Payments collected on this period's bills</span><strong>Rs. {{ money(bd.payment_summary.collected_on_recognized_documents) }}</strong></div>
+          <div class="pl-mini-row"><span>Outstanding on this period's delivered revenue</span><strong>Rs. {{ money(bd.payment_summary.outstanding_on_recognized_documents) }}</strong></div>
+          <div class="pl-mini-row"><span>Total bill balance (including undelivered booking value)</span><strong>Rs. {{ money(bd.payment_summary.document_balance_total) }}</strong></div>
+          <div class="pl-mini-row"><span>Bills with a balance</span><strong>{{ bd.payment_summary.documents_with_balance }}</strong></div>
+          <div class="pl-mini-row"><span>Money received in this period (all sources)</span><strong>Rs. {{ money(payment_received_total) }}</strong></div>
+          <div class="pl-mini-row"><span>Customer advances (open bookings, current)</span><strong>Rs. {{ money(bd.payment_summary.advance_total) }}</strong></div>
+          <p class="section-note mt-2 mb-0">{{ bd.payment_summary.note }}</p>
+          <a href="{{ url_for('financial_details', start_date=start_date, end_date=end_date) }}" class="btn btn-outline-secondary btn-sm mt-2">Open financial details</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-7">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-hourglass-split"></i> Bills with a balance</h5><span class="small text-muted">Largest {{ bd.payment_summary.top_credit_rows|length }} of {{ bd.payment_summary.documents_with_balance }} · credit is a receivable, not a profit adjustment</span></div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap pl-scroll">
+            <table class="ui-table pl-table">
+              <thead><tr><th>Date</th><th>Reference</th><th>Customer</th><th class="num">Bill</th><th class="num">Collected</th><th class="num">Outstanding</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for row in bd.payment_summary.top_credit_rows %}
+                <tr>
+                  <td>{{ row.date.strftime('%Y-%m-%d') if row.date else '—' }}</td>
+                  <td><a href="{{ url_for('profit_transaction_detail', document_type=row.document_type, document_id=row.document_id, start_date=start_date, end_date=end_date) }}">{{ row.reference }}</a></td>
+                  <td>{{ row.client }}</td>
+                  <td class="num">Rs. {{ money(row.document_gross) }}</td>
+                  <td class="num">Rs. {{ money(row.document_collected) }}</td>
+                  <td class="num">Rs. {{ money(row.document_outstanding) }}</td>
+                  <td><span class="pl-status pl-status--{{ row.payment_status_key }}">{{ row.payment_status_label }}</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="ui-empty">Every bill for this selection is settled.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# --------------------- UNDELIVERED / ESTIMATES -------------------------- #}
+  <div class="ui-card pl-card--estimate">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-calculator"></i> Undelivered bookings — advances and estimated future margin</h5>
+      <span class="small text-muted">Excluded from realized profit</span>
+    </div>
+    <div class="ui-card-body">
+      <p class="section-note">{{ bd.estimated_undelivered.note }}</p>
+      {% if bd.estimated_undelivered.unknown_cost_rows %}
+      <p class="section-note text-warning"><i class="bi bi-exclamation-triangle"></i> {{ bd.estimated_undelivered.unknown_cost_rows }} undelivered lines have no recorded purchase cost, so no estimated margin is shown for them (a zero cost would invent profit).</p>
+      {% endif %}
+      <div class="ui-table-wrap pl-scroll">
+        <table class="ui-table pl-table">
+          <thead><tr><th>Booking</th><th>Customer</th><th>Item</th><th class="num">Remaining qty</th><th class="num">Booked price</th><th class="num">Estimated cost</th><th class="num">Estimated margin</th><th>Cost basis</th></tr></thead>
+          <tbody>
+            {% for row in bd.estimated_undelivered.rows[:30] %}
+            <tr>
+              <td>{{ row.reference }}</td>
+              <td>{{ row.client }}</td>
+              <td>{{ row.material }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.remaining_qty) }}</td>
+              <td class="num">Rs. {{ money(row.rate) }}</td>
+              <td class="num">{% if row.cost_known %}Rs. {{ money(row.estimated_cost_rate) }}{% else %}<span class="text-warning">unavailable</span>{% endif %}</td>
+              <td class="num">{% if row.cost_known %}{{ signed(row.estimated_profit) }}{% else %}—{% endif %}</td>
+              <td class="small text-muted">{{ row.cost_basis }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="ui-empty">No undelivered booking quantity matches these filters.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr class="table-subtotal"><td colspan="6">Estimated margin on undelivered goods (not realized)</td><td class="num">{{ signed(bd.estimated_undelivered.total) }}</td><td></td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ------------------- GRN PURCHASES & INVENTORY (SEPARATE) --------------- #}
+  {% if bd.grn_section %}
+  <div class="ui-card pl-card--inventory">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-box-seam"></i> GRN purchases and remaining inventory — outside the P&amp;L</h5>
+      <span class="small text-muted">{{ bd.grn_section.purchase_count }} purchase lines · {{ bd.grn_section.lot_count }} FIFO lots</span>
+    </div>
+    <div class="ui-card-body">
+      <p class="section-note">{{ bd.grn_section.note }}</p>
+      <div class="pl-mini-grid">
+        <div class="pl-mini"><span>Purchases received in period</span><strong>Rs. {{ money(bd.grn_section.purchase_value) }}</strong></div>
+        <div class="pl-mini"><span>Purchase quantity</span><strong>{{ '{:,.2f}'.format(bd.grn_section.purchase_qty) }}</strong></div>
+        <div class="pl-mini"><span>Remaining inventory at GRN FIFO cost (current)</span><strong>Rs. {{ money(bd.grn_section.inventory.total_value or 0) }}</strong></div>
+        <div class="pl-mini"><span>Lots consumed via recorded FIFO allocation</span><strong>{{ bd.grn_section.recorded_lot_count }}</strong></div>
+        <div class="pl-mini"><span>Lots reconstructed from movement history</span><strong>{{ bd.grn_section.reconstructed_lot_count }}</strong></div>
+      </div>
+      <div class="ui-table-wrap pl-scroll mt-3">
+        <table class="ui-table pl-table">
+          <thead><tr><th>Date</th><th>GRN</th><th>Supplier</th><th>Item</th><th class="num">Received</th><th class="num">Rate</th><th class="num">Value</th><th class="num">Consumed</th><th class="num">Remaining</th><th class="num">Consumption</th></tr></thead>
+          <tbody>
+            {% for row in bd.grn_section.purchase_rows[:60] %}
+            <tr>
+              <td>{{ row.date.strftime('%Y-%m-%d') if row.date else '—' }}</td>
+              <td><a href="{{ url_for('grn') }}?search={{ row.reference }}">{{ row.reference }}</a></td>
+              <td>{{ row.supplier }}</td>
+              <td>{{ row.material }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.qty) }}</td>
+              <td class="num">Rs. {{ money(row.rate) }}</td>
+              <td class="num">Rs. {{ money(row.amount) }}</td>
+              {% if row.consumption %}
+              <td class="num">{{ '{:,.2f}'.format(row.consumption.consumed_qty) }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.consumption.remaining_qty) }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.consumption.consumed_pct) }}%</td>
+              {% else %}
+              <td class="num">—</td><td class="num">—</td><td class="num">—</td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="10" class="ui-empty">No GRN purchases in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if bd.grn_section.purchase_rows|length > 60 %}<p class="section-note mt-2">Showing the 60 most recent purchase lines of {{ bd.grn_section.purchase_rows|length }}.</p>{% endif %}
+      <div class="ui-table-wrap pl-scroll mt-3">
+        <table class="ui-table pl-table">
+          <thead><tr><th>Item</th><th class="num">Lots</th><th class="num">Received</th><th class="num">Consumed</th><th class="num">Remaining</th><th class="num">Remaining FIFO value</th><th class="num">Average remaining rate</th></tr></thead>
+          <tbody>
+            {% for row in bd.grn_section.inventory_by_material %}
+            <tr>
+              <td class="fw-bold">{{ row.material }}</td>
+              <td class="num">{{ row.lot_count }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.received_qty) }} {{ row.unit }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.consumed_qty) }}</td>
+              <td class="num">{{ '{:,.2f}'.format(row.remaining_qty) }}</td>
+              <td class="num">Rs. {{ money(row.remaining_value) }}</td>
+              <td class="num">Rs. {{ money(row.average_remaining_rate) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="ui-empty">No GRN lots recorded.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if bd.grn_section.warnings %}
+      <details class="mt-3"><summary class="small fw-bold text-warning">{{ bd.grn_section.warnings|length }} legacy movement warnings</summary>
+        <ul class="warning-list small text-muted mt-2">{% for warning in bd.grn_section.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# --------------------------- READ THE RESULT ---------------------------- #}
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-lightbulb"></i> Read the result in three steps</h5></div>
+    <div class="ui-card-body">
+      <div class="row g-3">
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)">
+          <div class="fw-bold mb-1">1. Sale is earned on delivery</div>
+          <div class="small text-muted">Goods add revenue when they are dispatched, even if the customer pays later. A booking is an order; a receipt settles a bill. Neither creates profit a second time.</div>
+          <div class="small mt-2">Delivered goods sales <strong>Rs. {{ money(bd.reconcile.goods_sales) }}</strong> · money received <strong>Rs. {{ money(payment_received_total) }}</strong>.</div>
+        </div></div>
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)">
+          <div class="fw-bold mb-1">2. FIFO assigns the GRN cost</div>
+          <div class="small text-muted">Each dispatch uses the oldest available GRN lot first. A GRN purchase is stock, not an immediate expense; its cost enters profit only when those goods are delivered.</div>
+          <div class="small mt-2">Purchases in period <strong>Rs. {{ money(bd.grn_section.purchase_value if bd.grn_section else 0) }}</strong> · cost assigned to delivered goods <strong>Rs. {{ money(bd.reconcile.goods_cost) }}</strong>.</div>
+        </div></div>
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)">
+          <div class="fw-bold mb-1">3. Net result is the remainder</div>
+          <div class="small text-muted">Gross profit plus service margin plus other income, less operating expenses and other losses. "Total Loss" is the sum of loss rows; it is not the final net loss. Credit, advances and inventory value are positions and are never added in.</div>
+          <div class="small mt-2">Net result for this period: <strong class="{{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ money(total_profit) }}</strong>.</div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  {# ------------------------------ COMPARISON ------------------------------ #}
+  <div class="row g-3">
+    <div class="col-xl-6">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-arrow-left-right"></i> Prior-equivalent period</h5></div>
+        <div class="ui-card-body">
+          {% if comparison.available %}
+          <p class="small text-muted">{{ comparison.label }}: {{ comparison.start_date }} to {{ comparison.end_date }}</p>
+          <table class="ui-table pl-table">
+            <thead><tr><th>Measure</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead>
+            <tbody>
+              {% for key,label in [('total_revenue','Revenue'),('total_cogs','Cost'),('total_expenses','Expenses'),('total_profit','Net result')] %}
+              {% set c = comparison.metrics[key] %}
+              <tr><td>{{ label }}</td><td class="num">{{ money(c.current) }}</td><td class="num">{{ money(c.previous) }}</td>
+                <td class="num comparison-delta {{ 'pos' if c.change >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(c.change) }}{% if c.change_pct is not none %}<br><span class="small text-muted">{{ '{:+.1f}'.format(c.change_pct) }}%</span>{% endif %}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}<div class="ui-empty">{{ comparison.label }}.</div>{% endif %}
+          <hr>
+          <div class="small text-muted">Recorded-cost-only result (excludes rows using estimated costs): <strong>Rs. {{ money(summary.recorded_cost_profit) }}</strong></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-6">
+      <div class="ui-card h-100">
+        <div class="ui-card-header"><h5><i class="bi bi-list-check"></i> Headline move</h5><a href="{{ entries_url }}" class="btn btn-outline-secondary btn-sm">Drill down</a></div>
+        <div class="ui-card-body">
+          <div class="pl-mini-row"><span>Profitable entries</span><strong class="pos">Rs. {{ money(total_profit_sum) }} <span class="small text-muted">({{ profit_entry_count }})</span></strong></div>
+          <div class="pl-mini-row"><span>Loss entries</span><strong class="neg">Rs. {{ money(total_loss_sum) }} <span class="small text-muted">({{ loss_entry_count }})</span></strong></div>
+          <div class="pl-mini-row"><span>Sales (money in)</span><strong>Rs. {{ money(total_revenue) }}</strong></div>
+          <div class="pl-mini-row"><span>Cost of goods (money out)</span><strong>Rs. {{ money(total_cogs) }}</strong></div>
+          <div class="pl-mini-row"><span>Discounts on this period's sales</span><strong>Rs. {{ money(summary.total_discounts) }}</strong></div>
+          <p class="section-note mt-2 mb-0">“Loss entries” sums the loss-making rows only; it is not the final net result.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ------------------------- DATA QUALITY / NOTES ------------------------- #}
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-shield-check"></i> Accounting coverage &amp; data quality</h5><span class="small text-muted">{{ voided_source_count }} void source documents excluded</span></div>
+    <div class="ui-card-body">
+      <ul class="warning-list small text-muted">
+        {% for note in bd.notes %}<li>{{ note }}</li>{% endfor %}
+      </ul>
+      {% if warnings %}<details class="mt-2" open><summary class="small fw-bold text-warning">{{ warnings|length }} source-link warning(s)</summary><ul class="warning-list small text-warning mt-2">{% for warning in warnings[:12] %}<li>{{ warning.message }}{% if warning.document_type and warning.document_id %} · <a href="{{ url_for('profit_transaction_detail', document_type=warning.document_type, document_id=warning.document_id, start_date=start_date, end_date=end_date) }}">trace source</a>{% endif %}</li>{% endfor %}</ul></details>
+      {% else %}<p class="small text-success mb-0"><i class="bi bi-check2-circle me-1"></i>No unresolved source-link warnings in the selected result.</p>{% endif %}
+      <details class="mt-3"><summary class="small fw-bold">Supported scope and unavoidable source limitations</summary><ul class="warning-list small text-muted mt-2">{% for note in unsupported %}<li>{{ note }}</li>{% endfor %}</ul></details>
+      <p class="section-note mb-0 mt-2">Generated {{ generated_at.strftime('%Y-%m-%d %H:%M:%S') }} · {{ entries_count }} matching entries · {{ pagination.total }} table rows.</p>
+    </div>
+  </div>
+{% else %}
+  <div class="ui-empty">The enhanced breakdown is unavailable for this request.</div>
+{% endif %}
+</div>
