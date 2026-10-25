@@ -175,16 +175,33 @@ def test_delivery_before_every_purchase_uses_the_nearest_later_lot(fifo_app):
         assert january.summary["total_cogs"] == pytest.approx(1400.0)
         assert january.summary["total_profit"] == pytest.approx(20 * 150 - 1400)
 
-        # Later deliveries keep walking the queue oldest-first.
+        # The January shortage was valued from the March lot, so those 20 units
+        # are gone.  Later deliveries keep walking the queue oldest-first and
+        # may not consume the same units twice: 80 * 70 + 20 * 90.
         add_sale(client_row, datetime(2026, 3, 10), [("CEMENT", 100, 150)], "MAR-SALE")
         db.session.commit()
         march = report("2026-03-01", "2026-03-31")
-        assert march.summary["total_cogs"] == pytest.approx(7000.0)
+        assert march.summary["total_cogs"] == pytest.approx(7400.0)
+        march_row = material_rows(march)[0]
+        # Every evidence line reconciles to the row cost and each lot keeps its
+        # own purchase rate.
+        assert sum(s["amount"] for s in march_row["cost_sources"]) == pytest.approx(7400.0)
+        assert sum(s["qty"] for s in march_row["cost_sources"]) == pytest.approx(100.0)
+        assert {s["rate"] for s in march_row["cost_sources"]} == {70.0, 90.0}
 
+        # 80 * 90 + 20 * 200: March already used 20 of the June lot.
         add_sale(client_row, datetime(2026, 6, 10), [("CEMENT", 100, 150)], "JUN-SALE")
         db.session.commit()
         june = report("2026-06-01", "2026-06-30")
-        assert june.summary["total_cogs"] == pytest.approx(9000.0)
+        assert june.summary["total_cogs"] == pytest.approx(11200.0)
+
+        # 220 units delivered against 300 purchased: the recognized cost is
+        # exactly the FIFO value of the units that left the yard.
+        assert (
+            january.summary["total_cogs"]
+            + march.summary["total_cogs"]
+            + june.summary["total_cogs"]
+        ) == pytest.approx(100 * 70 + 100 * 90 + 20 * 200)
 
 
 def test_lot_posted_later_the_same_day_is_consumed_by_that_days_delivery(fifo_app):

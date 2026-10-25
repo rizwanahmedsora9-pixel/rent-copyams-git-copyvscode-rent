@@ -149,6 +149,20 @@ def _day(value):
     return dt.date() if dt else None
 
 
+def _lot_available(lot_date, tx_dt):
+    """A lot exists for a delivery once its GRN is posted that day.
+
+    Posting-time FIFO compares calendar dates (``GRN.date_posted.date()``
+    ``> sale_date``), so a GRN posted at 18:00 is consumed by a sale issued at
+    10:00 on the same day.  Comparing full datetimes here would silently skip
+    that lot, hand the issue to an older lot or a "later GRN" estimate, and
+    disagree with the recorded allocation.
+    """
+    if not lot_date or not tx_dt:
+        return True
+    return lot_date.date() <= tx_dt.date()
+
+
 def _ref(obj, prefix):
     if obj is None:
         return ""
@@ -554,17 +568,7 @@ class _Projection:
             lots.sort(key=lambda lot: (lot["date"] or datetime.min, lot["grn_id"], lot["grn_item_id"]))
 
         def lot_available(lot_date, tx_dt):
-            """A lot exists for a delivery once its GRN is posted that day.
-
-            Posting-time FIFO compares calendar dates (``GRN.date_posted.date()
-            > sale_date``), so a GRN posted at 18:00 is consumed by a sale
-            issued at 10:00 on the same day.  Comparing full datetimes here
-            would silently skip that lot, hand the issue to an older lot or a
-            "later GRN" estimate, and disagree with the recorded allocation.
-            """
-            if not lot_date or not tx_dt:
-                return True
-            return lot_date.date() <= tx_dt.date()
+            return _lot_available(lot_date, tx_dt)
 
         def consume_fifo(material_name, qty, tx_dt):
             remaining = max(0.0, qty)
@@ -581,6 +585,48 @@ class _Projection:
                 remaining -= take
                 layers.append({**{k: v for k, v in lot.items() if k != "remaining"}, "qty": take})
             return layers, remaining
+
+        def consume_forward(material_name, qty):
+            """Draw a shortage from the *next* real lots in FIFO order.
+
+            Used when the dated queue cannot cover the dispatch: nothing was
+            purchased on/before the supply date, or every earlier lot was
+            already consumed.  The report has the real lot queue, so it costs
+            each slice from the lot that covered it (10 x 1,000 + 30 x 1,200),
+            never the whole quantity at one material-wide rate.  Consuming the
+            lots here also stops a later delivery from using the same units
+            twice.
+            """
+            remaining = max(0.0, qty)
+            layers = []
+            for lot in lots_by_material.get(_mat_key(material_name), []):
+                if remaining <= EPS:
+                    break
+                take = min(remaining, lot["remaining"])
+                if take <= EPS:
+                    continue
+                lot["remaining"] -= take
+                remaining -= take
+                layers.append({**{k: v for k, v in lot.items() if k != "remaining"}, "qty": take})
+            return layers, remaining
+
+        def lot_history_exists(material_name, tx_dt):
+            """True when this material had a posted lot on or before the issue.
+
+            A frozen sale-line rate is only a trustworthy posting record when
+            there was purchase history to anchor it.  Before the first purchase
+            it is a placeholder (``_cost_rate_for_material``'s forward guess),
+            so the report replaces it with the lots that actually covered the
+            units instead of re-applying that one rate to every unit.
+            """
+            return any(
+                lot_available(lot["date"], tx_dt)
+                for lot in lots_by_material.get(_mat_key(material_name), [])
+            )
+
+        def master_price(material_name):
+            material = self.material_by_key.get(_mat_key(material_name))
+            return _f(material.unit_price) if material is not None else 0.0
 
         def consume_specific(grn_item_id, qty, tx_dt):
             lot = lot_by_item.get(grn_item_id)
@@ -646,44 +692,170 @@ class _Projection:
                 else:
                     missing = True
                     bases.append("No cost available for recorded allocation quantity")
-            residual = max(0.0, qty - covered)
-            fifo_layers, unavailable = consume_fifo(item.product_name, residual, tx_dt)
-            layers.extend(fifo_layers)
-            if residual > EPS:
-                if frozen > 0:
-                    cost += residual * frozen
-                    bases.append("Frozen sale-line cost")
+
+            def add_layer_sources(layer_rows):
+                """Record one evidence line per consumed lot (qty x rate)."""
+                nonlocal missing
+                for layer in layer_rows:
+                    if _f(layer.get("rate")) <= 0:
+                        missing = True
+                        bases.append("Dated GRN lot without a purchase rate")
+                        continue
+                    sources.append({
+                        "type": ("GRNItem" if layer.get("grn_item_id") else "ReturnLot"),
+                        "id": layer.get("grn_item_id"), "grn_id": layer.get("grn_id"),
+                        "reference": layer.get("reference", ""), "supplier": layer.get("supplier", ""),
+                        "date": layer.get("date"), "qty": _f(layer["qty"]), "rate": _f(layer["rate"]),
+                        "amount": _f(layer["qty"]) * _f(layer["rate"]),
+                    })
+                    if layer.get("grn_id"):
+                        grn_ids.append(layer["grn_id"])
+
+            def line_reference():
+                sale = self.sale_by_id.get(getattr(item, "sale_id", None) or 0)
+                if sale is not None:
+                    return _sale_ref(sale)
+                ret = getattr(item, "return_obj", None)
+                if ret is not None:
+                    return _return_ref(ret)
+                entry = getattr(item, "entry_obj", None)
+                if entry is not None:
+                    return _ref(entry, "OUT")
+                return f"Line #{item.id}"
+
+            def add_frozen_source(quantity, basis_text, actual=True):
+                """A frozen scalar still has to reconcile to the row cost.
+
+                ``actual`` is False when nothing had been purchased yet: the
+                posting path could only freeze a placeholder (the material
+                master price or a forward guess), so the row stays an estimate.
+                """
+                nonlocal cost, estimated
+                if frozen <= 0 or quantity <= EPS:
+                    return False
+                amount = quantity * frozen
+                cost += amount
+                if actual:
+                    bases.append(basis_text)
                 else:
-                    fifo_cost = sum(_f(layer["qty"]) * _f(layer["rate"]) for layer in fifo_layers)
-                    cost += fifo_cost
+                    estimated = True
+                    bases.append(basis_text + " (posting estimate; no purchase history)")
+                sources.append({
+                    "type": "FrozenRate", "id": item.id, "grn_id": None,
+                    "reference": line_reference(), "supplier": "", "date": tx_dt,
+                    "qty": quantity, "rate": frozen, "amount": amount,
+                })
+                return True
+
+            def single_rate_sources(quantity):
+                """Last resort: one labelled estimate rate for the remainder."""
+                nonlocal cost, estimated, missing
+                rate, basis, fallback_sources = self.fallback_cost(item.product_name, tx_dt.date() if tx_dt else None)
+                if rate <= 0:
+                    missing = True
+                    bases.append(basis)
+                    return
+                cost += quantity * rate
+                estimated = True
+                bases.append(basis)
+                if fallback_sources:
+                    for source_row in fallback_sources:
+                        sources.append({
+                            **source_row, "qty": quantity,
+                            "amount": quantity * _f(source_row.get("rate")),
+                        })
+                    grn_ids.extend(s["grn_id"] for s in fallback_sources if s.get("grn_id"))
+                else:
+                    sources.append({
+                        "type": "EstimatedRate", "id": None, "grn_id": None,
+                        "reference": line_reference(), "supplier": "", "date": tx_dt,
+                        "qty": quantity, "rate": rate, "amount": quantity * rate,
+                    })
+
+            def estimate_from_next_lots(quantity):
+                """Split a shortage over the next real lots, each at its own rate.
+
+                Used only when nothing was purchased on/before the supply, i.e.
+                the delivery was posted against negative stock and posting could
+                only freeze one material-wide placeholder rate.  The report has
+                the real queue, so 10 bags from a 1,000 lot and 30 from a 1,200
+                lot are costed as 10,000 + 36,000, not 40 x one rate.  Legacy
+                names that differ only by descriptive text are matched exactly
+                like ``fallback_cost`` does, so a renamed material still uses
+                its real lots instead of a single blended rate.
+                """
+                nonlocal cost, estimated
+                key = _mat_key(item.product_name)
+                # Exact material identity only.  A merely similar legacy name
+                # keeps the labelled single-rate estimate; taking another
+                # material's lots would silently move stock between items.
+                candidate_lots = list(lots_by_material.get(key, []))
+                candidate_lots.sort(key=lambda lot: (lot["date"] or datetime.min, lot["grn_id"] or 0, lot["grn_item_id"] or 0))
+                remaining = quantity
+                taken = []
+                for lot in candidate_lots:
+                    if remaining <= EPS:
+                        break
+                    take = min(remaining, lot["remaining"])
+                    if take <= EPS:
+                        continue
+                    lot["remaining"] -= take
+                    remaining -= take
+                    taken.append({**{k: v for k, v in lot.items() if k != "remaining"}, "qty": take})
+                if taken:
+                    cost += sum(_f(layer["qty"]) * _f(layer["rate"]) for layer in taken)
+                    estimated = True
+                    if has_history:
+                        bases.append("Estimated from the next GRN lots in FIFO order; earlier lots were fully consumed")
+                    else:
+                        bases.append("Estimated from the nearest later GRN lots in FIFO order; no purchase existed on/before supply")
+                    add_layer_sources(taken)
+                    layers.extend(taken)
+                return remaining
+
+            residual = max(0.0, qty - covered)
+            fifo_layers, uncovered = consume_fifo(item.product_name, residual, tx_dt)
+            layers.extend(fifo_layers)
+            has_history = lot_history_exists(item.product_name, tx_dt)
+            if residual > EPS:
+                if frozen > 0 and has_history:
+                    # The line carries the rate posting froze while purchase
+                    # history existed: that is the recorded historical cost, so
+                    # later or addendum GRNs must not re-cost the delivery.
+                    add_frozen_source(residual, "Frozen sale-line cost")
+                else:
+                    # No trustworthy frozen record: cost every slice from the
+                    # lots that actually covered it, oldest first, so several
+                    # GRNs with different purchase rates are all reflected.
                     if fifo_layers:
+                        cost += sum(_f(layer["qty"]) * _f(layer["rate"]) for layer in fifo_layers)
                         estimated = True
                         bases.append("Reconstructed global FIFO estimate from dated GRN lots and all material issues; no frozen allocation")
-                        for layer in fifo_layers:
-                            if _f(layer.get("rate")) <= 0:
-                                missing = True
-                            else:
-                                sources.append({
-                                    "type": ("GRNItem" if layer.get("grn_item_id") else "ReturnLot"),
-                                    "id": layer.get("grn_item_id"), "grn_id": layer.get("grn_id"),
-                                    "reference": layer["reference"], "supplier": layer["supplier"],
-                                    "date": layer.get("date"), "qty": layer["qty"], "rate": layer["rate"],
-                                    "amount": _f(layer["qty"]) * _f(layer["rate"]),
-                                })
-                                if layer.get("grn_id"):
-                                    grn_ids.append(layer["grn_id"])
-                    if unavailable > EPS:
-                        rate, basis, fallback_sources = self.fallback_cost(item.product_name, tx_dt.date() if tx_dt else None)
-                        if rate > 0:
-                            cost += unavailable * rate
-                            estimated = True
-                            bases.append(basis + " for quantity beyond reconstructed lots")
-                            sources.extend(fallback_sources)
-                            grn_ids.extend(s["grn_id"] for s in fallback_sources if s.get("grn_id"))
-                        else:
-                            missing = True
-                            bases.append("No cost for quantity beyond reconstructed FIFO lots")
+                        add_layer_sources(fifo_layers)
+                    still_uncovered = uncovered
+                    if still_uncovered > EPS:
+                        # Dated lots are exhausted (or never existed): continue
+                        # down the queue so the shortage is still split over the
+                        # real purchases that covered it, each at its own rate.
+                        still_uncovered = estimate_from_next_lots(still_uncovered)
+                    if still_uncovered > EPS:
+                        # A frozen rate that merely repeats today's material
+                        # master price and has no purchase history behind it is
+                        # the posting-time placeholder, so it stays an estimate.
+                        frozen_is_placeholder = (
+                            frozen > 0
+                            and not has_history
+                            and not lots_by_material.get(_mat_key(item.product_name))
+                            and abs(frozen - master_price(item.product_name)) <= max(0.01, master_price(item.product_name) * 1e-9)
+                        )
+                        if not add_frozen_source(
+                            still_uncovered,
+                            "Frozen sale-line cost for quantity beyond every GRN lot",
+                            actual=has_history or not frozen_is_placeholder,
+                        ):
+                            single_rate_sources(still_uncovered)
             status = COST_MISSING if missing else (COST_ESTIMATED if estimated else COST_ACTUAL)
+            sources = _merge_sources(sources)
             supplier = next((s.get("supplier", "") for s in sources if s.get("supplier")), "")
             self.fifo_plan[key] = {
                 "cost": cost, "status": status, "basis": "; ".join(dict.fromkeys(bases)),
@@ -949,6 +1121,7 @@ class _Projection:
         else:
             status = COST_ACTUAL
         unique_bases = list(dict.fromkeys(bases))
+        sources = _merge_sources(sources)
         supplier = next((s.get("supplier", "") for s in sources if s.get("supplier")), "")
         return known_cost, status, "; ".join(unique_bases), sources, list(dict.fromkeys(grn_ids)), supplier
 
@@ -1063,6 +1236,7 @@ class _Projection:
                     "qty": qty, "remaining_return_qty": qty,
                     "unit_cost": (cost / qty if include else 0.0), "cost_status": cost_status,
                     "unit_revenue": net / qty, "is_service": False, "reference": row["reference"],
+                    "cost_sources": sources,
                 })
             # Older records can persist rent_item_revenue without a positive
             # service line. Preserve that evidenced revenue instead of silently
@@ -1161,6 +1335,7 @@ class _Projection:
                 "qty": qty, "remaining_return_qty": qty, "unit_cost": (cost / qty if include else 0.0),
                 "cost_status": cost_status, "unit_revenue": net / qty, "is_service": False,
                 "reference": row["reference"], "booking_id": booking.id,
+                "cost_sources": sources,
             })
 
         self.add_standalone_dispatch()
@@ -1298,6 +1473,7 @@ class _Projection:
                         "qty": qty, "remaining_return_qty": qty, "unit_cost": (cost / qty if include else 0.0),
                         "cost_status": cost_status, "unit_revenue": net / qty, "is_service": False,
                         "reference": row["reference"], "booking_id": booking.id,
+                        "cost_sources": sources,
                     })
                     if not include:
                         self.warn("missing_cost", f"Dispatch {entry.id}: supplied material cost unresolved", document_type="Entry", document_id=entry.id, reference=row["reference"], amount=net)
@@ -1488,6 +1664,12 @@ class _Projection:
                     material_cost = 0.0 if is_service else cost
                     delivery_revenue = reversal_revenue if is_service else 0.0
                     material_revenue = 0.0 if is_service else reversal_revenue
+                    # Show which original GRN lots the returned quantity is
+                    # taken out of; the reversal stays at the original unit cost.
+                    reversed_cost_sources = (
+                        [] if is_service or candidate is None or cost_status == COST_MISSING
+                        else _reversed_sources(candidate, qty)
+                    )
                     row = _base_row(
                         date=ret.date_posted, source="MaterialReturn",
                         source_label=("Booked Return" if origin == "booked" else "Material Return"),
@@ -1499,6 +1681,8 @@ class _Projection:
                         gross_revenue=reversal_revenue, material_revenue=material_revenue,
                         delivery_revenue=delivery_revenue, material_cost=material_cost,
                         cost_status=cost_status, cost_basis=basis, cost_amount_recorded=abs(cost),
+                        cost_sources=reversed_cost_sources,
+                        grn_ids=list(dict.fromkeys(s.get("grn_id") for s in reversed_cost_sources if s.get("grn_id"))),
                         include_in_net=include, note=ret.note or "",
                         payment_status="Return credit/refund is settlement, not new revenue",
                         booking_id=booking_id, sale_id=sale_id, return_id=ret.id,
@@ -1761,6 +1945,54 @@ def _select_rows(rows, start_date, end_date, filters=None):
 
 def _sum(rows, key):
     return sum(_f(row.get(key)) for row in rows)
+
+
+def _merge_sources(sources):
+    """Collapse repeated evidence lines for the same lot/rate.
+
+    One quantity can meet the same lot twice (FIFO consumption plus the
+    estimate for a shortage), and a sale with two lines of one material can
+    produce several entries for one GRN.  Merging keeps the printed layers
+    equal to the costed quantity instead of showing the same lot twice.
+    """
+    merged = {}
+    order = []
+    for source in sources or []:
+        key = (
+            source.get("type"), source.get("grn_id"), source.get("reference"),
+            round(_f(source.get("rate")), 6),
+        )
+        entry = merged.get(key)
+        if entry is None:
+            entry = {}
+            merged[key] = entry
+            order.append(key)
+        entry.update({k: v for k, v in source.items() if v is not None and k not in {"qty", "amount"}})
+        entry["qty"] = _f(entry.get("qty")) + _f(source.get("qty"))
+        entry["amount"] = _f(entry.get("amount")) + _f(source.get("amount"))
+    return [merged[key] for key in order]
+
+
+def _reversed_sources(candidate, qty):
+    """Scale a supply line's evidence to the returned quantity (negative).
+
+    A return reverses the same lots at the same unit costs, so the detail view
+    shows which GRNs the returned bags came from rather than one blended rate.
+    """
+    sources = candidate.get("cost_sources") or []
+    candidate_qty = _f(candidate.get("qty"))
+    if not sources or candidate_qty <= EPS or qty <= EPS:
+        return []
+    share = min(1.0, qty / candidate_qty)
+    reversed_rows = []
+    for source in sources:
+        reversed_rows.append({
+            **source,
+            "qty": -_f(source.get("qty")) * share,
+            "amount": -_f(source.get("amount")) * share,
+            "reversal_of": candidate.get("reference"),
+        })
+    return _merge_sources(reversed_rows)
 
 
 def summarize_rows(rows):
