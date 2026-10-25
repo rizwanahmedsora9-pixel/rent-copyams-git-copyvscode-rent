@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 import calendar
 import json
 import re
@@ -74,6 +75,14 @@ from app.services.financial_ledgers import (
     build_current_payables,
     build_supplier_payable_overview,
 )
+from app.services.profit_loss_breakdown import (
+    BOOKING_STATUS_CHOICES,
+    PAYMENT_STATUS_CHOICES,
+    TRANSACTION_GROUP_CHOICES,
+    attach_document_status,
+    build_breakdown,
+)
+from app.services.grn_consumption import build_grn_consumption
 from app.services.sales_core import _direct_sale_default_bill_ref, normalize_sale_category
 from app.services.time_money import pk_now, pk_today
 
@@ -95,7 +104,14 @@ def _norm(value):
     return " ".join(str(value or "").strip().casefold().split())
 
 
+@lru_cache(maxsize=16384)
 def _mat_key(value):
+    """Normalised material identity.
+
+    Pure function of a string, and by far the hottest helper in the projection
+    (it is called for every lot/candidate comparison).  Memoising it is a pure
+    performance change: same input, same output, no state.
+    """
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().casefold())
 
 
@@ -410,6 +426,10 @@ class _Projection:
         self.voided_source_count += sum(1 for booking in self.bookings if not _active(booking))
         self.voided_source_count += sum(1 for ret in self.returns if not _active(ret))
         self.fifo_plan = {}
+        # Final balance of every GRN lot after the replay.  Exposed read-only so
+        # the GRN consumption indicator (app.services.grn_consumption) can be
+        # proven to agree with the FIFO cost this report recognizes.
+        self.grn_lot_balances = {}
         self._build_fifo_cost_plan()
 
     def client_info(self, name, code=None):
@@ -824,6 +844,19 @@ class _Projection:
                 continue
             plan_event(kind, object_id, item, qty, tx_dt, allow_frozen=allow_frozen)
             remember_candidate(kind, object_id, item, qty, tx_dt)
+
+        self.grn_lot_balances = {
+            lot["grn_item_id"]: {
+                "grn_id": lot["grn_id"],
+                "received": lot.get("original_qty", lot["remaining"]),
+                "remaining": lot["remaining"],
+                "rate": lot["rate"],
+                "reference": lot["reference"],
+            }
+            for lots in lots_by_material.values()
+            for lot in lots
+            if lot.get("grn_item_id")
+        }
 
     def material_cost(self, item, tx_date, plan_key=None):
         """Resolve a sale/supply line's cost and its evidence."""
@@ -1273,6 +1306,12 @@ class _Projection:
                 self.warn("unmatched_dispatch", f"Dispatch {entry.id}: {remaining_qty:g} units exceed conservatively matched booked balance; excess revenue/cost not invented", document_type="Entry", document_id=entry.id, reference=_ref(entry, "OUT"))
 
     def add_delivery_rows(self):
+        # One index instead of scanning every candidate for every sale (the
+        # old shape was O(sales x candidates) and dominated the report).
+        service_candidates_by_sale = defaultdict(list)
+        for candidate in self.candidates:
+            if candidate.get("is_service"):
+                service_candidates_by_sale[candidate.get("sale_id")].append(candidate)
         for sale in self.sales:
             if not _active(sale):
                 continue
@@ -1347,12 +1386,31 @@ class _Projection:
                     row["warnings"].append("Delivery revenue is shown, but its result is excluded until delivery cost is recorded.")
                     self.warn("missing_delivery_cost", f"{row['reference']} / {material}: delivery cost unresolved", document_type="DirectSale", document_id=sale.id, reference=row["reference"], amount=value["revenue"])
                 self.rows.append(row)
-                for candidate in self.candidates:
-                    if candidate.get("sale_id") == sale.id and candidate.get("is_service") and _mat_key(candidate.get("material")) == _mat_key(material):
+                for candidate in service_candidates_by_sale.get(sale.id, []):
+                    if _mat_key(candidate.get("material")) == _mat_key(material):
                         candidate["delivery_include_in_net"] = include
                         candidate["delivery_cost_status"] = status
 
+    def _return_candidate_index(self):
+        """Candidates grouped by (origin, is_service, material, client).
+
+        The return matcher used to scan every candidate for every returned line
+        (O(returns x candidates), seconds on a production database).  The
+        grouping key is exactly the equality part of the old filter, so the
+        pre-sorted candidate list -- and therefore every match -- is unchanged.
+        """
+        index = defaultdict(list)
+        for candidate in self.candidates:
+            index[(
+                candidate["origin"],
+                candidate["is_service"],
+                _mat_key(candidate["material"]),
+                _norm(candidate["client"]),
+            )].append(candidate)
+        return index
+
     def add_returns(self):
+        candidate_index = self._return_candidate_index()
         for ret in self.returns:
             if not _active(ret):
                 continue
@@ -1364,12 +1422,11 @@ class _Projection:
                 is_service = self.is_service(item.material_name)
                 origin = "booked" if (ret.return_type or "normal").lower() == "booked" else "direct"
                 candidates = [
-                    candidate for candidate in self.candidates
-                    if candidate["origin"] == origin
-                    and candidate["is_service"] == is_service
-                    and _mat_key(candidate["material"]) == _mat_key(item.material_name)
-                    and _norm(candidate["client"]) == _norm(client_name)
-                    and _f(candidate["remaining_return_qty"]) > EPS
+                    candidate
+                    for candidate in candidate_index.get(
+                        (origin, is_service, _mat_key(item.material_name), _norm(client_name)), []
+                    )
+                    if _f(candidate["remaining_return_qty"]) > EPS
                     and (_as_dt(candidate["date"]) or datetime.max) <= (_as_dt(ret.date_posted) or datetime.min)
                 ]
                 candidates.sort(key=lambda c: (_as_dt(c["date"]) or datetime.min, c["document_id"] or 0))
@@ -1675,6 +1732,25 @@ def _report_match(row, filters):
                 return False
         except (TypeError, ValueError):
             return False
+    entity_type = _norm(filters.get("entity_type"))
+    if entity_type == "category":
+        category_value = _norm(filters.get("client_category") or filters.get("client"))
+        if category_value and _norm(row.get("client_category")) != category_value:
+            return False
+    payment_status = _norm(filters.get("payment_status"))
+    if payment_status:
+        if payment_status == "credit":
+            # Any bill with money still owed: unpaid or partly paid.
+            if _f(row.get("document_outstanding")) <= EPS:
+                return False
+        elif _norm(row.get("payment_status_key")) != payment_status:
+            return False
+    booking_status = _norm(filters.get("booking_status"))
+    if booking_status and _norm(row.get("booking_status_key")) != booking_status:
+        return False
+    transaction_group = _norm(filters.get("transaction_group"))
+    if transaction_group and _norm(row.get("transaction_group")) != transaction_group:
+        return False
     return True
 
 
@@ -1798,7 +1874,32 @@ def _explorer_rows(rows, args):
     cost_status = _norm(args.get("cost_status"))
     if cost_status:
         selected = [row for row in selected if _norm(row.get("cost_status")) == cost_status]
-    selected.sort(key=lambda row: (_as_dt(row.get("date")) or datetime.min, row.get("document_id") or 0, row.get("source_id") or 0), reverse=True)
+    def _tiebreak(row):
+        return (
+            _as_dt(row.get("date")) or datetime.min,
+            row.get("document_id") or 0,
+            row.get("source_id") or 0,
+        )
+
+    sort_keys = {
+        "date": lambda row: (_as_dt(row.get("date")) or datetime.min,),
+        "reference": lambda row: (_norm(row.get("reference")),),
+        "revenue": lambda row: (_f(row.get("revenue")),),
+        "cost": lambda row: (_f(row.get("cogs")),),
+        "profit": lambda row: (_f(row.get("profit")),),
+        "customer": lambda row: (_norm(row.get("client")),),
+        "qty": lambda row: (_f(row.get("qty")),),
+        "material": lambda row: (_norm(row.get("material")),),
+    }
+    sort_key = _norm(args.get("sort"))
+    order = _norm(args.get("order"))
+    if sort_key in sort_keys:
+        key_fn = sort_keys[sort_key]
+        # The clicked column is the primary key; the date/document tuple only
+        # breaks ties, so equal values keep a stable, reproducible order.
+        selected.sort(key=lambda row: (key_fn(row), _tiebreak(row)), reverse=(order != "asc"))
+    else:
+        selected.sort(key=_tiebreak, reverse=True)
     return selected
 
 
@@ -1940,10 +2041,36 @@ def _financial_position(context, start_date, end_date, filters):
 
 
 def _filter_options(context):
+    # Newest 300 GRN lots are offered as a stock-batch filter; older lots stay
+    # reachable through the item/supplier filters and the GRN screen itself.
+    grn_choices = []
+    for grn in sorted(
+        context.grns, key=lambda row: (_as_dt(row.date_posted) or datetime.min, row.id), reverse=True
+    )[:300]:
+        if not _active(grn):
+            continue
+        grn_choices.append({
+            "id": grn.id,
+            "label": " · ".join(
+                part for part in (
+                    _grn_ref(grn),
+                    (grn.supplier or "").strip(),
+                    (_day(grn.date_posted).isoformat() if _day(grn.date_posted) else ""),
+                ) if part
+            ),
+        })
+    client_categories = sorted({
+        (getattr(client, "category", "") or "").strip()
+        for client in context.clients
+        if (getattr(client, "category", "") or "").strip()
+    })
     return {
         "clients": context.clients,
         "materials": context.materials,
+        "services": Service.query.order_by(Service.name.asc()).all(),
         "suppliers": Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all(),
+        "client_categories": client_categories,
+        "grn_choices": grn_choices,
         "categories": [
             ("cash_sale", "Cash Sales"), ("credit_sale", "Credit Sales"),
             ("booking_supply", "Booking Supplies"), ("other_sale", "Other / Excess Sales"),
@@ -1959,8 +2086,17 @@ def build_profit_loss_report(
     *, start_date=None, end_date=None, client="", material="", supplier="",
     category="", grn_id=None, metric="", q="", entry_type="", cost_status="",
     page=1, per_page=25, include_position=False, previous=True, context=None,
+    payment_status="", booking_status="", transaction_group="", entity_type="",
+    client_category="", sort="", order="", include_breakdown=True,
 ):
-    """Return the complete report view model from one authoritative projection."""
+    """Return the complete report view model from one authoritative projection.
+
+    ``payment_status``, ``booking_status``, ``transaction_group``, ``entity_type``
+    and ``client_category`` are the enhanced report filters.  They only select
+    rows: no filter changes a revenue, cost or profit calculation.
+    ``sort``/``order`` order the paginated transaction table without touching
+    the totals, which always cover every matching row.
+    """
     if isinstance(start_date, str):
         start_date = _day(start_date)
     if isinstance(end_date, str):
@@ -1968,13 +2104,23 @@ def build_profit_loss_report(
     if start_date and end_date and start_date > end_date:
         start_date, end_date = end_date, start_date
     context = context or _Projection().build()
+    # Attach the settlement / booking status used by the new filters and by the
+    # breakdown tables.  Idempotent: a caller may pass a context that already
+    # carries them.
+    if not getattr(context, "settlement", None):
+        attach_document_status(context)
     filters = {
         "client": (client or "").strip(), "material": (material or "").strip(),
         "supplier": (supplier or "").strip(), "category": (category or "").strip(),
         "grn_id": grn_id,
+        "payment_status": (payment_status or "").strip(),
+        "booking_status": (booking_status or "").strip(),
+        "transaction_group": (transaction_group or "").strip(),
+        "entity_type": (entity_type or "").strip(),
+        "client_category": (client_category or "").strip(),
     }
     # Resolve a typed customer code to its canonical name once.
-    if filters["client"]:
+    if filters["client"] and _norm(filters["entity_type"]) != "category":
         client_obj = context.client_by_code.get(_norm(filters["client"])) or context.client_by_name.get(_norm(filters["client"]))
         if client_obj:
             filters["client"] = client_obj.name
@@ -1986,7 +2132,10 @@ def build_profit_loss_report(
     previous_rows = _select_rows(context.rows, prev_start, prev_end, filters) if prev_start and prev_end else []
     previous_summary = summarize_rows(previous_rows)
     comparison = _comparison(summary, previous_summary, prev_start, prev_end, prev_label)
-    explorer_args = {"metric": metric, "q": q, "entry_type": entry_type, "cost_status": cost_status}
+    explorer_args = {
+        "metric": metric, "q": q, "entry_type": entry_type, "cost_status": cost_status,
+        "sort": (sort or "").strip(), "order": (order or "").strip(),
+    }
     entries = _explorer_rows(current_rows, explorer_args)
     try:
         per_page = int(per_page)
@@ -2007,6 +2156,14 @@ def build_profit_loss_report(
     export_previous_summary = summarize_rows(export_previous_rows)
     export_comparison = _comparison(export_summary, export_previous_summary, prev_start, prev_end, prev_label)
     _export_clients, export_items, export_daily, _export_types = _insights(entries)
+    inventory_view = build_grn_consumption() if include_breakdown else None
+    breakdown = (
+        build_breakdown(
+            context, current_rows, start_date=start_date, end_date=end_date,
+            filters=filters, inventory=inventory_view,
+        )
+        if include_breakdown else None
+    )
     current_document_keys = {(row.get("document_type"), row.get("document_id")) for row in current_rows}
     report = {
         "context": context,
@@ -2056,6 +2213,20 @@ def build_profit_loss_report(
         "voided_source_count": context.voided_source_count,
         "filter_options": _filter_options(context),
         "financial_position": _financial_position(context, start_date, end_date, filters) if include_position else None,
+        "breakdown": breakdown,
+        "inventory_view": inventory_view,
+        "sort": explorer_args["sort"],
+        "order": explorer_args["order"],
+        "payment_status_choices": PAYMENT_STATUS_CHOICES,
+        "booking_status_choices": BOOKING_STATUS_CHOICES,
+        "transaction_group_choices": TRANSACTION_GROUP_CHOICES,
+        "selected": {
+            "payment_status": filters["payment_status"],
+            "booking_status": filters["booking_status"],
+            "transaction_group": filters["transaction_group"],
+            "entity_type": filters["entity_type"],
+            "client_category": filters["client_category"],
+        },
     }
     # Legacy aliases are intentionally references to the same computed values;
     # the existing plain-language cards remain compatible.

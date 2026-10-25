@@ -56,11 +56,21 @@ def _report_from_request(*, include_position=False):
         page=request.args.get("page", 1),
         per_page=request.args.get("per_page", 25),
         include_position=include_position,
+        payment_status=request.args.get("payment_status", ""),
+        booking_status=request.args.get("booking_status", ""),
+        transaction_group=request.args.get("transaction_group", ""),
+        entity_type=request.args.get("entity_type", ""),
+        client_category=request.args.get("client_category", ""),
+        sort=request.args.get("sort", ""),
+        order=request.args.get("order", ""),
     )
 
     def report_url(endpoint="profit_reports", **overrides):
         args = request.args.to_dict(flat=True)
         args.pop("page", None)
+        # ``partial`` is a transport detail of the automatic filter refresh; it
+        # must never leak into a bookmarkable or drill-down URL.
+        args.pop("partial", None)
         args["start_date"] = report["start_date_str"]
         args["end_date"] = report["end_date_str"]
         args["period"] = "all" if start is None and end is None else "custom"
@@ -83,8 +93,35 @@ def _template_context(report, period, period_label, report_url):
         "report_url": report_url,
         "start_date": report["start_date_str"],
         "end_date": report["end_date_str"],
+        # Drill-down targets for the summary cards and the partial template.
+        "entries_url": report_url(view="entries"),
+        "unknown_url": report_url(view="entries", metric="unknown_cost"),
+        "profit_url": report_url(view="entries", metric="profit"),
+        "loss_url": report_url(view="entries", metric="loss"),
+        "pl_card_links": {
+            "delivered_goods_sales": report_url(view="entries", transaction_group="goods", metric="revenue"),
+            "earned_service_revenue": report_url(view="entries", transaction_group="services", metric="revenue"),
+            "cogs_fifo": report_url(view="entries", transaction_group="goods", metric="cogs"),
+            "direct_service_costs": report_url(view="entries", transaction_group="services", metric="cogs"),
+            "gross_profit": report_url(view="entries", transaction_group="goods"),
+            "service_margin": report_url(view="entries", transaction_group="services"),
+            "operating_expenses": report_url(view="entries", transaction_group="expenses"),
+            "net_profit": report_url(view="entries"),
+            "credit_outstanding": report_url(view="entries", payment_status="credit"),
+            "customer_advances": report_url(view="entries", booking_status="partially_delivered"),
+            "estimated_undelivered_profit": "#pl-undelivered-estimate",
+        },
     })
     return context
+
+
+def _sort_url(report_url, **overrides):
+    """Helper used by the transaction table's sortable headers.
+
+    The current view is preserved: sorting the control-center table must not
+    navigate away from the report the reader is looking at.
+    """
+    return report_url(**overrides)
 
 
 @bp.route("/profit_reports")
@@ -100,7 +137,12 @@ def profit_reports():
         return redirect(url_for("profit_reports"))
     view_mode = (request.args.get("view") or "").strip().lower()
     template_name = "profit_entries.html" if view_mode == "entries" else "profit_reports.html"
-    return render_template(template_name, **_template_context(report, period, period_label, report_url))
+    context = _template_context(report, period, period_label, report_url)
+    context["sort_url"] = lambda **overrides: _sort_url(report_url, **overrides)
+    # Automatic (no-button) filter updates fetch only the results region.
+    if (request.args.get("partial") or "").strip() == "1":
+        return render_template("partials/profit_loss_results.html", **context)
+    return render_template(template_name, **context)
 
 
 @bp.route("/profit_reports/transaction/<string:document_type>/<int:document_id>")

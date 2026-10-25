@@ -254,6 +254,43 @@ def api_notifications_due():
     return jsonify(payload)
 
 
+@bp.route('/api/grn_consumption')
+@login_required
+def api_grn_consumption():
+    """Per-lot GRN consumption, for the GRN screen's live indicator refresh.
+
+    Read-only and derived from the same projection the GRN page renders from
+    (posted GRNAllocation rows first, then the FIFO movement replay), so a
+    refresh can never invent a different answer than a page load.
+    """
+    from app.services.grn_consumption import build_grn_consumption
+
+    raw = (request.args.get('grn_ids') or '').strip()
+    ids = [int(part) for part in re.split(r'[,\s]+', raw) if part.isdigit()]
+    data = build_grn_consumption(grn_ids=ids or None)
+
+    def stamp(value):
+        return value.isoformat(sep=' ', timespec='minutes') if hasattr(value, 'isoformat') else value
+
+    items = {
+        str(item_id): {**row, 'date': stamp(row.get('date'))}
+        for item_id, row in data['items'].items()
+    }
+    grns = {}
+    for grn_id, row in data['grns'].items():
+        payload = {key: value for key, value in row.items() if key != 'items'}
+        payload['date'] = stamp(payload.get('date'))
+        grns[str(grn_id)] = payload
+    return jsonify({
+        'ok': True,
+        'items': items,
+        'grns': grns,
+        'inventory': data['inventory'],
+        'warnings': data['warnings'][:20],
+        'notes': data['notes'],
+    })
+
+
 @bp.route('/api/clients/search')
 @login_required
 def api_clients_search():
