@@ -284,9 +284,13 @@ def test_04_grn_page_and_api_render_the_same_numbers(consumption_app):
         assert pct == pytest.approx(expected["consumed_pct"])
         assert 0.0 <= pct <= 100.0
 
-    # One bar per lot, one GRN summary per GRN, and no duplicated element ids.
+    # One bar per lot, inside the collapsible details row.  The old per-GRN
+    # roll-up (data-grn-summary) is deliberately not rendered: each lot reports
+    # its own consumption when the row is expanded.  No duplicated element ids.
     assert html.count('data-grn-consume data-grn-item-id=') == len(service["items"])
-    assert html.count('data-grn-summary data-grn-id=') == len(service["grns"])
+    assert "data-grn-summary" not in html
+    assert html.count('<tr class="grn-row"') == html.count('<tr class="grn-details-row"')
+    assert html.count('<tr class="grn-details-row"') == len(service["grns"])
     ids = re.findall(r'\sid="([^"]+)"', html)
     assert len(ids) == len(set(ids)), "duplicate element ids on the GRN page"
     assert "grn-consume-pct" in html and "grn_consumption.js" in html
