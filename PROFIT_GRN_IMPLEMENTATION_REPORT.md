@@ -16,10 +16,11 @@ Two features, both additive:
    bands required by the specification. A refresh button repaints from a JSON
    endpoint without reloading the page; rows inserted by any existing workflow
    are repainted automatically.
-   *Layout pass (§ 3.1):* each lot is now a bordered card, the per-GRN roll-up
-   has its own **Overall consumption** column instead of being squeezed under
-   Total Qty, an **Overall consumption** panel above the table reports the
-   whole screen at cost, and the row actions are one uniform icon strip.
+   *Layout pass (§ 3.1):* the row actions are one uniform icon strip and the
+   screen-level summary is a single slim strip.  *Compact pass (§ 3.2):* every
+   GRN is one line; an expand arrow opens a details row that lists each lot's
+   own received / consumed / remaining figures and bar.  There is deliberately
+   no per-GRN roll-up column — several items on one GRN report separately.
 2. **Profit & Loss Control Center — automatic filters and a full breakdown**
    on top of the existing report engine: no Apply button, debounced text
    fields, searchable dropdowns (white background, black text, scrollable),
@@ -47,8 +48,8 @@ pins).
 | `static/profit_report.js` | Automatic filters, searchable comboboxes, debounce, in-flight indicator, partial fetch, URL sync, error banner. |
 | `static/grn_consumption.js` | Bar / percentage / colour painting, ARIA progressbar, mutation observer, JSON refresh; repaints the read-outs beside each bar through `data-grn-scope` and the whole-screen overall meter. |
 | `tests/test_grn_consumption_indicator.py` | 7 tests: FIFO parity, spec scenario, bands, recorded vs reconstructed, page/API agreement, filter invariance, returns. |
-| `tests/test_grn_screen_layout.py` | 6 tests: the overall meter has its own column, every read-out sits in a repaint scope, the overview panel aggregates the service exactly, the row actions are one uniform icon strip, the refresh button is wired to CSS that exists, the toolbar keeps its controls. |
-| `tests/frontend/test_grn_consumption_dom.js` | 30 jsdom checks: repaint of the bars **and** the figures beside them, scope isolation between lots, the per-GRN meter, the whole-screen meter, clamping. Runs offline (`npm i jsdom`). |
+| `tests/test_grn_screen_layout.py` | 6 tests: the collapsed row is one line with an expand button over a hidden details row, every read-out sits in a repaint scope, the slim overview strip aggregates the service exactly, the row actions are one uniform icon strip, the refresh button is wired to CSS that exists, the toolbar keeps its controls. |
+| `tests/frontend/test_grn_consumption_dom.js` | 43 jsdom checks: the compact row / hidden details row, the expand-collapse state machine (`aria-expanded`, icon, title, row class), repaint of the bars **and** the figures beside them, scope isolation between lots, the whole-screen meter (only the lots on the page, no per-GRN meter), clamping. Runs offline (`npm i jsdom`). |
 | `tests/test_profit_loss_automatic_filters.py` | 12 tests: every filter (including the GRN lot filter), sorting stability, reconciliation, partial rendering, drill-down links, realized vs estimate separation. |
 
 ### Modified
@@ -61,7 +62,7 @@ pins).
 | `app/blueprints/api.py` | New read-only endpoint `GET /api/grn_consumption` (login required, optional `grn_ids`). |
 | `app/services/profit_loss_exports.py` | Eight additional Excel sheets (`P&L Cards`, `By Item`, `By Service`, `By Customer`, `By Day`, `Outstanding Credit`, `Customer Advances`, `GRN & Inventory`). Existing six sheets unchanged in name and order. |
 | `templates/profit_reports.html` | Rebuilt filter bar + results region + JS bootstrap. Same URL, same route, same header actions (View All Transactions, Excel, PDF, Print). |
-| `templates/grn_wizard.html` | Indicator markup and CSS (theme-aware), consumption refresh button, script tag. Every existing control left in place. Layout pass (§ 3.1): lot cards, dedicated **Overall consumption** column, whole-screen overall meter, uniform action strip, wrapping toolbar. |
+| `templates/grn_wizard.html` | Indicator markup and CSS (theme-aware), consumption refresh button, script tag. Every existing control left in place. Layout pass (§ 3.1): uniform action strip, slim screen-level meter, wrapping toolbar. Compact pass (§ 3.2): one line per GRN with an expand arrow; per-lot detail strips are server-rendered into a hidden `grn-details-row`; no per-GRN roll-up. |
 | `templates/profit_report_pdf.html` | Adds the cards, reconciliation, item / service / customer tables, outstanding credit, estimate table and inventory section to the existing PDF. |
 
 **No database migrations, no backfills, no data changes.** The feature is a
@@ -135,14 +136,14 @@ with **no change to any projection, route or number**:
 
 | Problem | Fix |
 |---|---|
-| The per-GRN roll-up meter was inside the **Total Qty** column: a `min-width: 190px` box whose bar was clamped to `min-width: 90px` next to a 46 px label, so the one figure that says *is this GRN still in the warehouse?* was the least readable thing on the row. | The roll-up moved to its own **Overall consumption** column (bar 14 px tall, 190–250 px wide, 1 rem percentage) with *consumed / left* and the stock value still in hand under it. **Total Qty** is now just a right-aligned, tabular quantity plus a line count. |
+| The per-GRN roll-up meter was inside the **Total Qty** column: a `min-width: 190px` box whose bar was clamped to `min-width: 90px` next to a 46 px label, so the one figure that says *is this GRN still in the warehouse?* was the least readable thing on the row. | The roll-up moved to its own **Overall consumption** column (bar 14 px tall, 190–250 px wide, 1 rem percentage) with *consumed / left* and the stock value still in hand under it. **Total Qty** is now just a right-aligned, tabular quantity plus a line count. *(Superseded in § 3.2: the roll-up column was removed — each lot reports separately in the expanded row.)* |
 | Received / consumed / remaining sat **outside** the element the repaint script searches (`el.querySelector` inside `[data-grn-consume]`), so *Recalculate* moved the bars and left the figures stale. | Each block is wrapped in `data-grn-scope`; `paint()` falls back to that scope. The jsdom test asserts the figures move *and* that lot 2 does not inherit lot 1's numbers. |
 | The Actions cell mixed three icon buttons with a wide labelled **Delete** and an even wider **Shift** button (plus a `d-inline` form), so the strip wrapped unevenly and the buttons had five different widths. | One `.grn-row-actions` flex strip: five 34 px icon-only outline buttons (38 px under 768 px), each with `title` **and** `aria-label`, delete still a confirmed POST, shift still a modal trigger. |
 | The ⟳ button toggled a `.spin` class that **no stylesheet defines**, and added `btn-danger` / `btn-success` on top of `btn-outline-info`, which `theme.css` defines *later* — so the busy and the success/failure states were invisible. | `.grn-refresh-spin` is defined in the page stylesheet, and the base `btn-outline-info` is removed before the state class is applied, so the button really spins and really turns green/red. |
 
 Additions that came with the space:
 
-* **Overall consumption panel** above the table — one big bar for the whole
+* **Overall consumption panel** above the table *(replaced in § 3.2 by a one-line strip)* — one big bar for the whole
   screen, measured as *consumed value ÷ received value* at lot cost (unit-safe,
   unlike summing bags + tons + CFT), with lots on screen, fully consumed,
   FIFO-replay lots and the stock value still in hand. It is server-rendered from
@@ -155,10 +156,29 @@ Additions that came with the space:
   controls, and the sort links use `.grn-sort-link` — `text-dark` was invisible
   on the dark card header.
 
-Pinned by `tests/test_grn_screen_layout.py` (6 tests: column count, one meter per
-row, repaint scopes, overview aggregation against the service, the action strip,
-the refresh wiring, the toolbar) and `tests/frontend/test_grn_consumption_dom.js`
-(30 jsdom checks).
+Pinned by `tests/test_grn_screen_layout.py` (6 tests: compact row + expand
+button, one repaint scope per lot, overview aggregation against the service, the
+action strip, the refresh wiring, the toolbar) and
+`tests/frontend/test_grn_consumption_dom.js` (43 jsdom checks, including the
+expand / collapse state machine).
+
+### 3.2 Compact pass — vertical space, an arrow, no per-GRN roll-up
+
+A list of GRNs was still tall: every lot was a full card inside the row, and a
+separate column repeated an aggregate figure for the whole GRN.  The screen now
+reads as a list first and a report second:
+
+| Before | Now |
+|---|---|
+| Each row showed one card per lot (name, rate, badge, three figures, bar) plus a **GRN roll-up** column. A two-lot GRN was roughly three stacked blocks tall. | The row is a single line: arrow, star, GRN #, date, supplier, the lot names + quantities, total qty, discount, actions. No bar and no percentage are in the collapsed row at all. |
+| The roll-up repeated what the lots already said. With several items in one GRN it was a second, aggregate answer to a question the operator was asking per item. | The **Overall consumption** column is gone. Expanding the row shows `Consumption by lot`: one compact strip per item with *its own* received / consumed / remaining, bar, percentage, rate, `recorded` / `reconstructed` badge and stock value in hand. No aggregate is rendered — not in the row, not in the panel. |
+| The whole-screen overall meter was a two-column panel (headline, caption, 18 px bar, legend row + a 2×2 card grid). | One slim strip: title, percentage, 8 px bar, received / consumed / in hand, and the lot counts + stock value in a single muted line. Same server projection and same JSON refresh contract. |
+
+The details row is **server-rendered** (`<tr class="grn-details-row" id="grnDetails<id>" hidden>`)
+and the arrow is a real `<button aria-expanded aria-controls>`; the toggle only
+flips `hidden` and the icon, so every figure is on the page with or without
+JavaScript. `static/grn_consumption.js` exposes `initExpanders`, `setExpanded`
+and `toggleRow`, and the expander is idempotent for rows inserted later.
 
 ### Worked example from the specification (asserted end to end in `test_01`)
 
@@ -336,16 +356,19 @@ browser would):
   `General / Open Khata / Walking-Customer`;
 * a failed request shows the error banner with a full-page link;
 * the loading class is applied during the request and cleared after it;
-* GRN indicator: 152 bars and 152 GRN summaries painted, 0 width/aria/level
-  mismatches against the data attributes, 0 duplicate ids, 100% clamped from
-  140%, divide-by-zero returns 0%, injected row repainted, refresh moves the bar.
-* GRN layout (jsdom, `tests/frontend/test_grn_consumption_dom.js`): a refresh
-  repaints the bar *and* the received / consumed / remaining figures beside it,
-  lot 2 keeps its own figures (scope isolation), the per-GRN meter and the
-  whole-screen meter follow the payload, percentages stay clamped — 30 checks.
-  The same script was also run against the real rendered `/grn` page with the
-  real `/api/grn_consumption` payload: 14 lot bars, 6 GRN meters and the overall
-  meter all matched the payload (63 checks).
+* GRN indicator: every lot bar painted, 0 width/aria/level mismatches against
+  the data attributes, 0 duplicate ids, 100% clamped from 140%, divide-by-zero
+  returns 0%, injected row repainted, refresh moves the bar. No per-GRN summary
+  element is rendered (removed in § 3.2).
+* GRN layout (jsdom, `tests/frontend/test_grn_consumption_dom.js`): the arrow
+  opens and closes the hidden details row (`aria-expanded`, icon, title and
+  `is-expanded` stay in agreement), a refresh repaints the bar *and* the
+  received / consumed / remaining figures beside it, lot 2 keeps its own figures
+  (scope isolation), the whole-screen meter follows the payload for the lots on
+  the page, percentages stay clamped — 43 checks.
+  The same script was also run against the real rendered `/grn` page with a real
+  `/api/grn_consumption` payload: the per-lot bars and the overall meter matched
+  the payload, and the first row’s arrow toggled its details row (43 checks).
 
 ---
 
@@ -404,16 +427,18 @@ the FIFO parity tests, still passes).
 
 ## 10. Manual verification recipe
 
-1. Open **GRN**. Above the table the **Overall consumption** panel shows one bar
-   for the whole screen (consumed value ÷ received value at cost) with lots on
-   screen, fully consumed, FIFO-replay lots and the stock value still in hand.
-   In any row: the **Items** column lists one card per lot (name, @rate,
-   `recorded`/`reconstructed` badge, received / consumed / remaining, bar,
-   percentage at the right, colour band), and the **Overall consumption** column
-   rolls the GRN's lots up. The Actions column is five equal icon buttons —
-   view, print, edit, shift, delete. Click **Recalculate** next to Excel to pull
-   a fresh replay: the bars, the figures beside them and the overall panel all
-   move, and the icon spins while the request is in flight.
+1. Open **GRN**. Above the table one slim **Overall consumption** strip shows
+   the whole screen (consumed value ÷ received value at cost) with received /
+   consumed / in hand, lot counts and the stock value still in hand.
+   Every record is one line. Click the **chevron** on the left of a row: it
+   turns down and a `Consumption by lot` panel opens listing each item on that
+   GRN with its own name, @rate, `recorded`/`reconstructed` badge, received /
+   consumed / remaining, bar and percentage, and the value still in hand for
+   that lot. There is no per-GRN aggregate column. Collapse it with the same
+   arrow. The Actions column is five equal icon buttons — view, print, edit,
+   shift, delete. Click **Recalculate** next to Excel to pull a fresh replay:
+   the bars, the figures beside them, the hidden detail rows and the slim
+   overall strip all move, and the icon spins while the request is in flight.
 2. Filter or search the GRN screen: the same lot keeps the same percentage.
 3. Open **Profit & Loss**. Change *Payment status* to *Credit outstanding*:
    the cards and tables update without a page reload and without an Apply

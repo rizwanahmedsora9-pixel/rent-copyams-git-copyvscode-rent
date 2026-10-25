@@ -1,20 +1,19 @@
-"""GRN screen layout: the consumption meters get real room, the row actions
-stay one tidy strip.
+"""GRN screen layout: one compact row per GRN, lot meters behind an arrow.
 
 The indicator's *numbers* are already pinned by ``test_grn_consumption_indicator``.
-These tests pin the presentation contract around them, because three things were
-wrong there:
+These tests pin the presentation contract around them:
 
-1. the per-GRN roll-up meter was squeezed into the Total Qty column (a 190px
-   box whose bar was clamped to 90px), so the one number that answers "is this
-   GRN still in the warehouse?" was the least readable thing on the row;
-2. the received / consumed / remaining read-outs sat *outside* the element the
-   repaint script searches, so hitting "Recalculate" moved the bars and left
-   the figures stale — they now live in a ``data-grn-scope`` block that
-   ``static/grn_consumption.js`` falls back to;
-3. the Actions cell mixed three icon buttons with a wide labelled *Delete* and
-   an even wider *Shift* button, so the strip wrapped unevenly, and the refresh
-   button toggled a ``.spin`` class that no stylesheet defines.
+1. a record is one line: the collapsed ``<tr>`` carries no progress bar and no
+   consumption figures at all, so a page of GRNs stays scannable;
+2. every row has a real expand button (``aria-expanded`` / ``aria-controls``)
+   that opens a server-rendered ``grn-details-row``; the row is ``hidden``
+   until the operator asks for it;
+3. there is no aggregate report per GRN: the old *Overall consumption* column
+   and its ``data-grn-summary`` element are gone.  A GRN with several items
+   lists each item's own consumption inside the expanded panel;
+4. the whole-screen *Overall consumption* summary is one slim strip, not the
+   old two-column panel with four stat cards;
+5. the row actions and toolbar keep the contract from the previous pass.
 
 Only structure and class names are asserted here; the CSS itself lives in the
 template and is checked by presence, not by pixels.
@@ -69,9 +68,23 @@ def header_cells(html):
     return [re.sub(r"<[^>]+>", "", cell).strip() for cell in re.findall(r"<th[\s>](.*?)</th>", head, re.S)]
 
 
-def body_rows(html):
+def row_pairs(html):
+    """[(collapsed row, details row)] — the details row follows its main row."""
     table = records_table(html)
-    return re.findall(r"<tr>(.*?)</tr>", table[table.index("<tbody>"):], re.S)
+    body = table[table.index("<tbody>"):]
+    return re.findall(
+        r'(<tr class="grn-row"[^>]*>.*?</tr>)\s*(<tr class="grn-details-row"[^>]*>.*?</tr>)',
+        body,
+        re.S,
+    )
+
+
+def main_rows(html):
+    return [pair[0] for pair in row_pairs(html)]
+
+
+def details_rows(html):
+    return [pair[1] for pair in row_pairs(html)]
 
 
 def overview_section(html):
@@ -80,43 +93,65 @@ def overview_section(html):
     return match.group(0)
 
 
+def lot_count(details_row):
+    return details_row.count("data-grn-consume data-grn-item-id=")
+
+
 # --------------------------------------------------------------------------- #
-# 1. The per-GRN meter has its own column, and Total Qty is just a quantity
+# 1. Collapsed rows are one compact line; details are hidden until asked
 # --------------------------------------------------------------------------- #
-def test_overall_meter_gets_its_own_column(grn_screen):
+def test_collapsed_row_is_one_line_and_has_an_expand_button(grn_screen):
     _app, html, data = grn_screen
     headers = header_cells(html)
-    assert any(name.startswith("Overall consumption") for name in headers), headers
-    assert len(headers) == 9
+    assert len(headers) == 9, headers
+    assert not any("overall consumption" in name.lower() for name in headers), headers
 
-    rows = body_rows(html)
-    assert len(rows) == len(data["grns"])
-    for row in rows:
-        assert row.count("<td") == len(headers), "row does not match the header"
-        assert row.count("data-grn-summary data-grn-id=") == 1
-        assert 'class="grn-overall" data-grn-scope' in row
-        # the roll-up bar moved out of the quantity cell
-        qty_cell = re.search(r'<td class="grn-col-num">\s*<span class="grn-qty">.*?</td>', row, re.S)
-        assert qty_cell and "grn-consume-track" not in qty_cell.group(0)
-        assert "grn-consume-summary" not in row  # the old cramped wrapper is gone
+    pairs = row_pairs(html)
+    assert len(pairs) == len(data["grns"])
+    for main, details in pairs:
+        assert main.count("<td") == len(headers), "row does not match the header"
+        # The collapsed row is only identity + quantity: no bar, no figures.
+        assert "grn-consume-track" not in main
+        assert "data-grn-consume" not in main
+        assert "data-grn-scope" not in main
+        assert "data-grn-summary" not in main
+        assert "grn-consume-pct" not in main
+        assert main.count('class="grn-items-line"') + main.count('class="grn-items-empty"') == 1
+
+        # A real button controls the hidden details row.
+        assert main.count('<button type="button" class="grn-expand-btn"') == 1
+        assert 'aria-expanded="false"' in main
+        target = re.search(r'aria-controls="([^"]+)"', main).group(1)
+        assert 'data-grn-expand="%s"' % target in main
+        assert 'id="%s" hidden' % target in details
+        assert 'colspan="9"' in details
+
+        # Everything about every lot waits inside the details row.
+        lots = lot_count(details)
+        assert lots >= 1
+        assert details.count('class="grn-item-consume" data-grn-scope') == lots
+        assert details.count("data-grn-summary") == 0, "per-GRN aggregate is not wanted"
+
+    # One details row per record, and the toggle script is loaded by the page.
+    assert len(details_rows(html)) == len(main_rows(html)) == len(data["grns"])
+    assert "grn_consumption.js" in html
 
 
 def test_every_lot_and_meter_can_be_repainted(grn_screen):
-    """The read-outs must sit inside a scope the repaint script searches."""
+    """Each lot's read-outs sit in its own data-grn-scope block."""
     _app, html, _data = grn_screen
-    for row in body_rows(html):
-        lots = row.count("data-grn-consume data-grn-item-id=")
-        assert row.count('class="grn-item-consume" data-grn-scope') == lots
-        assert row.count("data-grn-scope") == lots + 1  # + the overall meter
-        assert row.count("data-grn-received") == lots
-        assert row.count("data-grn-consumed") == lots + 1
-        assert row.count("data-grn-remaining") == lots + 1
+    for details in details_rows(html):
+        lots = lot_count(details)
+        assert details.count("data-grn-scope") == lots
+        assert details.count("data-grn-received") == lots
+        assert details.count("data-grn-consumed") == lots
+        assert details.count("data-grn-remaining") == lots
 
 
 # --------------------------------------------------------------------------- #
-# 2. The whole-screen overall meter reports the same projection
+# 2. The whole-screen overall meter is one slim strip over the server numbers
 # --------------------------------------------------------------------------- #
-def test_overview_meter_aggregates_the_server_projection(grn_screen):
+def test_overview_is_one_slim_strip_aggregating_the_server_projection(grn_screen):
     _app, html, data = grn_screen
     section = overview_section(html)
     lots = list(data["items"].values())
@@ -145,13 +180,24 @@ def test_overview_meter_aggregates_the_server_projection(grn_screen):
     # ...and the meter is honest about what it measures.
     assert "valued at cost" in section
 
+    # Slim: just the bar track + its fill are <div>s; the four stat cards,
+    # caption row and separate legend row are gone.
+    assert section.count("<div") == 2
+    assert section.count("grn-overview-bar") == 1
+    assert "grn-overview-stat" not in section
+    assert "grn-overview-stats" not in section
+    assert "grn-overview-caption" not in section
+    assert "grn-overview-legend" not in section
+    overview_css = re.search(r"\.grn-overview \{[^}]*\}", html).group(0)
+    assert "display: flex" in overview_css and "flex-wrap: wrap" in overview_css
+
 
 # --------------------------------------------------------------------------- #
 # 3. Row actions: one uniform, icon-only strip
 # --------------------------------------------------------------------------- #
 def test_row_actions_are_one_uniform_strip(grn_screen):
-    _app, html, data = grn_screen
-    rows = body_rows(html)
+    _app, html, _data = grn_screen
+    rows = main_rows(html)
     assert rows
     for row in rows:
         strip = re.search(r'<div class="grn-row-actions">(.*?)</div>', row, re.S).group(1)

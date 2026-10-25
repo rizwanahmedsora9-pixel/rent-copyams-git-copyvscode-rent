@@ -123,12 +123,18 @@
        use.  It aggregates exactly what the server template aggregates (received
        / consumed / remaining *value* of the lots on screen), so a refresh can
        only ever reproduce the number a page load would have printed. */
-    function paintOverview(payload) {
+    function paintOverview(payload, itemIds) {
         var meter = document.getElementById("grnOverallMeter");
         if (!meter || !payload || !payload.items) return null;
+        /* The strip says "across the GRNs on this screen", so aggregate only
+           the lots the page is actually showing.  The endpoint returns the
+           whole ledger; on a filtered screen that was more than the server had
+           rendered. */
+        var ids = (itemIds && itemIds.length) ? itemIds : Object.keys(payload.items);
         var totals = { received: 0, consumed: 0, remaining: 0, lots: 0, complete: 0, replay: 0 };
-        Object.keys(payload.items).forEach(function (itemId) {
-            var row = payload.items[itemId] || {};
+        ids.forEach(function (itemId) {
+            var row = payload.items[itemId] || payload.items[String(itemId)];
+            if (!row) return;
             totals.received += num(row.received_value);
             totals.consumed += num(row.consumed_value);
             totals.remaining += num(row.remaining_value);
@@ -173,7 +179,15 @@
 
     function applyServerData(payload) {
         if (!payload || !payload.items) return 0;
-        paintOverview(payload);
+        var visibleItemIds = [];
+        Array.prototype.forEach.call(
+            document.querySelectorAll("[data-grn-consume][data-grn-item-id]"),
+            function (el) {
+                var id = el.getAttribute("data-grn-item-id");
+                if (id && visibleItemIds.indexOf(id) === -1) visibleItemIds.push(id);
+            }
+        );
+        paintOverview(payload, visibleItemIds);
         var painted = 0;
         Object.keys(payload.items).forEach(function (itemId) {
             var row = payload.items[itemId];
@@ -213,7 +227,63 @@
             });
     }
 
+    /* ---------------------------------------------------------------------
+       Collapsible GRN rows.
+
+       The records table stays one compact line per GRN; the per-lot details
+       live in a server-rendered <tr> that is simply hidden until the arrow is
+       clicked.  Rendering them on the server keeps every figure available
+       without JavaScript (and greppable by tests), while the toggle only
+       changes visibility — it never computes a number.
+       --------------------------------------------------------------------- */
+    function detailsFor(button) {
+        var id = button.getAttribute("data-grn-expand");
+        return id ? document.getElementById(id) : null;
+    }
+
+    function setExpanded(button, open) {
+        var details = detailsFor(button);
+        if (!details) return false;
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+        var showLabel = button.getAttribute("data-label-show") || "Show details";
+        var hideLabel = button.getAttribute("data-label-hide") || "Hide details";
+        var label = open ? hideLabel : showLabel;
+        var reference = button.getAttribute("data-grn-label");
+        button.setAttribute("title", label);
+        button.setAttribute("aria-label", reference ? label + " for " + reference : label);
+        var icon = button.querySelector("i");
+        if (icon) {
+            icon.classList.toggle("bi-chevron-right", !open);
+            icon.classList.toggle("bi-chevron-down", open);
+        }
+        details.hidden = !open;
+        details.classList.toggle("is-open", open);
+        if (button.closest) {
+            var row = button.closest("tr");
+            if (row) row.classList.toggle("is-expanded", open);
+        }
+        // Bars inside a hidden row still carry the server width; repaint on
+        // open so a row refreshed while collapsed is never stale when shown.
+        if (open) paintAll(details);
+        return true;
+    }
+
+    function toggleRow(button) {
+        return setExpanded(button, button.getAttribute("aria-expanded") !== "true");
+    }
+
+    function initExpanders(root) {
+        var buttons = (root || document).querySelectorAll("[data-grn-expand]");
+        Array.prototype.forEach.call(buttons, function (button) {
+            if (button.getAttribute("data-grn-expand-ready") === "1") return;
+            button.setAttribute("data-grn-expand-ready", "1");
+            button.addEventListener("click", function () { toggleRow(button); });
+        });
+        return buttons.length;
+    }
+
     function init() {
+        initExpanders(document);
         paintAll(document);
         // Recalculate indicators for rows added by an existing workflow
         // (filters, pagination, AJAX row insertion) without touching the data.
@@ -243,6 +313,9 @@
 
     window.FBMGrnConsumption = {
         init: init,
+        initExpanders: initExpanders,
+        setExpanded: setExpanded,
+        toggleRow: toggleRow,
         paint: paint,
         paintAll: paintAll,
         applyServerData: applyServerData,
