@@ -107,6 +107,7 @@ def _collect_direct_sale_form_draft(form_data, mode='add', sale_id=None):
             'bags_delivered': bags,
             'rent_amount': rent
         })
+    from app.services.lookups import is_service_name
     return {
         'mode': mode,
         'sale_id': sale_id,
@@ -132,7 +133,11 @@ def _collect_direct_sale_form_draft(form_data, mode='add', sale_id=None):
         'items': [
             {
                 'product_name': (p or '').strip(),
-                'alternate_material': (a or '').strip(),
+                'alternate_material': (
+                    ''
+                    if is_service_name((p or '').strip()) or is_service_name((a or '').strip())
+                    else (a or '').strip()
+                ),
                 'qty': (q or '').strip(),
                 'unit_rate': (r or '').strip(),
                 'ignore_booking': str(ib or '').strip().lower() in ['1', 'true', 'on', 'yes']

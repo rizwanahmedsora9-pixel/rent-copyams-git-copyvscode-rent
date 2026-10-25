@@ -227,6 +227,7 @@ def direct_sales_page():
     return render_template('direct_sales.html',
                            sales=sales,
                            materials=materials,
+                           alt_materials=[m for m in materials if not is_service_name(m.name)],
                            services=Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all(),
                            clients=clients,
                            grns=grns,
