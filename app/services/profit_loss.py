@@ -11,9 +11,18 @@ Recognition rules
 * A booking is an order/advance, not revenue.  Revenue and cost are recognized
   only for quantities actually supplied against a BookingAllocation (or a
   conservatively matched legacy dispatch Entry).
+* Material cost is FIFO: every dispatched quantity is valued from the oldest
+  open GRN lot at that delivery date (lot date, then GRN id, then lot id), and
+  the same lot queue is consumed once across sales, booking supplies and
+  legacy dispatches.  A lot is available from the calendar day its GRN is
+  posted — the same rule posting-time FIFO uses.  Recorded GRNAllocations and
+  frozen line rates stay authoritative for their own rows.
 * GRN/frozen costs are recorded costs.  Historical/master fallbacks are clearly
-  labelled estimates.  A row with no defensible cost is visible, but excluded
-  from net profit instead of silently treating its cost as zero.
+  labelled estimates.  When a delivery predates every purchase, the estimate
+  comes from the NEAREST later lot (the head of the FIFO queue) — never from
+  the newest purchase in the dataset.  A row with no defensible cost is
+  visible, but excluded from net profit instead of silently treating its cost
+  as zero.
 * Receipts, supplier payments and driver payments are settlements.  Purchases
   are inventory.  Neither is posted again as P&L activity.
 * Returns are dated reversals linked to the original supplied quantity where
@@ -462,8 +471,24 @@ class _Projection:
                     chosen = value
                     break
             if chosen is None:
-                chosen = values[0]
-                basis = "Estimated from a later GRN; not an as-of-sale historical cost"
+                # Nothing was bought on/before the supply date.  FIFO values
+                # the issue from the next lot in the queue, so the nearest
+                # LATER GRN is the defensible estimate.  Taking values[0] here
+                # used the newest purchase in the whole dataset (often months
+                # after the delivery), which rewrote historical profit with a
+                # future price and is not FIFO at all.
+                if tx_date:
+                    forward = [value for value in values if value[0] and value[0].date() > tx_date]
+                else:
+                    forward = []
+                if forward:
+                    chosen = min(forward, key=lambda value: (value[0], value[2].id))
+                    basis = "Estimated from the nearest later GRN; no purchase existed on/before supply"
+                else:
+                    # No dates at all on either side: the oldest recorded
+                    # purchase is still closer to FIFO than the newest one.
+                    chosen = min(values, key=lambda value: (value[0] or datetime.min, value[2].id))
+                    basis = "Estimated from the earliest GRN; date of supply is unknown"
             else:
                 basis = "Estimated from latest GRN on/before supply; no frozen allocation"
             dt, rate, item, grn = chosen
@@ -508,13 +533,26 @@ class _Projection:
         for lots in lots_by_material.values():
             lots.sort(key=lambda lot: (lot["date"] or datetime.min, lot["grn_id"], lot["grn_item_id"]))
 
+        def lot_available(lot_date, tx_dt):
+            """A lot exists for a delivery once its GRN is posted that day.
+
+            Posting-time FIFO compares calendar dates (``GRN.date_posted.date()
+            > sale_date``), so a GRN posted at 18:00 is consumed by a sale
+            issued at 10:00 on the same day.  Comparing full datetimes here
+            would silently skip that lot, hand the issue to an older lot or a
+            "later GRN" estimate, and disagree with the recorded allocation.
+            """
+            if not lot_date or not tx_dt:
+                return True
+            return lot_date.date() <= tx_dt.date()
+
         def consume_fifo(material_name, qty, tx_dt):
             remaining = max(0.0, qty)
             layers = []
             for lot in lots_by_material.get(_mat_key(material_name), []):
                 if remaining <= EPS:
                     break
-                if tx_dt and lot["date"] and lot["date"] > tx_dt:
+                if not lot_available(lot["date"], tx_dt):
                     continue
                 take = min(remaining, lot["remaining"])
                 if take <= EPS:
@@ -528,7 +566,7 @@ class _Projection:
             lot = lot_by_item.get(grn_item_id)
             if not lot or qty <= 0:
                 return
-            if tx_dt and lot["date"] and lot["date"] > tx_dt:
+            if not lot_available(lot["date"], tx_dt):
                 return
             lot["remaining"] = max(0.0, lot["remaining"] - qty)
 
