@@ -145,6 +145,15 @@ def test_two_lines_of_one_sale_consume_lots_in_sequence(fifo_app):
         # produced 40*80 + 40*80 = 6,400 and over-consumed the 80-rate lot.
         assert day.summary["total_cogs"] == pytest.approx(6700.0)
         assert day.summary["total_material_revenue"] == pytest.approx(40 * 150 + 40 * 160)
+        fifo_sources = [source for row in rows for source in row["cost_sources"]]
+        assert sum(source.get("qty", 0) for source in fifo_sources) == pytest.approx(80.0)
+        assert sum(source.get("amount", 0) for source in fifo_sources) == pytest.approx(6700.0)
+        assert all(source.get("reference") and source.get("date") for source in fifo_sources)
+        detail_response = client.get(f"/profit_reports/transaction/DirectSale/{sale.id}")
+        assert detail_response.status_code == 200
+        assert b"GRN cost layers (qty \xc3\x97 unit cost)" in detail_response.data
+        assert b"GRN-80" in detail_response.data
+        assert b"40.00 \xc3\x97 Rs. 80.00" in detail_response.data
 
 
 def test_delivery_before_every_purchase_uses_the_nearest_later_lot(fifo_app):

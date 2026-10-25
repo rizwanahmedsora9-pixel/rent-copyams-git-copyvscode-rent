@@ -158,6 +158,9 @@ def test_profit_summary_uses_plain_language(app, client):
 
     # The drill-down is reachable from the summary page.
     assert "View All Transactions" in body
+    assert "Read the result in three steps" in body
+    assert "FIFO assigns the GRN cost" in body
+    assert "is the sum of loss rows" in body
 
 
 def test_profit_summary_hides_accounting_jargon(app, client):
