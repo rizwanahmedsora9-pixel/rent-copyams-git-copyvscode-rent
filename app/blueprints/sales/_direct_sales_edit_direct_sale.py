@@ -274,6 +274,10 @@ def edit_direct_sale(id):
             alt_mid = alternate_ids[idx] if idx < len(alternate_ids) else ''
             alt_obj = None
             if alt_name_in or str(alt_mid or '').strip():
+                if _kind == 'service' or is_service_name(mat_obj.name):
+                    return _fail_edit(f'Alternate material cannot be used for service "{mat_obj.name}".')
+                if alt_name_in and is_service_name(alt_name_in):
+                    return _fail_edit(f'Service "{alt_name_in}" cannot be used as an alternate material.')
                 try:
                     alt_obj = resolve_transaction_material(
                         material_id=alt_mid,
@@ -285,6 +289,8 @@ def edit_direct_sale(id):
                     return _fail_edit(str(ve))
                 if not alt_obj:
                     return _fail_edit(MATERIAL_NOT_SELECTED_MSG)
+                if is_service_name(alt_obj.name):
+                    return _fail_edit(f'Service "{alt_obj.name}" cannot be used as an alternate material.')
 
             grn_item_id = None
             if idx < len(grn_item_ids) and grn_item_ids[idx]:

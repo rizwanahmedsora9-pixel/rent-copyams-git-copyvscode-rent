@@ -909,3 +909,227 @@ def test_full_rent_transaction_lifecycle_and_smoke(app, client):
         assert "12MM STEEL" in body
         for svc_name in ("RENT-CEMENT", "RENT-STEEL", "RENT-GENERAL"):
             assert svc_name not in body
+
+
+def test_services_never_use_alternate_material_system_in_direct_sales(app, client):
+    """Services (RENT-CEMENT, RENT-STEEL, custom services, and pre-migration
+    legacy rent items) must never use the alternate material system in Direct
+    Sales — neither as the primary item receiving an alternate nor as an
+    alternate itself — while normal materials continue to use alternates."""
+    import re as _re
+    from models import Client, Settings, Account
+
+    login(client)
+    with app.app_context():
+        settings = Settings.query.first()
+        if not settings:
+            settings = Settings(allow_global_negative_stock=False)
+            db.session.add(settings)
+        else:
+            settings.allow_global_negative_stock = False
+        c = Client(name="ALT TEST CLIENT", code="FBM-91001", category="Credit Customer", is_active=True)
+        acc = Account.query.first()
+        if not acc:
+            acc = Account(name="Main Cash", account_type="Cash", category="Cash", is_active=True)
+            db.session.add(acc)
+        mat_12 = Material(name="12MM STEEL", code="FBMST-000012", unit="KG", total=500, unit_price=240)
+        mat_20 = Material(name="20MM STEEL", code="FBMST-000020", unit="KG", total=500, unit_price=250)
+        mat_kohat = Material(name="KOHAT CEMENT", code="FBMCEM-000001", unit="Bags", total=500, unit_price=1200)
+        # Pre-migration legacy rent material still in Material table:
+        legacy_rent_steel = _make_rent_material(name="RENT-STEEL", code="FBMREN-000003", unit="Pcs")
+        # Registered services in Service master:
+        svc_cement = Service(name="RENT-CEMENT", code="FBMREN-000002", unit="Pcs")
+        svc_custom = Service(name="CRANE LOADING", code="SVC-CRANE-01", unit="Trip")
+        db.session.add_all([
+            c, mat_12, mat_20, mat_kohat, svc_cement, svc_custom,
+            Entry(material="12MM STEEL", type="IN", qty=500, date="2026-01-01"),
+            Entry(material="20MM STEEL", type="IN", qty=500, date="2026-01-01"),
+            Entry(material="KOHAT CEMENT", type="IN", qty=500, date="2026-01-01"),
+        ])
+        db.session.commit()
+        from app.services.lookups import invalidate_service_cache
+        invalidate_service_cache()
+        acc_id = acc.id
+        mat_12_id = mat_12.id
+        mat_20_id = mat_20.id
+        mat_kohat_id = mat_kohat.id
+        legacy_rent_steel_id = legacy_rent_steel.id
+        svc_cement_id = svc_cement.id
+        svc_custom_id = svc_custom.id
+
+    # 1) Direct Sales page Alternate dropdown excludes services AND legacy rent materials
+    ds_html = client.get("/direct_sales").get_data(as_text=True)
+    alt_list_match = _re.search(
+        r'<div id="addSaleAltMaterialList0"[^>]*>(.*?)</div>\s*<div id="addSaleAltMaterialDisplay0"',
+        ds_html,
+        _re.S,
+    )
+    assert alt_list_match is not None
+    alt_list_html = alt_list_match.group(1)
+    assert "12MM STEEL" in alt_list_html
+    assert "20MM STEEL" in alt_list_html
+    assert "KOHAT CEMENT" in alt_list_html
+    assert "RENT-CEMENT" not in alt_list_html
+    assert "RENT-STEEL" not in alt_list_html
+    assert "CRANE LOADING" not in alt_list_html
+
+    # 2) Book 12MM STEEL + RENT-CEMENT + RENT-STEEL + CRANE LOADING so all have booking balance
+    resp = client.post("/add_booking", data={
+        "client_code": "FBM-91001",
+        "material_name[]": ["12MM STEEL", "RENT-CEMENT", "RENT-STEEL", "CRANE LOADING"],
+        "material_id[]": [str(mat_12_id), "", str(legacy_rent_steel_id), ""],
+        "service_id[]": ["", str(svc_cement_id), "", str(svc_custom_id)],
+        "qty[]": ["100", "50", "50", "5"],
+        "unit_rate[]": ["240", "30", "25", "1000"],
+        "amount": str(100 * 240 + 50 * 30 + 50 * 25 + 5 * 1000),
+        "paid_amount": "0",
+        "payment_account_id": str(acc_id),
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+
+    # 3) Attempting to supply a physical alternate ON booked RENT-CEMENT is rejected
+    resp = client.post("/add_direct_sale", data={
+        "category": "Booking Delivery",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "product_name[]": ["RENT-CEMENT"],
+        "material_id[]": [""],
+        "service_id[]": [str(svc_cement_id)],
+        "alternate_material[]": ["KOHAT CEMENT"],
+        "alternate_material_id[]": [str(mat_kohat_id)],
+        "qty[]": ["10"],
+        "unit_rate[]": ["0"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "Alternate material cannot be used for service" in resp.get_data(as_text=True)
+    with app.app_context():
+        assert DirectSale.query.count() == 0
+
+    # 4) Attempting to supply a physical alternate ON booked custom service (CRANE LOADING) is rejected
+    resp = client.post("/add_direct_sale", data={
+        "category": "Booking Delivery",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "product_name[]": ["CRANE LOADING"],
+        "material_id[]": [""],
+        "service_id[]": [str(svc_custom_id)],
+        "alternate_material[]": ["20MM STEEL"],
+        "alternate_material_id[]": [str(mat_20_id)],
+        "qty[]": ["1"],
+        "unit_rate[]": ["0"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "Alternate material cannot be used for service" in resp.get_data(as_text=True)
+    with app.app_context():
+        assert DirectSale.query.count() == 0
+
+    # 5) Attempting to supply a physical alternate ON pre-migration RENT-STEEL is rejected
+    resp = client.post("/add_direct_sale", data={
+        "category": "Booking Delivery",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "product_name[]": ["RENT-STEEL"],
+        "material_id[]": [str(legacy_rent_steel_id)],
+        "service_id[]": [""],
+        "alternate_material[]": ["20MM STEEL"],
+        "alternate_material_id[]": [str(mat_20_id)],
+        "qty[]": ["10"],
+        "unit_rate[]": ["0"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "Alternate material cannot be used for service" in resp.get_data(as_text=True)
+    with app.app_context():
+        assert DirectSale.query.count() == 0
+
+    # 6) Attempting to select pre-migration RENT-STEEL AS alternate for 12MM STEEL is rejected
+    resp = client.post("/add_direct_sale", data={
+        "category": "Booking Delivery",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "product_name[]": ["12MM STEEL"],
+        "material_id[]": [str(mat_12_id)],
+        "service_id[]": [""],
+        "alternate_material[]": ["RENT-STEEL"],
+        "alternate_material_id[]": [str(legacy_rent_steel_id)],
+        "qty[]": ["10"],
+        "unit_rate[]": ["0"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "cannot be used as an alternate material" in resp.get_data(as_text=True)
+    with app.app_context():
+        assert DirectSale.query.count() == 0
+
+    # 7) Multi-row sale: normal material WITH alternate + RENT-CEMENT & CRANE LOADING WITHOUT alternate succeeds!
+    resp = client.post("/add_direct_sale", data={
+        "category": "Mixed Transaction",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "manual_bill_no": "DS-MIX-SVC-ALT-1",
+        "product_name[]": ["12MM STEEL", "RENT-CEMENT", "CRANE LOADING"],
+        "material_id[]": [str(mat_12_id), "", ""],
+        "service_id[]": ["", str(svc_cement_id), str(svc_custom_id)],
+        "alternate_material[]": ["20MM STEEL", "", ""],
+        "alternate_material_id[]": [str(mat_20_id), "", ""],
+        "qty[]": ["40", "60", "2"],
+        "unit_rate[]": ["0", "35", "0"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    assert "Direct sale added successfully" in resp.get_data(as_text=True)
+    with app.app_context():
+        assert DirectSale.query.count() == 1
+        sale = DirectSale.query.first()
+        sale_id = sale.id
+        # 40 of 20MM STEEL delivered against 12MM STEEL booking (rate 0),
+        # 50 booked RENT-CEMENT @ 0 + 10 excess @ 35 = 350,
+        # 2 booked CRANE LOADING @ 0
+        assert float(sale.amount or 0) == 10 * 35
+        assert float(Material.query.filter_by(name="12MM STEEL").first().total) == 500
+        assert float(Material.query.filter_by(name="20MM STEEL").first().total) == 460
+
+    # 8) Edit modal marks service rows with service-alt-disabled & readonly, keeps material row editable,
+    #    and excludes services from editSaleAltMaterialList
+    modal_html = client.get(f"/direct_sales/{sale_id}/edit-modal").get_data(as_text=True)
+    assert "service-alt-disabled" in modal_html
+    assert 'placeholder="N/A for services"' in modal_html
+    assert 'placeholder="Alternate (optional)"' in modal_html
+    for m in _re.finditer(r'<div id="editSaleAltMaterialList[^"]*"[^>]*>(.*?)</div>', modal_html, _re.S):
+        sub = m.group(1)
+        assert "12MM STEEL" in sub
+        assert "RENT-CEMENT" not in sub
+        assert "RENT-STEEL" not in sub
+        assert "CRANE LOADING" not in sub
+
+    # 9) Edit Direct Sale rejects adding an alternate onto a service row OR using a service as alternate
+    resp = client.post(f"/edit_bill/DirectSale/{sale_id}", data={
+        "category": "Mixed Transaction",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "manual_bill_no": "DS-MIX-SVC-ALT-1",
+        "product_name[]": ["12MM STEEL", "RENT-CEMENT"],
+        "material_id[]": [str(mat_12_id), ""],
+        "service_id[]": ["", str(svc_cement_id)],
+        "alternate_material[]": ["20MM STEEL", "KOHAT CEMENT"],
+        "alternate_material_id[]": [str(mat_20_id), str(mat_kohat_id)],
+        "qty[]": ["40", "60"],
+        "unit_rate[]": ["0", "35"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "Alternate material cannot be used for service" in resp.get_data(as_text=True)
+
+    resp = client.post(f"/edit_bill/DirectSale/{sale_id}", data={
+        "category": "Mixed Transaction",
+        "client_code": "FBM-91001",
+        "driver_name": "Driver A",
+        "manual_bill_no": "DS-MIX-SVC-ALT-1",
+        "product_name[]": ["12MM STEEL", "RENT-CEMENT"],
+        "material_id[]": [str(mat_12_id), ""],
+        "service_id[]": ["", str(svc_cement_id)],
+        "alternate_material[]": ["RENT-STEEL", ""],
+        "alternate_material_id[]": [str(legacy_rent_steel_id), ""],
+        "qty[]": ["40", "60"],
+        "unit_rate[]": ["0", "35"],
+        "paid_amount": "0",
+    }, follow_redirects=True)
+    assert "cannot be used as an alternate material" in resp.get_data(as_text=True)
+

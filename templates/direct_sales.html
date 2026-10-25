@@ -712,7 +712,7 @@
                                             </button>
                                         </div>
                                         <div id="addSaleAltMaterialList0" class="combobox-list alt-material-list shadow-lg" style="display: none;">
-                                            {% for mat in materials %}
+                                            {% for mat in (alt_materials if alt_materials is defined else materials) %}
                                             <div class="combobox-item" data-value="{{ mat.name }}" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="addSaleAltMaterialSearch0" data-combo-display="addSaleAltMaterialDisplay0">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
                                             </div>
@@ -1027,6 +1027,10 @@
     font-size: 0.72rem;
     padding: 4px 6px;
 }
+.sale-form .service-alt-disabled .input-group {
+    opacity: 0.45;
+    pointer-events: none;
+}
 </style>
 <script>
 let saleMaterialRowCounter = 0;
@@ -1151,6 +1155,7 @@ function prepareSaleMaterialComboboxRow(row, idx) {
             grnInput.addEventListener('focus', function () { filterSaleGrnItems(row); });
         }
     }
+    syncServiceAlternateState(row);
 }
 
 function onSaleMaterialPicked(code, name, inputId) {
@@ -1164,6 +1169,7 @@ function onSaleMaterialPicked(code, name, inputId) {
         if (grnInput) grnInput.value = '';
         if (grnDisplay) grnDisplay.innerText = '';
         filterSaleGrnItems(row);
+        syncServiceAlternateState(row);
         checkItemBookingStatus(row);
     }
 }
@@ -1305,6 +1311,7 @@ function removeSaleItemRow(btn) {
         if (materialDisplay) materialDisplay.innerText = '';
         const altDisplay = row.querySelector('.alt-material-display');
         if (altDisplay) altDisplay.innerText = '';
+        syncServiceAlternateState(row);
         updateSalePrice(row.closest('form'));
         return;
     }
@@ -1530,6 +1537,62 @@ function isRentMaterial(v) {
     }
     const txt = raw.toLowerCase().replace(/[-_]+/g, ' ');
     return txt.includes('rent');
+}
+function isKnownNonServiceMaterial(v) {
+    const raw = (v || '').toString().trim();
+    if (!raw || isRentMaterial(raw)) return false;
+    const lower = raw.toLowerCase();
+    return (
+        knownMaterialNames.has(raw) ||
+        knownMaterialNames.has(lower) ||
+        Array.from(knownMaterialNames).some((n) => String(n || '').toLowerCase() === lower) ||
+        knownMaterialCodes.has(raw) ||
+        knownMaterialCodes.has(lower) ||
+        Array.from(knownMaterialCodes).some((n) => String(n || '').toLowerCase() === lower)
+    );
+}
+function isRowServiceItem(row) {
+    if (!row) return false;
+    const materialInput = row.querySelector('.price-trigger, input[name="product_name[]"]');
+    const val = materialInput ? (materialInput.value || '').trim() : '';
+    if (val) {
+        if (isRentMaterial(val)) return true;
+        if (isKnownNonServiceMaterial(val)) return false;
+    }
+    const svcIdInput = row.querySelector('.service-id-input, input[name="service_id[]"]');
+    if (svcIdInput && String(svcIdInput.value || '').trim() !== '') return true;
+    if (materialInput && materialInput.dataset && materialInput.dataset.selectedServiceId) return true;
+    return false;
+}
+function syncServiceAlternateState(row) {
+    if (!row) return;
+    const altInput = row.querySelector('.alt-material-input, input[name="alternate_material[]"]');
+    if (!altInput) return;
+    const altIdInput = row.querySelector('.alt-material-id-input, input[name="alternate_material_id[]"]');
+    const altBtn = row.querySelector('.alt-material-toggle-btn');
+    const altList = row.querySelector('.alt-material-list');
+    const altDisplay = row.querySelector('.alt-material-display');
+    const altCell = altInput.closest('.position-relative');
+    if (isRowServiceItem(row)) {
+        altInput.value = '';
+        if (altIdInput) altIdInput.value = '';
+        if (typeof window.clearSelectedMaterialId === 'function') window.clearSelectedMaterialId(altInput);
+        if (altDisplay) altDisplay.innerText = '';
+        if (altList) altList.style.display = 'none';
+        altInput.readOnly = true;
+        altInput.tabIndex = -1;
+        altInput.dataset.serviceAltDisabled = '1';
+        altInput.placeholder = 'N/A for services';
+        if (altBtn) altBtn.disabled = true;
+        if (altCell) altCell.classList.add('service-alt-disabled');
+    } else {
+        altInput.readOnly = false;
+        altInput.removeAttribute('tabindex');
+        delete altInput.dataset.serviceAltDisabled;
+        altInput.placeholder = 'Alternate (optional)';
+        if (altBtn) altBtn.disabled = false;
+        if (altCell) altCell.classList.remove('service-alt-disabled');
+    }
 }
 function toNum(v) {
     const n = parseFloat(v);
@@ -1899,6 +1962,7 @@ function filterAddSaleClientsByCategory() {
 }
 
 function checkItemBookingStatus(row) {
+    syncServiceAlternateState(row);
     const materialInput = row.querySelector('.price-trigger');
     const rateInput = row.querySelector('.rate-input');
     const qtyInputEl = row.querySelector('.qty-input');
@@ -1995,15 +2059,31 @@ function checkItemBookingStatus(row) {
 
 function attachSaleListeners(row) {
     const materialInput = row.querySelector('.price-trigger');
+    const altInput = row.querySelector('.alt-material-input, input[name="alternate_material[]"]');
     const rateInput = row.querySelector('.rate-input');
     const qtyInput = row.querySelector('.qty-input');
     const ignoreItem = row.querySelector('.ignore-booking-item');
     const ignoreHidden = row.querySelector('.ignore-booking-hidden');
     syncSaleRowToggleButton(row);
+    syncServiceAlternateState(row);
     
     if (materialInput) {
         materialInput.addEventListener('input', () => checkItemBookingStatus(row));
         materialInput.addEventListener('change', () => checkItemBookingStatus(row));
+    }
+    if (altInput && altInput.dataset.serviceAltGuardBound !== '1') {
+        altInput.dataset.serviceAltGuardBound = '1';
+        altInput.addEventListener('focus', () => {
+            if (isRowServiceItem(row)) {
+                syncServiceAlternateState(row);
+                altInput.blur();
+            }
+        });
+        altInput.addEventListener('input', () => {
+            if (isRowServiceItem(row)) {
+                syncServiceAlternateState(row);
+            }
+        });
     }
     if (ignoreItem) {
         ignoreItem.addEventListener('change', () => {
@@ -2564,8 +2644,11 @@ function validateSaleFormBeforeSubmit(form) {
         const alt = (row.querySelector('[name="alternate_material[]"]')?.value || '').trim();
         const altMatIdInput = row.querySelector('.alt-material-id-input');
         const altMatId = (altMatIdInput && altMatIdInput.value) ? altMatIdInput.value.trim() : '';
-        const altIsService = alt && (knownServiceNames.has(alt) || knownServiceNames.has(alt.toLowerCase()) || knownServiceCodes.has(alt) || knownServiceCodes.has(alt.toLowerCase()) || Array.from(knownServiceNames).some((n) => String(n || '').toLowerCase() === alt.toLowerCase()));
-        if (altIsService) {
+        const rowIsService = Boolean(svcIdVal) || isKnownService || isRentMaterial(product);
+        const altIsService = Boolean(alt) && (isRentMaterial(alt) || knownServiceNames.has(alt) || knownServiceNames.has(alt.toLowerCase()) || knownServiceCodes.has(alt) || knownServiceCodes.has(alt.toLowerCase()) || Array.from(knownServiceNames).some((n) => String(n || '').toLowerCase() === alt.toLowerCase()));
+        if (rowIsService && (alt || altMatId)) {
+            issues.push(`Row ${idx + 1}: Alternate material cannot be used for services.`);
+        } else if (altIsService) {
             issues.push(`Row ${idx + 1}: A service cannot be selected as an alternate material.`);
         } else if (alt && !altMatId && !(knownMaterialNames.has(alt) || knownMaterialNames.has(alt.toLowerCase()) || knownMaterialCodes.has(alt) || knownMaterialCodes.has(alt.toLowerCase()))) {
             issues.push(`Row ${idx + 1}: Select a valid alternate material from list.`);
@@ -2683,6 +2766,7 @@ function resetAddSaleForm() {
             if (materialDisplay) materialDisplay.innerText = '';
             const altDisplay = firstRow.querySelector('#addSaleAltMaterialDisplay0');
             if (altDisplay) altDisplay.innerText = '';
+            syncServiceAlternateState(firstRow);
         }
     }
 
@@ -2769,6 +2853,7 @@ function applyAddSaleDraft(draft) {
             if (r) r.value = item.unit_rate || '';
             if (ib) ib.value = item.ignore_booking ? '1' : '0';
             if (ibToggle) ibToggle.checked = !!item.ignore_booking;
+            syncServiceAlternateState(row);
         });
     }
 
@@ -2822,6 +2907,7 @@ function applyEditSaleDraft(draft) {
             if (r) r.value = item.unit_rate || '';
             if (ib) ib.value = item.ignore_booking ? '1' : '0';
             if (ibToggle) ibToggle.checked = !!item.ignore_booking;
+            syncServiceAlternateState(row);
         });
     }
 

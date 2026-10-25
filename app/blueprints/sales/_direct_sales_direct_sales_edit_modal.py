@@ -50,9 +50,8 @@ def direct_sale_edit_modal(sale_id):
     ), None)
 
     # Surface the original booked material for each existing sale line so that
-    # the edit modal can pre-fill the "Alternate" field.  Without this, an
-    # alternate-material dispatch (e.g. delivered KOHAT against RENT-CEMENT
-    # booking) loses its booking identity in the UI and on save.
+    # the edit modal can pre-fill the "Alternate" field.  Services never use
+    # the alternate-material system.
     refs = _direct_sale_bill_refs(sale)
     old_entries = Entry.query.filter(
         Entry.bill_no.in_(refs),
@@ -63,7 +62,13 @@ def direct_sale_edit_modal(sale_id):
     for e in old_entries:
         delivered = (e.material or '').strip()
         booked = (e.booked_material or '').strip()
-        if delivered and booked and booked != delivered:
+        if (
+            delivered
+            and booked
+            and booked != delivered
+            and not is_service_name(delivered)
+            and not is_service_name(booked)
+        ):
             alt_by_delivered[delivered] = booked
 
     services = Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all()
@@ -81,6 +86,7 @@ def direct_sale_edit_modal(sale_id):
         '_direct_sale_edit_modal.html',
         sale=sale,
         materials=materials,
+        alt_materials=[m for m in materials if not is_service_name(m.name)],
         services=services,
         clients=clients,
         delivery_persons=delivery_persons,

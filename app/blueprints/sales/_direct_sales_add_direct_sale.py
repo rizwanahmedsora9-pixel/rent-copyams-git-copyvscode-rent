@@ -282,6 +282,10 @@ def add_direct_sale():
         alt_mid = alternate_ids[idx] if idx < len(alternate_ids) else ''
         alt_obj = None
         if alt_input or str(alt_mid or '').strip():
+            if _kind == 'service' or is_service_name(mat_name):
+                return _fail_sale(f'Alternate material cannot be used for service "{mat_name}".')
+            if alt_input and is_service_name(alt_input):
+                return _fail_sale(f'Service "{alt_input}" cannot be used as an alternate material.')
             try:
                 alt_obj = resolve_transaction_material(
                     material_id=alt_mid,
@@ -292,6 +296,8 @@ def add_direct_sale():
                 return _fail_sale(str(ve))
             if not alt_obj:
                 return _fail_sale(MATERIAL_NOT_SELECTED_MSG)
+            if is_service_name(alt_obj.name):
+                return _fail_sale(f'Service "{alt_obj.name}" cannot be used as an alternate material.')
 
         if balance > 0:
             qty_booking = min(qty, balance)

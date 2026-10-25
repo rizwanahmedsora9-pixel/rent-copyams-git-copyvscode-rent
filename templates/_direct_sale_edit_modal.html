@@ -173,12 +173,12 @@
                                         </div>
                                         <div id="editSaleMaterialList{{ sale.id }}_{{ loop.index0 }}" class="combobox-list shadow-lg" style="display: none;">
                                             {% for mat in materials %}
-                                            <div class="combobox-item" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}">
+                                            <div class="combobox-item" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}" data-combo-after="onSaleMaterialPicked">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
                                             </div>
                                             {% endfor %}
                                             {% for svc in services or [] %}
-                                            <div class="combobox-item" data-service-id="{{ svc.id }}" data-combo-code="{{ svc.name }}" data-combo-name="{{ svc.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}">
+                                            <div class="combobox-item" data-service-id="{{ svc.id }}" data-combo-code="{{ svc.name }}" data-combo-name="{{ svc.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}" data-combo-after="onSaleMaterialPicked">
                                                 <span class="fw-bold text-warning code-span">{{ svc.name }}</span>
                                             </div>
                                             {% endfor %}
@@ -204,16 +204,19 @@
                                         </div>
                                         <div id="editSaleGRNDisplay{{ sale.id }}_{{ loop.index0 }}" class="text-info small mt-1 fw-bold"></div>
                                     </div>
-                                    <div class="position-relative">
+                                    {% set item_is_service = namespace(val=false) %}
+                                    {% for svc in services or [] %}{% if svc.name|lower == item.product_name|lower %}{% set item_is_service.val = true %}{% endif %}{% endfor %}
+                                    {% if 'rent' in (item.product_name or '')|lower|replace('-', ' ')|replace('_', ' ') %}{% set item_is_service.val = true %}{% endif %}
+                                    <div class="position-relative{% if item_is_service.val %} service-alt-disabled{% endif %}">
                                         <div class="input-group input-group-sm">
                                             <input type="hidden" name="alternate_material_id[]" id="editSaleAltMaterialId{{ sale.id }}_{{ loop.index0 }}" class="alt-material-id-input" value="">
-                                            <input type="text" name="alternate_material[]" id="editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}" value="{{ sale_alt_material_by_product.get(item.product_name, '') if sale_alt_material_by_product else '' }}" class="form-control bg-dark text-white border-secondary alt-material-input" placeholder="Alternate (optional)" autocomplete="off" onfocus="showCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}')" oninput="filterCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialDisplay{{ sale.id }}_{{ loop.index0 }}')" data-material-id-input="editSaleAltMaterialId{{ sale.id }}_{{ loop.index0 }}">
-                                            <button class="btn btn-outline-secondary alt-material-toggle-btn" type="button" onclick="toggleCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}')">
+                                            <input type="text" name="alternate_material[]" id="editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}" value="{{ sale_alt_material_by_product.get(item.product_name, '') if (sale_alt_material_by_product and not item_is_service.val) else '' }}" class="form-control bg-dark text-white border-secondary alt-material-input" placeholder="{{ 'N/A for services' if item_is_service.val else 'Alternate (optional)' }}" autocomplete="off"{% if item_is_service.val %} readonly tabindex="-1" data-service-alt-disabled="1"{% endif %} onfocus="showCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}')" oninput="filterCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialDisplay{{ sale.id }}_{{ loop.index0 }}')" data-material-id-input="editSaleAltMaterialId{{ sale.id }}_{{ loop.index0 }}">
+                                            <button class="btn btn-outline-secondary alt-material-toggle-btn" type="button"{% if item_is_service.val %} disabled{% endif %} onclick="toggleCombobox('editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}', 'editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}')">
                                                 <i class="bi bi-chevron-down text-warning"></i>
                                             </button>
                                         </div>
                                         <div id="editSaleAltMaterialList{{ sale.id }}_{{ loop.index0 }}" class="combobox-list alt-material-list shadow-lg" style="display: none;">
-                                            {% for mat in materials %}
+                                            {% for mat in (alt_materials if alt_materials is defined else materials) %}
                                             <div class="combobox-item" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="editSaleAltMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleAltMaterialDisplay{{ sale.id }}_{{ loop.index0 }}">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
                                             </div>
