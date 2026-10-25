@@ -507,6 +507,32 @@ class _LotLedger:
                 layers.append((lot["grn_item_id"], take))
         return layers, remaining
 
+    def _lot_history_exists(self, material, tx_dt):
+        return any(
+            self._lot_available(lot, tx_dt)
+            for lot in self.lots_by_material.get(material_key(material), [])
+        )
+
+    def _consume_forward(self, material, qty):
+        """Consume the next lots for a dispatch that predates every purchase.
+
+        Mirrors ``profit_loss``: a delivery posted against negative stock is
+        attributed, oldest lot first, to the purchases that later covered it,
+        so the indicator's remaining quantity agrees with the costed quantity.
+        """
+        remaining = max(0.0, qty)
+        layers = []
+        for lot in self.lots_by_material.get(material_key(material), []):
+            if remaining <= EPS:
+                break
+            take = min(remaining, lot["remaining"])
+            if take <= EPS:
+                continue
+            lot["remaining"] -= take
+            remaining -= take
+            layers.append((lot["grn_item_id"], take))
+        return layers, remaining
+
     def _consume_specific(self, grn_item_id, qty, tx_dt, *, recorded=True):
         lot = self.lots.get(grn_item_id)
         if lot is None or qty <= EPS or not self._lot_available(lot, tx_dt):
@@ -546,6 +572,14 @@ class _LotLedger:
                 # Synthetic return layers are consumed by the replay too, but
                 # they belong to no GRN and never appear in the indicator.
                 layers.extend(fifo_layers)
+                if unavailable > EPS and not self._lot_history_exists(material, tx_dt):
+                    # Negative-stock dispatch: the units were covered by later
+                    # purchases, so attribute them there (oldest first) exactly
+                    # like the P&L cost reconstruction.
+                    forward_layers, unavailable = self._consume_forward(material, unavailable)
+                    for grn_item_id, take in forward_layers:
+                        self.reconstructed_qty[grn_item_id] += take
+                    layers.extend(forward_layers)
                 if unavailable > EPS:
                     self.warnings.append(
                         f"{material}: {unavailable:g} dispatched before any dated GRN lot was available; "

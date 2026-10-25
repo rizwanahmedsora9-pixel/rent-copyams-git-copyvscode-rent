@@ -16,6 +16,36 @@ def _value(value):
     return float(value or 0)
 
 
+def cost_layer_text(row):
+    """One readable evidence line per consumed GRN lot: ``REF qty x rate``.
+
+    Copied verbatim from the report row so the workbook shows the same source
+    lots, quantities and purchase rates as the screen and the detail page.
+    """
+    parts = []
+    for source in row.get("cost_sources") or []:
+        reference = source.get("reference") or (
+            f"{source.get('type')} #{source.get('id')}" if source.get("id") else source.get("type")
+        )
+        qty = source.get("qty")
+        rate = source.get("rate")
+        amount = source.get("amount")
+        if qty is None or rate is None:
+            parts.append(f"{reference}: Rs. {_value(rate):,.2f}/unit")
+        else:
+            parts.append(f"{reference}: {_value(qty):,.2f} x Rs. {_value(rate):,.2f} = Rs. {_value(amount):,.2f}")
+    return "; ".join(parts)
+
+
+def source_grn_text(row):
+    references = []
+    for source in row.get("cost_sources") or []:
+        reference = source.get("reference")
+        if reference and reference not in references:
+            references.append(reference)
+    return ", ".join(references)
+
+
 def _write_table(ws, headers, rows, widths=None):
     ws.append(headers)
     for cell in ws[1]:
@@ -118,6 +148,7 @@ def build_profit_loss_excel(report):
         "Delivery Cost", "Expense", "Other Gain", "Other Loss", "Net Profit",
         "Cost Status", "Cost Basis", "Included In Net", "Document Type",
         "Document ID", "Source Type", "Source ID", "Payment Status", "Notes",
+        "Source GRNs", "GRN Cost Layers",
     ]
     tx_rows = []
     for row in report["export_transactions"]:
@@ -134,8 +165,12 @@ def build_profit_loss_excel(report):
             "Yes" if row.get("include_in_net") else "No", row.get("document_type"),
             row.get("document_id"), row.get("source_type"), row.get("source_id"),
             row.get("payment_status"), row.get("note"),
+            source_grn_text(row), cost_layer_text(row),
         ])
-    _write_table(tx_ws, tx_headers, tx_rows, {"Cost Basis": 58, "Payment Status": 42, "Notes": 55, "Transaction Type": 30})
+    _write_table(tx_ws, tx_headers, tx_rows, {
+        "Cost Basis": 58, "Payment Status": 42, "Notes": 55, "Transaction Type": 30,
+        "Source GRNs": 34, "GRN Cost Layers": 90,
+    })
     for row in tx_ws.iter_rows(min_row=2):
         row[0].number_format = "yyyy-mm-dd hh:mm"
         for index in range(7, 20):
