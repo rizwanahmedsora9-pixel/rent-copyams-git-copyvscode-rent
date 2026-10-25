@@ -46,6 +46,28 @@
         return rounded.toLocaleString(undefined, { maximumFractionDigits: 2 });
     }
 
+    function formatMoney(value) {
+        var rounded = Math.round(num(value));
+        return "Rs " + rounded.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    /* The numeric read-outs (received / consumed / remaining) sit next to the
+       bar rather than inside it, so look in the bar first and then in the
+       enclosing block marked with data-grn-scope.  Each scope holds exactly one
+       indicator, which keeps a lot's numbers from leaking into its neighbour. */
+    function scopeOf(el) {
+        if (el.closest) {
+            var scope = el.closest("[data-grn-scope]");
+            if (scope) return scope;
+        }
+        return el.parentNode || el;
+    }
+
+    function setScopedText(el, selector, text) {
+        var target = el.querySelector(selector) || scopeOf(el).querySelector(selector);
+        if (target) target.textContent = text;
+    }
+
     function paint(el, data) {
         if (!el) return;
         var received = data && data.received !== undefined ? num(data.received) : num(el.getAttribute("data-received"));
@@ -82,12 +104,9 @@
             track.setAttribute("title", current.label + " — " + formatQty(consumed) + " of " + formatQty(received) + " consumed");
         }
 
-        var consumedEl = el.querySelector("[data-grn-consumed]");
-        if (consumedEl) consumedEl.textContent = formatQty(consumed);
-        var remainingEl = el.querySelector("[data-grn-remaining]");
-        if (remainingEl) remainingEl.textContent = formatQty(remaining);
-        var receivedEl = el.querySelector("[data-grn-received]");
-        if (receivedEl) receivedEl.textContent = formatQty(received);
+        setScopedText(el, "[data-grn-consumed]", formatQty(consumed));
+        setScopedText(el, "[data-grn-remaining]", formatQty(remaining));
+        setScopedText(el, "[data-grn-received]", formatQty(received));
         return { received: received, consumed: consumed, remaining: remaining, percent: pct, level: current.level };
     }
 
@@ -100,8 +119,61 @@
         return results;
     }
 
+    /* The whole-screen overall meter, repainted from the same payload the bars
+       use.  It aggregates exactly what the server template aggregates (received
+       / consumed / remaining *value* of the lots on screen), so a refresh can
+       only ever reproduce the number a page load would have printed. */
+    function paintOverview(payload) {
+        var meter = document.getElementById("grnOverallMeter");
+        if (!meter || !payload || !payload.items) return null;
+        var totals = { received: 0, consumed: 0, remaining: 0, lots: 0, complete: 0, replay: 0 };
+        Object.keys(payload.items).forEach(function (itemId) {
+            var row = payload.items[itemId] || {};
+            totals.received += num(row.received_value);
+            totals.consumed += num(row.consumed_value);
+            totals.remaining += num(row.remaining_value);
+            totals.lots += 1;
+            if (row.fully_consumed) totals.complete += 1;
+            if (row.status === "reconstructed") totals.replay += 1;
+        });
+        var pct = percentOf(totals.received, totals.consumed);
+        var current = band(pct);
+
+        meter.classList.remove("level-low", "level-moderate", "level-high", "level-critical", "level-complete");
+        meter.classList.add("level-" + current.level);
+        meter.setAttribute("data-received", totals.received);
+        meter.setAttribute("data-consumed", totals.consumed);
+
+        var text = (Math.round(pct * 10) / 10).toFixed(1) + "%";
+        var pctEl = meter.querySelector("[data-overall-pct]");
+        if (pctEl) pctEl.textContent = text;
+        var fill = meter.querySelector("[data-overall-fill]");
+        if (fill) fill.style.width = pct + "%";
+        var bar = meter.querySelector("[data-overall-bar]");
+        if (bar) {
+            bar.setAttribute("aria-valuenow", String(pct));
+            bar.setAttribute("aria-valuetext", text + " of received stock value consumed");
+        }
+        var receivedEl = meter.querySelector("[data-overall-received]");
+        if (receivedEl) receivedEl.textContent = formatMoney(totals.received);
+        var consumedEl = meter.querySelector("[data-overall-consumed]");
+        if (consumedEl) consumedEl.textContent = formatMoney(totals.consumed);
+        var remainingEl = meter.querySelector("[data-overall-remaining]");
+        if (remainingEl) remainingEl.textContent = formatMoney(totals.remaining);
+        var valueEl = meter.querySelector("[data-overall-value]");
+        if (valueEl) valueEl.textContent = formatMoney(totals.remaining);
+        var lotsEl = meter.querySelector("[data-overall-lots]");
+        if (lotsEl) lotsEl.textContent = String(totals.lots);
+        var completeEl = meter.querySelector("[data-overall-complete]");
+        if (completeEl) completeEl.textContent = String(totals.complete);
+        var replayEl = meter.querySelector("[data-overall-replay]");
+        if (replayEl) replayEl.textContent = String(totals.replay);
+        return { percent: pct, level: current.level, totals: totals };
+    }
+
     function applyServerData(payload) {
         if (!payload || !payload.items) return 0;
+        paintOverview(payload);
         var painted = 0;
         Object.keys(payload.items).forEach(function (itemId) {
             var row = payload.items[itemId];
@@ -174,6 +246,7 @@
         paint: paint,
         paintAll: paintAll,
         applyServerData: applyServerData,
+        paintOverview: paintOverview,
         refresh: refresh,
         percentOf: percentOf
     };

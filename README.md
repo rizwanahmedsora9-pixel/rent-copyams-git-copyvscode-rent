@@ -108,6 +108,18 @@ flashes, `check_bill` auto bills, stock/bill/receivable blind spots) lives in
 `tests/test_predator_regressions.py`. Schema/import, full-DB snapshots,
 auto-migrations, wipe, ledgers/PDF and login have their own modules.
 
+`tests/frontend/` holds offline DOM tests for the browser-side scripts. They are
+not collected by pytest; run them with node after installing jsdom:
+
+```bash
+npm i jsdom
+node tests/frontend/test_grn_consumption_dom.js   # GRN consumption indicator
+node tests/frontend/test_pan_view_dom.js          # table pan / fit behaviour
+```
+
+Point `GRN_PAGE_HTML` at a saved `/grn` page to run the consumption test against
+the real rendered screen instead of its built-in fixture.
+
 ---
 
 ## What is already solid (vs the old audits)
