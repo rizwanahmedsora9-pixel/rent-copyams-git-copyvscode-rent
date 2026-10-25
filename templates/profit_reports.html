@@ -101,6 +101,18 @@
     {{ ui_tile(href=url_for('financial_details', start_date=start_date, end_date=end_date), label='Money Received', value=("Rs. " ~ ("{:,.2f}".format(payment_received_total))), icon='bi-wallet2', colour='teal', sub='Settlement information only — never new profit', cta='Open financial details') }}
   </div>
 
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-lightbulb"></i> Read the result in three steps</h5></div>
+    <div class="ui-card-body">
+      <div class="row g-3">
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">1. Sale is earned</div><div class="small text-muted">A sale adds revenue when goods are supplied, even if the customer pays later. A receipt settles a bill; it does not create profit again.</div><div class="small mt-2">This period: earned revenue <strong>Rs. {{ '{:,.2f}'.format(total_revenue) }}</strong>; money received <strong>Rs. {{ '{:,.2f}'.format(payment_received_total) }}</strong>.</div></div></div>
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">2. FIFO assigns the GRN cost</div><div class="small text-muted">Each sale uses the oldest available GRN lot first. Example: if the oldest GRN has 6 units left, the first 6 sold use that rate; remaining units continue into the next GRN lot. The sale rate is revenue; the FIFO GRN rate is the item's cost, so the difference (after discounts and other costs) drives its margin. A GRN purchase is stock, not an immediate expense.</div><div class="small mt-2">This period: purchase value <strong>Rs. {{ '{:,.2f}'.format(financial_position.purchase_value if financial_position else 0) }}</strong>; cost assigned to sold goods <strong>Rs. {{ '{:,.2f}'.format(total_cogs) }}</strong>.</div></div></div>
+        <div class="col-md-4"><div class="h-100 p-3 rounded-3" style="background:var(--ui-surface-2)"><div class="fw-bold mb-1">3. Profit / loss is the net</div><div class="small text-muted">Net result = profitable rows added together − loss-making rows added together, less operating expenses, plus/minus other supported items. “Total Loss” is the sum of loss rows; it is not the final net loss.</div><div class="small mt-2">The final net result for this period is <strong class="{{ 'pos' if total_profit >= 0 else 'neg' }}">Rs. {{ '{:,.2f}'.format(total_profit) }} {{ 'profit' if total_profit >= 0 else 'loss' }}</strong>.</div></div></div>
+      </div>
+      <p class="section-note mt-3">The two comparisons above are intentionally not expected to match: receipts may relate to earlier/later sales, and purchases may remain in stock. Click a transaction to see the exact GRN lot(s), unit rate and quantity used.</p>
+    </div>
+  </div>
+
   <div class="row g-3">
     <div class="col-xl-7">
       <div class="ui-card h-100">

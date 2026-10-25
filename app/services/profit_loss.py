@@ -615,7 +615,12 @@ class _Projection:
                     bases.append(basis)
                     estimated = estimated or not actual
                     if grn_item is not None and grn is not None:
-                        sources.append({"type": "GRNAllocation", "id": alloc.id, "grn_id": grn.id, "reference": _grn_ref(grn), "supplier": grn.supplier or "", "rate": rate})
+                        sources.append({
+                            "type": "GRNAllocation", "id": alloc.id, "grn_id": grn.id,
+                            "reference": _grn_ref(grn), "supplier": grn.supplier or "",
+                            "date": _as_dt(grn.date_posted), "qty": take, "rate": rate,
+                            "amount": take * rate,
+                        })
                         grn_ids.append(grn.id)
                     layers.append({"grn_item_id": alloc.grn_item_id, "qty": take, "rate": rate})
                 else:
@@ -641,7 +646,9 @@ class _Projection:
                                 sources.append({
                                     "type": ("GRNItem" if layer.get("grn_item_id") else "ReturnLot"),
                                     "id": layer.get("grn_item_id"), "grn_id": layer.get("grn_id"),
-                                    "reference": layer["reference"], "supplier": layer["supplier"], "rate": layer["rate"],
+                                    "reference": layer["reference"], "supplier": layer["supplier"],
+                                    "date": layer.get("date"), "qty": layer["qty"], "rate": layer["rate"],
+                                    "amount": _f(layer["qty"]) * _f(layer["rate"]),
                                 })
                                 if layer.get("grn_id"):
                                     grn_ids.append(layer["grn_id"])
