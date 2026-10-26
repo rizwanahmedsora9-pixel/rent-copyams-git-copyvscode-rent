@@ -320,6 +320,7 @@ def _wipe_dataset_preview_map():
         'grn': {'label': 'GRN', 'tables': ['grn_item', 'grn'], 'queries': [('grn_item', q(GRNItem)), ('grn', q(GRN))]},
         'materials': {'label': 'Materials', 'tables': ['material'], 'queries': [('material', q(Material))]},
         'material_categories': {'label': 'Material Categories', 'tables': ['material_category'], 'queries': [('material_category', q(MaterialCategory))]},
+        'services': {'label': 'Rent & Service Charges', 'tables': ['service'], 'queries': [('service', q(Service))]},
         'direct_sales': {'label': 'Direct Sales', 'tables': ['direct_sale_item', 'direct_sale', 'delivery_rent', 'sale_delivery_person', 'delivery_person_payment', 'pending_bill', 'entry', 'invoice'], 'queries': [('direct_sale_item', q(DirectSaleItem)), ('direct_sale', q(DirectSale)), ('delivery_rent', q(DeliveryRent)), ('sale_delivery_person', q(SaleDeliveryPerson))]},
         'material_returns': {'label': 'Material Returns', 'tables': ['material_return_item', 'material_return', 'entry', 'payment'], 'queries': [('material_return_item', q(MaterialReturnItem)), ('material_return', q(MaterialReturn))]},
         'delivery_rents': {'label': 'Delivery Rents', 'tables': ['delivery_rent', 'sale_delivery_person', 'delivery_person_payment'], 'queries': [('delivery_rent', q(DeliveryRent)), ('sale_delivery_person', q(SaleDeliveryPerson)), ('delivery_person_payment', q(DeliveryPersonPayment))]},

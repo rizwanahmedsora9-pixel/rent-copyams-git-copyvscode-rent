@@ -68,7 +68,7 @@ DEFAULT_DB = ROOT / "instance" / "audit_full_cycle.db"
 FULL_WIPE_TARGETS = [
     "clients", "suppliers", "supplier_payments", "pending_bills", "notifications",
     "dispatching", "receiving", "grn", "materials", "material_categories",
-    "direct_sales", "material_returns", "delivery_rents", "delivery_persons",
+    "direct_sales", "material_returns", "delivery_rents", "delivery_persons", "services",
     "invoices", "payments", "bookings", "accounts", "account_categories",
     "account_transactions", "account_reconciliations", "cash_flow_entries",
     "cash_flow_categories", "cash_reconciliation_data", "cash_reconciliation_audit",

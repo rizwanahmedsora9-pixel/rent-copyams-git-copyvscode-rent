@@ -551,6 +551,18 @@
           </tbody>
         </table>
       </div>
+      {% if stock_warnings %}
+      {% set _stock_warnings = stock_warnings %}
+      <div class="alert alert-warning mt-3 mb-0">
+        <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle me-1"></i>{{ _stock_warnings|length }} stock shortfall / unresolved-cost warning(s)</div>
+        <p class="small mb-2">Goods were sold that no GRN lot could cover. The cost shown is the posting-time frozen rate, clearly labelled — never a fabricated purchase lot. Restock or correct the GRN to clear it.</p>
+        <ul class="warning-list small mb-0">
+          {% for warning in _stock_warnings[:12] %}
+          <li>{{ warning.message }}{% if warning.document_type and warning.document_id %} · <a href="{{ url_for('profit_transaction_detail', document_type=warning.document_type, document_id=warning.document_id, start_date=start_date, end_date=end_date) }}">trace source</a>{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
       {% if bd.grn_section.warnings %}
       <details class="mt-3"><summary class="small fw-bold text-warning">{{ bd.grn_section.warnings|length }} legacy movement warnings</summary>
         <ul class="warning-list small text-muted mt-2">{% for warning in bd.grn_section.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>

@@ -131,6 +131,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -530,9 +531,26 @@ def inventory_section(con) -> dict:
             )
 
     master_names = {m["name"] for m in con.execute("SELECT name FROM material")}
+    # A Service is a charge, not stock: it legitimately owns booking-pool Entry
+    # rows while having no Material master row.  Counting it as a "ghost
+    # material" flagged every dataset that bills rent as inconsistent.
+    service_names = set()
+    if "service" in t:
+        service_names = {
+            " ".join(str(r["name"] or "").upper().split())
+            for r in con.execute("SELECT name FROM service")
+        }
+    service_names.discard("")
+
+    def _is_service_label(name):
+        tokens = [tok for tok in re.split(r"[^A-Z0-9]+", str(name or "").upper()) if tok]
+        if any(tok in {"RENT", "RENTS", "RENTED", "RENTING", "RENTAL", "RENTALS"} for tok in tokens):
+            return True
+        return " ".join(str(name or "").upper().split()) in service_names
+
     ghost = []
     for mat, rows in entry_by_mat.items():
-        if mat and mat not in master_names:
+        if mat and mat not in master_names and not _is_service_label(mat):
             active = [r for r in rows if not r["is_void"]]
             if active:
                 ghost.append({
@@ -550,6 +568,9 @@ def inventory_section(con) -> dict:
             "but have no master row: " + ", ".join(sorted({g['material_name'] for g in ghost}))
         )
     out["ghost_stock"] = ghost
+    out["service_stock_labels"] = sorted(
+        {mat for mat in entry_by_mat if mat and mat not in master_names and _is_service_label(mat)}
+    )
 
     # GRN item vs entry reconciliation
     grn_issues = []

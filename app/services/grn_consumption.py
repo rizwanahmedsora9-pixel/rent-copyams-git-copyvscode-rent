@@ -56,6 +56,8 @@ from models import (
     db,
 )
 
+from app.services.lookups import is_rent_like_name
+
 EPS = 1e-6
 
 # Lot status, most to least certain.
@@ -159,7 +161,10 @@ def _is_service(name, service_keys):
         return False
     if key in service_keys:
         return True
-    return "rent" in str(name or "").casefold()
+    # Word-boundary rent rule (shared with lookups and Profit & Loss): the old
+    # substring test also matched TRANSPARENT SHEET / CURRENT STOCK and made
+    # their lots look permanently unconsumed.
+    return is_rent_like_name(name)
 
 
 class _LotLedger:

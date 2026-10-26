@@ -86,6 +86,7 @@ from app.services.profit_loss_breakdown import (
     build_breakdown,
 )
 from app.services.grn_consumption import build_grn_consumption
+from app.services.lookups import is_rent_like_name
 from app.services.sales_core import _direct_sale_default_bill_ref, normalize_sale_category
 from app.services.time_money import pk_now, pk_today
 
@@ -339,6 +340,23 @@ def _base_row(**kwargs):
     return row
 
 
+def _registered_service_keys():
+    """Names/codes that are *defined* as services in the Services master.
+
+    A rent-like label is a service even without a master row (legacy data), but
+    only a registered service is defined as a charge with **no purchase cost**.
+    That distinction matters for Profit & Loss: a delivery charge still needs a
+    recorded delivery cost before its result can be trusted, while a service we
+    sell (``CEMENT RENT``) has zero cost of goods by definition.
+    """
+    keys = set()
+    for service in Service.query.all():
+        keys.add(_mat_key(service.name))
+        keys.add(_mat_key(service.code))
+    keys.discard("")
+    return keys
+
+
 def _service_classifier():
     names = set()
     for service in Service.query.all():
@@ -348,7 +366,9 @@ def _service_classifier():
 
     def is_service(name):
         key = _mat_key(name)
-        return bool(key and (key in names or "rent" in str(name or "").casefold()))
+        # Word-boundary rent rule, shared with lookups/GRN/stock: a material
+        # named "TRANSPARENT SHEET" or "DIFFERENT SAND" is NOT a rent charge.
+        return bool(key and (key in names or is_rent_like_name(name)))
 
     return is_service
 
@@ -384,6 +404,10 @@ class _Projection:
         self.client_by_code = {_norm(c.code): c for c in self.clients}
         self.materials = Material.query.order_by(Material.name.asc()).all()
         self.is_service = _service_classifier()
+        self.service_master_keys = _registered_service_keys()
+        self.is_registered_service = (
+            lambda name: bool(_mat_key(name)) and _mat_key(name) in self.service_master_keys
+        )
         sales_query = DirectSale.query.options(
             selectinload(DirectSale.items), selectinload(DirectSale.invoice)
         )
@@ -913,11 +937,28 @@ class _Projection:
                         and not lots_by_material.get(_mat_key(item.product_name))
                         and abs(frozen - master_price(item.product_name)) <= max(0.01, master_price(item.product_name) * 1e-9)
                     )
-                    if not add_frozen_source(
+                    if add_frozen_source(
                         still_uncovered,
                         "Frozen sale-line cost for quantity beyond every GRN lot",
                         actual=has_history or not frozen_is_placeholder,
                     ):
+                        # No real lot covered these units.  The cost is an
+                        # honest disclosure, but the shop floor should still see
+                        # that stock went negative: warn even though the row is
+                        # costed, otherwise the loss of a lot appears only on a
+                        # detail page.
+                        self.warn(
+                            "short_stock_cost",
+                            f"{line_reference()} / {item.product_name}: "
+                            f"{still_uncovered:,.2f} sold beyond every GRN lot; "
+                            f"costed from the posting-time frozen rate, not from a purchase lot",
+                            document_type=("DirectSale" if getattr(item, "sale_id", None) else None),
+                            document_id=getattr(item, "sale_id", None),
+                            reference=line_reference(),
+                            amount=still_uncovered * frozen,
+                            material=item.product_name,
+                        )
+                    else:
                         single_rate_sources(still_uncovered)
             status = COST_MISSING if missing else (COST_ESTIMATED if estimated else COST_ACTUAL)
             sources = _merge_sources(sources)
@@ -1281,6 +1322,7 @@ class _Projection:
                         "booking_id": None,
                         "booking_item_id": None,
                         "source_item_id": item.id,
+                        "registered_service": self.is_registered_service(item.product_name),
                     })
                     self.candidates.append({
                         "origin": "direct", "document_type": "DirectSale", "document_id": sale.id,
@@ -1385,7 +1427,9 @@ class _Projection:
                 self.delivery_components[sale.id].append({
                     "material": sale_item.product_name, "qty": qty, "gross": gross,
                     "revenue": net, "discount": discount_share, "origin": "Booking supply service",
-                    "booking_id": booking.id, "booking_item_id": booking_item.id, "source_item_id": sale_item.id,
+                    "booking_id": booking.id, "booking_item_id": booking_item.id,
+                    "source_item_id": sale_item.id,
+                    "registered_service": self.is_registered_service(sale_item.product_name),
                 })
                 self.candidates.append({
                     "origin": "booked", "document_type": "DirectSale", "document_id": sale.id,
@@ -1505,6 +1549,10 @@ class _Projection:
                 self.booking_original_qty[item.id] = _f(item.qty)
                 self.booking_recognized_revenue[booking.id] += net
                 if self.is_service(entry.material):
+                    # A registered Service needs no delivery-cost record: the
+                    # charge is service income with no purchase cost at all.
+                    service_no_cost = self.is_registered_service(entry.material)
+                    status = COST_NA if service_no_cost else COST_MISSING
                     row = _base_row(
                         date=entry_date, source="Entry", source_label="Legacy Booking Delivery Supplied",
                         transaction_type="Booking Delivery Supplied", entry_type="delivery_service", category="booking_delivery",
@@ -1512,9 +1560,15 @@ class _Projection:
                         source_type="Entry", source_id=entry.id, client=client_name, client_code=code,
                         material=entry.material, booked_material=item.material_name, qty=qty,
                         sale_rate=rate, gross_revenue=gross, discount=discount_share,
-                        delivery_revenue=net, delivery_cost=0.0, cost_status=COST_MISSING,
-                        cost_basis="Standalone operational dispatch has no linked delivery-cost record",
-                        include_in_net=False, note="Revenue shown; result excluded until direct delivery cost is resolved.",
+                        delivery_revenue=net, delivery_cost=0.0, cost_status=status,
+                        cost_basis=(
+                            "Registered service charge from the Services master: service income with no purchase cost"
+                            if service_no_cost
+                            else "Standalone operational dispatch has no linked delivery-cost record"
+                        ),
+                        include_in_net=service_no_cost,
+                        note=("Service income recognised; a service is not stock." if service_no_cost
+                              else "Revenue shown; result excluded until direct delivery cost is resolved."),
                         payment_status="Legacy booking dispatch", booking_id=booking.id, booking_item_id=item.id,
                         entry_id=entry.id, original_sources=[{"type": "Booking", "id": booking.id, "reference": _booking_ref(booking)}],
                     )
@@ -1524,11 +1578,12 @@ class _Projection:
                         "sale_id": None, "booking_item_id": item.id, "material": entry.material,
                         "client": client_name, "client_code": code, "date": entry_date,
                         "qty": qty, "remaining_return_qty": qty, "unit_cost": 0.0,
-                        "cost_status": COST_MISSING, "unit_revenue": net / qty, "is_service": True,
+                        "cost_status": status, "unit_revenue": net / qty, "is_service": True,
                         "reference": row["reference"], "booking_id": booking.id,
-                        "delivery_include_in_net": False,
+                        "delivery_include_in_net": service_no_cost,
                     })
-                    self.warn("missing_delivery_cost", f"Dispatch {entry.id}: standalone booking delivery has no linked delivery-cost record", document_type="Entry", document_id=entry.id, reference=row["reference"], amount=net)
+                    if not service_no_cost:
+                        self.warn("missing_delivery_cost", f"Dispatch {entry.id}: standalone booking delivery has no linked delivery-cost record", document_type="Entry", document_id=entry.id, reference=row["reference"], amount=net)
                 else:
                     # Entry has no frozen/GRN allocation.  Reuse the same cost
                     # resolver contract through a lightweight line object.
@@ -1621,21 +1676,43 @@ class _Projection:
                     ))
                 continue
             code, client_name = self.client_info(sale.client_name, sale.client_code)
-            by_material = defaultdict(lambda: {"qty": 0.0, "gross": 0.0, "revenue": 0.0, "discount": 0.0, "booking_ids": set()})
+            by_material = defaultdict(lambda: {"qty": 0.0, "gross": 0.0, "revenue": 0.0, "discount": 0.0, "booking_ids": set(), "registered_service": False})
             for component in components:
                 target = by_material[component["material"]]
                 for key in ("qty", "gross", "revenue", "discount"):
                     target[key] += _f(component[key])
                 if component.get("booking_id"):
                     target["booking_ids"].add(component["booking_id"])
+                if component.get("registered_service"):
+                    target["registered_service"] = True
             gross_total = sum(value["gross"] for value in by_material.values())
             quantity_total = sum(max(0.0, value["qty"]) for value in by_material.values())
             allocation_total = gross_total if gross_total > EPS else quantity_total
             for material, value in by_material.items():
                 allocation_value = value["gross"] if gross_total > EPS else max(0.0, value["qty"])
                 share = recorded_cost * allocation_value / allocation_total if allocation_total > EPS else 0.0
-                status = COST_ACTUAL if cost_recorded else COST_MISSING
-                include = cost_recorded
+                # A registered Service is a charge we sell, not goods: it has no
+                # purchase cost by definition, so its income is recognised with
+                # zero COGS.  A rent-like/delivery-charge label with no Service
+                # master row keeps the conservative rule: no recorded delivery
+                # cost means the result stays out of net profit.
+                service_no_cost = bool(value.get("registered_service")) and not cost_recorded
+                if cost_recorded:
+                    status = COST_ACTUAL
+                elif service_no_cost:
+                    status = COST_NA
+                else:
+                    status = COST_MISSING
+                include = cost_recorded or service_no_cost
+                if cost_recorded:
+                    row_basis = basis
+                elif service_no_cost:
+                    row_basis = (
+                        "Registered service charge from the Services master: "
+                        "service income with no purchase cost (a service is not stock)"
+                    )
+                else:
+                    row_basis = "No delivery cost record; result excluded rather than assumed zero"
                 row = _base_row(
                     date=sale.date_posted, source="DirectSale", source_label="Delivery Service / Rent",
                     transaction_type="Delivery Service / Rent", entry_type="delivery_service", category="delivery",
@@ -1646,7 +1723,7 @@ class _Projection:
                     cost_rate=(share / value["qty"] if value["qty"] else 0.0),
                     gross_revenue=value["gross"], discount=value["discount"],
                     delivery_revenue=value["revenue"], delivery_cost=(share if include else 0.0),
-                    cost_status=status, cost_basis=(basis if cost_recorded else "No delivery cost record; result excluded rather than assumed zero"),
+                    cost_status=status, cost_basis=row_basis,
                     cost_amount_recorded=share, include_in_net=include, note=sale.note or "",
                     payment_status=self.payment_status(sale), sale_id=sale.id,
                     booking_id=(next(iter(value["booking_ids"])) if len(value["booking_ids"]) == 1 else None),
@@ -2520,6 +2597,10 @@ def build_profit_loss_report(
         "explorer": explorer_args,
         "top_clients": top_clients[:20], "top_items": top_items[:20],
         "daily_insights": daily, "type_insights": types,
+        "stock_warnings": [
+            warning for warning in context.warnings
+            if warning.get("code") in ("short_stock_cost", "missing_cost")
+        ],
         "warnings": [
             warning for warning in context.warnings
             if (warning.get("document_type"), warning.get("document_id")) in current_document_keys
