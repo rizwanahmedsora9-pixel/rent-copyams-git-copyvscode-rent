@@ -275,7 +275,7 @@ def test_05_alternate_booked_material_and_excess_are_not_duplicated(pl_app):
         assert booking.id
 
 
-def test_06_recorded_grn_and_frozen_costs_beat_master_fallback(pl_app):
+def test_06_recorded_grn_and_exact_fifo_lot_rate_beat_frozen_and_master(pl_app):
     with pl_app.app_context():
         material, client, supplier, _account = seed_base(material_rate=999)
         _grn, grn_item = add_grn(supplier, material, 10, 80, datetime(2026, 1, 1))
@@ -287,12 +287,18 @@ def test_06_recorded_grn_and_frozen_costs_beat_master_fallback(pl_app):
         db.session.commit()
         result = report("2026-01-01", "2026-01-31")
         assert result.summary["total_revenue"] == pytest.approx(1050)
-        assert result.summary["total_cogs"] == pytest.approx(570)
-        assert result.summary["actual_material_cost"] == pytest.approx(570)
-        assert result.summary["estimated_material_cost"] == 0
-        assert result.summary["total_profit"] == pytest.approx(480)
-        assert all(row["cost_status"] == "actual" for row in result.rows)
-        assert result.rows[0]["cost_sources"]
+        # The second line's frozen 85 is not mixed over a real 80-rate lot:
+        # 5 x 80 recorded + 2 x 80 reconstructed = 560.
+        assert result.summary["total_cogs"] == pytest.approx(560)
+        assert result.summary["actual_material_cost"] == pytest.approx(400)
+        assert result.summary["estimated_material_cost"] == pytest.approx(160)
+        assert result.summary["total_profit"] == pytest.approx(490)
+        assert [row["cost_status"] for row in result.rows] == ["actual", "estimated"]
+        assert all(row["cost_sources"] for row in result.rows)
+        assert all(
+            source["grn_item_id"] == grn_item.id
+            for row in result.rows for source in row["cost_sources"]
+        )
 
 
 def test_07_missing_cost_is_not_zero_and_estimate_is_explicit(pl_app):

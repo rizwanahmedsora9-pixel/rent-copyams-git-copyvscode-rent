@@ -407,33 +407,41 @@ def test_new_purchase_rate_does_not_rewrite_price_or_completed_delivery(multi_ap
 # --------------------------------------------------------------------------- #
 # 8. An addendum GRN cannot re-cost a delivery that already had history
 # --------------------------------------------------------------------------- #
-def test_addendum_grn_does_not_re_cost_a_delivery_that_had_history(multi_app):
+def test_addendum_grn_updates_both_fifo_views_to_its_own_rate(multi_app):
     client = make_csrf_client(multi_app)
     login(client)
     with multi_app.app_context():
         _material, _client_row, supplier_id = seed(multi_app)
         add_grn(multi_app, supplier_id, 10, 1000, datetime(2026, 1, 1, 9, 0), "GRN-OLD")
-        # Only 10 bags are on hand, so posting freezes the known rate for the other
-        # 30 bags and records no allocation for them.
+        # Only 10 bags are on hand, so posting freezes the only known rate for
+        # the other 30 bags and records no allocation for them.
         post_delivery(client, 40, rate=1300, bill="PARTIAL-STOCK")
         before = report()
         assert before.summary["total_cogs"] == pytest.approx(40 * 1000)
 
-        # The supplier invoice for the remaining 30 bags is entered later, dated
-        # before the delivery date.
-        add_grn(multi_app, supplier_id, 30, 1200, datetime(2026, 1, 5, 9, 0), "GRN-ADDENDUM")
+        # The supplier invoice for the remaining 30 bags is entered later,
+        # dated before the delivery date.  FIFO must now consume that real lot
+        # at its real rate in both P&L and GRN, not keep the frozen placeholder.
+        _addendum_grn_id, addendum_lot_id = add_grn(
+            multi_app, supplier_id, 30, 1200,
+            datetime(2026, 1, 5, 9, 0), "GRN-ADDENDUM",
+        )
         after = report()
 
-        # The recorded units keep their frozen rate; the addendum cannot silently
-        # rewrite a completed delivery.
-        assert after.summary["total_cogs"] == pytest.approx(40 * 1000)
+        assert after.summary["total_cogs"] == pytest.approx(EXPECTED_COGS)
         rows = goods_rows(after)
-        assert [row["material_cost"] for row in rows] == [10000.0, 30000.0]
-        frozen = next(row for row in rows if row["cost_sources"][0]["type"] == "FrozenRate")
-        assert frozen["material_cost"] == pytest.approx(30_000)
-        assert frozen["cost_sources"][0]["qty"] == pytest.approx(30)
-        assert frozen["cost_sources"][0]["amount"] == pytest.approx(30_000)
-        assert "Frozen sale-line cost" in frozen["cost_basis"]
+        assert [row["material_cost"] for row in rows] == [10000.0, 36000.0]
+        assert [row["cost_sources"][0]["type"] for row in rows] == ["GRNAllocation", "GRNItem"]
+        assert all(row["cost_sources"][0]["grn_item_id"] for row in rows)
+        assert rows[1]["cost_sources"][0]["grn_item_id"] == addendum_lot_id
+        assert rows[1]["cost_sources"][0]["rate"] == pytest.approx(1200)
+        assert rows[1]["cost_status"] == "estimated"
+        assert "global FIFO" in rows[1]["cost_basis"]
+
+        consumption = build_grn_consumption()
+        assert consumption["items"][addendum_lot_id]["consumed_qty"] == pytest.approx(30)
+        assert consumption["items"][addendum_lot_id]["remaining_qty"] == pytest.approx(0)
+        assert after.context.grn_lot_balances[addendum_lot_id]["remaining"] == pytest.approx(0)
 
 
 # --------------------------------------------------------------------------- #

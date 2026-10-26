@@ -208,17 +208,39 @@ def _grn_consumed_qty_map(grn_item_ids, exclude_sale_id=None):
     return {int(row[0]): float(row[1] or 0) for row in rows if row[0]}
 
 
-def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None, reserved=None):
+def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None, reserved=None, fifo_snapshot=None):
     """Oldest open GRN lots first (date, grn id, item id).
 
     ``reserved`` maps ``grn_item_id -> qty`` for lots already promised to
     earlier lines of the *same* document.  Without it two lines of one sale
     would both consume the oldest lot from the same snapshot and promise more
     of that lot than it holds, which makes FIFO cost (and the P&L) wrong.
+
+    When ``fifo_snapshot`` is supplied, availability comes from the same
+    chronological replay that produces the Profit & Loss cost and the GRN
+    indicator.  The legacy query below is retained only for callers that
+    cannot build a projection (e.g. isolated unit helpers).
     """
     mat_key = _material_norm_key(mat_name)
     if not mat_key:
         return []
+    if fifo_snapshot is not None:
+        reserved = reserved or {}
+        open_lots = []
+        for row in fifo_snapshot.available_fifo_lots(mat_name, as_of_dt=as_of_dt):
+            available = max(
+                0.0,
+                float(row["available"] or 0) - float(reserved.get(row["grn_item_id"], 0) or 0),
+            )
+            if available <= 0:
+                continue
+            lot = SimpleNamespace(
+                id=row["grn_item_id"],
+                qty=row["available"],
+                price_at_time=row["rate"],
+            )
+            open_lots.append((lot, available, float(row["rate"] or 0)))
+        return open_lots
     rows = db.session.query(GRNItem, GRN).join(
         GRN, GRNItem.grn_id == GRN.id
     ).filter(
@@ -246,13 +268,14 @@ def _grn_fifo_lots_for_material(mat_name, as_of_dt=None, exclude_sale_id=None, r
     return open_lots
 
 
-def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id=None, reserved=None):
+def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id=None, reserved=None, fifo_snapshot=None):
     remaining = float(qty_needed or 0)
     if remaining <= 0:
         return []
     plan = []
     for item, available, rate in _grn_fifo_lots_for_material(
-        mat_name, as_of_dt, exclude_sale_id, reserved=reserved
+        mat_name, as_of_dt, exclude_sale_id, reserved=reserved,
+        fifo_snapshot=fifo_snapshot,
     ):
         take = min(available, remaining)
         if take <= 0:
@@ -274,12 +297,14 @@ def _allocate_grn_fifo_plan(mat_name, qty_needed, as_of_dt=None, exclude_sale_id
     return plan
 
 
-def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
-    """Split cash/credit lines so each line is one FIFO lot with a frozen cost.
+def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None, fifo_snapshot=None):
+    """Split chargeable lines so each line is one FIFO lot with its own rate.
 
     Lots promised to an earlier line of the same document are treated as taken,
     so a sale with two lines of one material consumes the oldest lot once and
-    then moves on to the next lot — exactly how the P&L replays it.
+    then moves on to the next lot — exactly how the P&L replays it.  The lot
+    queue comes from the authoritative P&L/GRN replay, not from a second
+    allocation-only query.
     """
     expanded = []
     reserved = {}
@@ -296,12 +321,21 @@ def _expand_chargeable_items_fifo(items, as_of_dt=None, exclude_sale_id=None):
             expanded.append(copied)
             continue
         qty = float(item.get('qty') or 0)
+        if fifo_snapshot is None:
+            # Built once per document, before any of its lines reserve stock.
+            # This replay already accounts for booked/legacy dispatches and
+            # returns that have no GRNAllocation row.
+            from app.services.grn_consumption import build_fifo_snapshot
+            fifo_snapshot = build_fifo_snapshot(
+                as_of_dt=as_of_dt, exclude_sale_id=exclude_sale_id
+            )
         plan = _allocate_grn_fifo_plan(
             item.get('product_name'),
             qty,
             as_of_dt=as_of_dt,
             exclude_sale_id=exclude_sale_id,
             reserved=reserved,
+            fifo_snapshot=fifo_snapshot,
         )
         if not plan:
             copied = dict(item)

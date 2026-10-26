@@ -812,6 +812,8 @@
 
                     <button type="button" class="btn btn-sm btn-outline-info" id="grnConsumptionRefresh" title="Recalculate the consumption bars from the stock ledger"><i class="bi bi-arrow-repeat"></i> <span data-refresh-label>Recalculate</span></button>
 
+                    <span class="small text-muted ms-1" id="grnLiveStatus" data-ledger-live-status aria-live="polite">Live</span>
+
                 </div>
 
             </form>
@@ -1660,5 +1662,11 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script src="{{ url_for('static', filename='grn_consumption.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='ledger_live.js') }}?v=1"></script>
+<script>
+  if (window.FBMLedgerLive) {
+    window.FBMLedgerLive.init({ grn: true, status: '#grnLiveStatus' });
+  }
+</script>
 
 {% endblock %}

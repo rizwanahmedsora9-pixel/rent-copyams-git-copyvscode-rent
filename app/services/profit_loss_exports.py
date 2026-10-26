@@ -27,6 +27,9 @@ def cost_layer_text(row):
         reference = source.get("reference") or (
             f"{source.get('type')} #{source.get('id')}" if source.get("id") else source.get("type")
         )
+        lot_id = source.get("grn_item_id")
+        if lot_id:
+            reference = f"{reference} Lot #{lot_id}"
         qty = source.get("qty")
         rate = source.get("rate")
         amount = source.get("amount")

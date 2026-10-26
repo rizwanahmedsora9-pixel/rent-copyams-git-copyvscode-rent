@@ -1,5 +1,12 @@
 # Multi-GRN material costing in Profit & Loss — fix report
 
+> **Partly superseded (2026-10-26).** See
+> `FIFO_LIVE_RECONCILIATION_REPORT.md`.  Recorded `GRNAllocation` rows still
+> stay authoritative, but a frozen scalar rate no longer masks real GRN layers:
+> every unrecorded unit is costed at the exact lot rate the FIFO replay
+> consumes.  A later/addendum GRN therefore updates both P&L and GRN in real
+> time instead of leaving the delivery on its posting-time placeholder rate.
+
 Date: 2026-10-25
 Scope: costing correction inside the existing FBM Flask application. No schema
 change, no data rewrite, no costing-policy replacement.
