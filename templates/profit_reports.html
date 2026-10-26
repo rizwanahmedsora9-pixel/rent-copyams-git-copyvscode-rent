@@ -235,6 +235,7 @@
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('profit_reports') }}" id="plReset"><i class="bi bi-arrow-counterclockwise me-1"></i> Reset filters</a>
             <span class="pl-filter-state" id="plFilterState"><i class="bi bi-cloud-check"></i> Filters apply automatically</span>
+            <span class="small text-muted" id="plLiveStatus" data-ledger-live-status aria-live="polite">Live</span>
             <noscript><button type="submit" class="btn btn-warning btn-sm">Apply</button></noscript>
           </div>
         </div>
@@ -248,7 +249,8 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='profit_report.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='profit_report.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='ledger_live.js') }}?v=1"></script>
 <script>
   window.PL_FILTER_DATA = {
     entityType: {{ (selected.entity_type or '')|tojson }},
@@ -266,6 +268,9 @@
       stateLabel: '#plFilterState',
       data: window.PL_FILTER_DATA
     });
+  }
+  if (window.FBMLedgerLive) {
+    window.FBMLedgerLive.init({ profit: true, status: '#plLiveStatus' });
   }
 </script>
 {% endblock %}

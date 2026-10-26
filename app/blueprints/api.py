@@ -1,7 +1,7 @@
 """HTTP routes: api."""
 from __future__ import annotations
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, make_response, send_from_directory, abort, session
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, make_response, send_from_directory, abort, session, current_app
 from flask_login import login_required, login_user, logout_user, current_user
 from datetime import datetime, date, timedelta
 from sqlalchemy import func, case, text, or_, and_, exists, not_
@@ -254,14 +254,53 @@ def api_notifications_due():
     return jsonify(payload)
 
 
+def _ledger_revision():
+    """Cheap change token for the live GRN / Profit & Loss screens.
+
+    A replay of the full FIFO ledger is far too expensive to poll.  SQLite
+    updates the database file (or its WAL sidecar) on every committed business
+    transaction, including edits and voids, so the browser can poll this tiny
+    token and only request a fresh projection when the underlying data moved.
+    """
+    import hashlib
+    from pathlib import Path
+
+    raw_path = current_app.config.get("APP_DB_PATH") or ""
+    parts = []
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            stat = Path(f"{raw_path}{suffix}").stat()
+            parts.append(f"{suffix}:{stat.st_size}:{stat.st_mtime_ns}")
+        except (OSError, ValueError, TypeError):
+            parts.append(f"{suffix}:missing")
+    # Deliberately no PRAGMA data_version here: that counter is per SQLite
+    # connection and can change when Flask checks out a different pooled
+    # connection, which would make the UI refresh even with no business change.
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
+
+
+@bp.route('/api/ledger_revision')
+@login_required
+def api_ledger_revision():
+    """Return the current stock/sales ledger revision (no FIFO replay)."""
+    response = jsonify({
+        "ok": True,
+        "revision": _ledger_revision(),
+        "checked_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
+
 @bp.route('/api/grn_consumption')
 @login_required
 def api_grn_consumption():
     """Per-lot GRN consumption, for the GRN screen's live indicator refresh.
 
-    Read-only and derived from the same projection the GRN page renders from
-    (posted GRNAllocation rows first, then the FIFO movement replay), so a
-    refresh can never invent a different answer than a page load.
+    Read-only and derived from the same authoritative FIFO replay the Profit &
+    Loss report uses for COGS (posted GRNAllocation rows first, then the dated
+    global movement replay), so a refresh can never invent a different answer
+    than a page load or disagree with reported cost.
     """
     from app.services.grn_consumption import build_grn_consumption
 

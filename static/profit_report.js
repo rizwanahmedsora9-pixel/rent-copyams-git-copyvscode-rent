@@ -17,6 +17,7 @@
     "use strict";
 
     var DEBOUNCE_MS = 500;
+    var activeRefresh = null;
 
     function each(root, selector, fn) {
         (root || document).querySelectorAll(selector).forEach(fn);
@@ -303,7 +304,7 @@
             setBusy(true);
             clearError();
             var target = splitPartial(url);
-            fetch(target.fetchUrl, {
+            return fetch(target.fetchUrl, {
                 headers: { "X-Requested-With": "fetch" },
                 credentials: "same-origin",
                 signal: controller ? controller.signal : undefined
@@ -323,17 +324,22 @@
                 window.history.replaceState({}, "", cleanUrl);
                 setBusy(false);
                 region.dispatchEvent(new CustomEvent("pl:updated"));
+                return true;
             }).catch(function (error) {
-                if (error && error.name === "AbortError") return;
+                if (error && error.name === "AbortError") return true;
                 setBusy(false);
                 showError((error && error.message ? error.message : "The report could not be updated.") + " <a href=\"" + splitPartial(url).cleanUrl + "\">Open the full page</a>.");
+                return false;
             });
         }
 
         function refresh(overrides) {
             window.clearTimeout(timer);
-            load(buildUrl(overrides));
+            return load(buildUrl(overrides));
         }
+        // The live-ledger watcher calls this after another user posts a sale or
+        // GRN.  It uses exactly the same partial request as a filter change.
+        activeRefresh = refresh;
 
         function refreshDebounced(overrides) {
             window.clearTimeout(timer);
@@ -457,5 +463,10 @@
         if (lastUrl) window.history.replaceState({}, "", lastUrl);
     }
 
-    window.FBMProfitFilters = { init: init };
+    window.FBMProfitFilters = {
+        init: init,
+        refresh: function (overrides) {
+            return activeRefresh ? activeRefresh(overrides) : Promise.resolve(true);
+        }
+    };
 })();

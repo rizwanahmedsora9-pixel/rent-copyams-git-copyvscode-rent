@@ -788,4 +788,4 @@ def _in_period(value, start_date=None, end_date=None):
 
 def build_inventory_view(context=None):
     """Inventory valuation shared by the report page and the GRN page."""
-    return build_grn_consumption()
+    return build_grn_consumption(fifo_context=context)

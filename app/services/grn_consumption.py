@@ -27,10 +27,12 @@ Nothing here writes to the database.  The stock ``Entry`` ledger, the GRN rows
 and ``GRNAllocation`` stay the source of truth; this is a read-only projection,
 and every GRN row it reports can be traced back to those tables.
 
-One deliberate design note: the per-lot replay below mirrors
-``profit_loss._Projection._build_fifo_cost_plan``.  ``tests/test_grn_consumption_indicator.py``
-asserts that both replays end on the same lot balances, so the GRN indicator and
-the reported FIFO cost can never disagree.
+Design note: the report view below is now an adapter over
+``profit_loss._Projection``'s authoritative FIFO replay, not a second replay.
+``tests/test_grn_consumption_indicator.py`` asserts that both views end on the
+same lot balances.  The legacy ``_LotLedger`` implementation is retained only
+for callers that explicitly pass a prepared ``ledger``; the page and API never
+use it, so the GRN indicator and reported FIFO cost cannot disagree.
 """
 from __future__ import annotations
 
@@ -76,6 +78,11 @@ def _f(value):
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _active(obj):
+    """Same active/void rule used by the Profit & Loss projection."""
+    return obj is not None and not bool(getattr(obj, "is_void", False))
 
 
 def material_key(value):
@@ -572,10 +579,13 @@ class _LotLedger:
                 # Synthetic return layers are consumed by the replay too, but
                 # they belong to no GRN and never appear in the indicator.
                 layers.extend(fifo_layers)
-                if unavailable > EPS and not self._lot_history_exists(material, tx_dt):
-                    # Negative-stock dispatch: the units were covered by later
-                    # purchases, so attribute them there (oldest first) exactly
-                    # like the P&L cost reconstruction.
+                if unavailable > EPS:
+                    # Negative-stock dispatch OR dated lots already exhausted:
+                    # the P&L continues down the same global queue into the next
+                    # real lots, so this replay must consume those lots too.
+                    # The old "no history at all" condition left 19 real-world
+                    # lots unconsumed on the GRN screen while the P&L had them
+                    # at zero (6,438 units in the bundled 2026 snapshot).
                     forward_layers, unavailable = self._consume_forward(material, unavailable)
                     for grn_item_id, take in forward_layers:
                         self.reconstructed_qty[grn_item_id] += take
@@ -685,14 +695,104 @@ class _LotLedger:
         )
 
 
-def build_grn_consumption(grn_ids=None, *, ledger=None):
+class _ProjectionLedger:
+    """Expose the Profit & Loss FIFO replay as the GRN consumption ledger.
+
+    The P&L projection and the GRN indicator used to run two separate FIFO
+    replays.  They agreed on simple data but diverged as soon as an issue had
+    purchase history on its date while the remaining units were covered by a
+    later GRN: the report consumed that later lot, the GRN screen did not.  The
+    bundled 2026 snapshot had 19 such lots (6,438 units) showing stock still on
+    hand.  There is now one authoritative replay: the P&L's cost plan.  This
+    adapter only presents its lot balances and recorded/reconstructed quantities
+    to the existing view model; it never recalculates stock.
+    """
+
+    def __init__(self, projection, *, grn_ids=None):
+        self.report_ids = {int(g) for g in grn_ids} if grn_ids else None
+        self.lots = {}
+        self.lots_by_material = defaultdict(list)
+        self.lot_hits = defaultdict(list)
+        self.recorded_qty = defaultdict(float)
+        self.reconstructed_qty = defaultdict(float)
+        self.warnings = []
+        self.grn_order = []
+        self.grn_by_id = {grn.id: grn for grn in projection.grns}
+
+        balances = getattr(projection, "grn_lot_balances", None) or {}
+
+        # Recorded allocations are authoritative evidence.  Only count rows
+        # attached to an active sale; voided documents release their stock in
+        # the P&L replay and must not keep a lot marked as recorded here.
+        recorded = defaultdict(float)
+        for allocations in getattr(projection, "grn_allocations_by_item", {}).values():
+            for alloc in allocations:
+                sale = getattr(projection, "sale_by_id", {}).get(alloc.sale_id)
+                if not _active(alloc) or (sale is not None and not _active(sale)):
+                    continue
+                qty = max(0.0, _f(alloc.qty))
+                if qty > EPS and alloc.grn_item_id in balances:
+                    recorded[alloc.grn_item_id] += qty
+
+        def active(obj):
+            return not bool(getattr(obj, "is_void", False))
+
+        for grn in projection.grns:
+            if not active(grn):
+                continue
+            live_items = [item for item in grn.items if active(item)]
+            if not live_items:
+                continue
+            self.grn_order.append(grn)
+            for item in live_items:
+                balance = balances.get(item.id) or {}
+                received = max(0.0, _f(balance.get("received", item.qty)))
+                remaining = max(0.0, min(received, _f(balance.get("remaining", item.qty))))
+                consumed = max(0.0, received - remaining)
+                recorded_qty = min(consumed, recorded.get(item.id, 0.0))
+                self.recorded_qty[item.id] = recorded_qty
+                self.reconstructed_qty[item.id] = max(0.0, consumed - recorded_qty)
+                lot = {
+                    "grn_item_id": item.id,
+                    "grn_id": grn.id,
+                    "reference": _grn_reference(grn),
+                    "supplier": grn.supplier or "",
+                    "date": _as_dt(grn.date_posted),
+                    "material": item.mat_name or "",
+                    "received": received,
+                    "remaining": remaining,
+                    "rate": max(0.0, _f(balance.get("rate", item.price_at_time))),
+                    "key": material_key(item.mat_name),
+                }
+                self.lots[item.id] = lot
+                if lot["key"]:
+                    self.lots_by_material[lot["key"]].append(lot)
+
+        # The report's own diagnostics are more useful than a second replay's
+        # stale "could not attribute" notes; keep only stock/cost warnings.
+        for warning in getattr(projection, "warnings", []) or []:
+            message = warning.get("message") if isinstance(warning, dict) else str(warning or "")
+            code = (warning.get("code") if isinstance(warning, dict) else "") or ""
+            if message and (code in {"missing_cost", "orphan_allocation"} or "FIFO" in message or "stock" in message.lower()):
+                self.warnings.append(message)
+        self.warnings = list(dict.fromkeys(self.warnings))
+
+
+def build_grn_consumption(grn_ids=None, *, ledger=None, fifo_context=None):
     """Return the complete GRN consumption view model.
 
-    ``GRNItem.qty`` is the received quantity; consumption is derived from the
-    FIFO replay (recorded allocations first, then reconstructed FIFO), never by
-    subtracting total sales from every GRN independently.
+    ``GRNItem.qty`` is the received quantity; consumption comes from the same
+    authoritative FIFO replay that costs goods in Profit & Loss.  Nothing is
+    derived by subtracting total sales from each GRN independently, and the
+    page/API cannot show a different lot balance than the report.
     """
-    ledger = ledger or _LotLedger(grn_ids=grn_ids)
+    if ledger is None:
+        if fifo_context is None:
+            # Local import avoids a module cycle: profit_loss imports this view
+            # model for its inventory breakdown.
+            from app.services.profit_loss import _Projection
+            fifo_context = _Projection()
+        ledger = _ProjectionLedger(fifo_context, grn_ids=grn_ids)
     units = {material_key(m.name): (m.unit or "") for m in Material.query.all()}
 
     report_ids = getattr(ledger, "report_ids", None)
@@ -798,8 +898,10 @@ def build_grn_consumption(grn_ids=None, *, ledger=None):
     total_remaining_value = sum(row["remaining_value"] for row in items.values())
     total_remaining_qty = sum(row["remaining_qty"] for row in items.values())
     notes = [
-        "Consumption is the FIFO lot replay (recorded GRNAllocation rows first, then oldest-lot-first "
-        "for physical dispatches that carry no recorded allocation).",
+        "Consumption uses the exact FIFO replay that costs goods in Profit & Loss: recorded "
+        "GRNAllocation rows first, then oldest-lot-first for every physical dispatch without one.",
+        "Each lot keeps its own purchase rate; a delivery spanning lots is shown as separate "
+        "quantity × rate layers, never as one mixed rate.",
         "A GRN whose lots were consumed only by the replay is labelled reconstructed, not recorded.",
         "Material returns restore the quantity to the lots the original dispatch consumed.",
         "100% consumed means the received quantity has been dispatched or otherwise accounted for by the "
@@ -823,10 +925,23 @@ def build_grn_consumption(grn_ids=None, *, ledger=None):
     }
 
 
-def grn_consumption_for_page(grns):
-    """Attach consumption data to a list of GRN ORM rows (no extra queries)."""
+def build_fifo_snapshot(*, as_of_dt=None, exclude_sale_id=None):
+    """Return the authoritative FIFO replay used to allocate a new sale.
+
+    Sale posting passes this snapshot to ``_expand_chargeable_items_fifo`` so
+    booked supplies, imported dispatches, returns and recorded allocations all
+    reduce the same lot queue before the new document reserves its own layers.
+    """
+    from app.services.profit_loss import _Projection
+    return _Projection(through_date=as_of_dt, exclude_sale_id=exclude_sale_id)
+
+
+def grn_consumption_for_page(grns, *, fifo_context=None):
+    """Attach consumption data to a list of GRN ORM rows from the P&L replay."""
     if not grns:
         return {"grns": {}, "items": {}, "by_material": [], "inventory": {
             "total_qty": 0.0, "total_value": 0.0, "lot_count": 0, "by_material": [],
         }}
-    return build_grn_consumption(grn_ids=[grn.id for grn in grns])
+    return build_grn_consumption(
+        grn_ids=[grn.id for grn in grns], fifo_context=fifo_context
+    )

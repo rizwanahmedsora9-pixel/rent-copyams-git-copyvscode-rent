@@ -108,6 +108,9 @@ flashes, `check_bill` auto bills, stock/bill/receivable blind spots) lives in
 `tests/test_predator_regressions.py`. Schema/import, full-DB snapshots,
 auto-migrations, wipe, ledgers/PDF and login have their own modules.
 
+The end-to-end FIFO/GRN/P&L/API/live-refresh regression is in
+`tests/test_fifo_grn_profit_realtime.py`.
+
 `tests/frontend/` holds offline DOM tests for the browser-side scripts. They are
 not collected by pytest; run them with node after installing jsdom:
 
@@ -115,6 +118,7 @@ not collected by pytest; run them with node after installing jsdom:
 npm i jsdom
 node tests/frontend/test_grn_consumption_dom.js   # GRN consumption indicator
 node tests/frontend/test_pan_view_dom.js          # table pan / fit behaviour
+node tests/frontend/test_ledger_live_dom.js       # live revision watcher
 ```
 
 Point `GRN_PAGE_HTML` at a saved `/grn` page to run the consumption test against
