@@ -1,5 +1,6 @@
 """wipe — split from misc.py."""
 from ._common import *  # noqa
+from models import Service  # noqa: F401  (Service master wipe target)
 
 @bp.route('/delete_selected_data', methods=['POST'])
 @login_required
@@ -205,6 +206,9 @@ def delete_selected_data():
             _tq(Client).delete()
             _tq(DeliveryPerson).delete()
             _tq(Material).delete()
+            # Services are a master too: leaving rent/charge rows behind would
+            # make "data 0" a lie and keep stale charges in every dropdown.
+            _tq(Service).delete()
             _tq(MaterialCategory).delete()
             _tq(BillCounter).delete()
             db.session.add(BillCounter(namespace=AUTO_BILL_NS_DEFAULT, count=1000))
@@ -352,6 +356,12 @@ def delete_selected_data():
         if 'materials' in targets:
             _tq(Material).delete()
             deleted_info.append('Materials')
+
+        if 'services' in targets:
+            # Service labels live as free text on bills/entries, so the master
+            # rows can be removed without breaking historical documents.
+            _tq(Service).delete()
+            deleted_info.append('Rent & Service Charges')
 
         if 'material_categories' in targets:
             _tq(Material).update({'category_id': None}, synchronize_session=False)
