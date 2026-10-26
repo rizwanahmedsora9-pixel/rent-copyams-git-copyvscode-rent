@@ -262,19 +262,51 @@ def get_service_by_input(input_str):
     ).first()
 
 
+# RENT WORDS (word-boundary match, never a substring match)
+_RENT_WORDS = frozenset({"RENT", "RENTS", "RENTED", "RENTING", "RENTAL", "RENTALS"})
+
+
+def is_rent_like_name(name):
+    """True when *name* contains the **word** rent (RENT / RENTAL / RENTING …).
+
+    The historic rule was ``'rent' in name``, which is a *substring* test and
+    therefore also matches ordinary physical materials:
+
+        TRANSPARENT SHEET, CURRENT STOCK, PARENT BOARD, DIFFERENT SHEET,
+        INHERENT MORTAR …
+
+    Every one of those was treated as a service: excluded from stock reports,
+    excluded from the GRN FIFO consumption replay and — worst — excluded from
+    Profit & Loss cost of goods, so their real purchase cost vanished from
+    profit.  A token match keeps the genuine charges (``RENT-CEMENT``,
+    ``RENT STEEL``, ``CEMENT RENT``, ``RENTAL MIXER``) and leaves every other
+    material alone.
+
+    The rule is shared: ``is_service_name``, the Profit & Loss projection, the
+    GRN consumption replay and the Services page all call this function, so the
+    four can never disagree about what a rent charge is.
+    """
+    txt = str(name or "").upper()
+    if not txt:
+        return False
+    for token in re.split(r"[^A-Z0-9]+", txt):
+        if token in _RENT_WORDS:
+            return True
+    return False
+
+
 def _is_legacy_rent_name(name):
     """The historic 'is this rent?' rule, kept only as a transition fallback.
 
     Before the rent rows are moved into the Service master they are still
     Materials, so ``is_service_name`` must keep answering True for them —
     otherwise the rent box on the sale form would go dark the day service
-    support ships. The ``and not a Material`` clause in ``is_service_name``
-    closes the overlap so the two rules can never both fire.
+    support ships.  It is now a word-boundary rule (see ``is_rent_like_name``);
+    on the production snapshot it returns exactly the same four rent materials
+    as the old substring test, without capturing physical names that merely
+    contain the letters r-e-n-t.
     """
-    txt = (name or '').strip().lower()
-    if not txt:
-        return False
-    return 'rent' in txt.replace('-', ' ').replace('_', ' ')
+    return is_rent_like_name(name)
 
 
 def is_service_name(name):

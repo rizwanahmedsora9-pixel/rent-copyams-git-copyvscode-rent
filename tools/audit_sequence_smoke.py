@@ -67,9 +67,14 @@ DEFAULT_DB = ROOT / "instance" / "audit_sequence_smoke.db"
 # ---------------------------------------------------------------------------
 CATEGORY_CEMENT = "Cement"
 CATEGORY_SAND = "Sand & Gravel"
+CATEGORY_SHEETS = "Sheets & Covers"
 MAT_DG = "DG Cement"
 MAT_PIONEER = "Pioneer Cement"
 MAT_SAND = "Chenab Sand"
+# Deliberately contains the letters r-e-n-t without being a rent word.  The old
+# substring rule treated this as a service: no stock, no GRN consumption and no
+# cost of goods.  It is an ordinary physical material.
+MAT_SHEET = "TRANSPARENT SHEET"
 SERVICE = "CEMENT RENT"
 CLIENT = "Bilal Construction"
 CLIENT_CODE = "SEQ-CL-1"
@@ -85,6 +90,7 @@ GRNS = [
     ("G4", SUP_RAVI, [(MAT_PIONEER, 60.0, 1600.0)], "2026-09-07", "09:45", "SEQ-GRN-4"),
     ("G5", SUP_KOHAT, [(MAT_DG, 40.0, 1350.0)], "2026-09-09", "14:20", "SEQ-GRN-5"),
     ("G6", SUP_RAVI, [(MAT_DG, 25.0, 1500.0)], "2026-09-11", "16:05", "SEQ-GRN-6"),
+    ("G7", SUP_KOHAT, [(MAT_SHEET, 40.0, 300.0)], "2026-09-10", "12:40", "SEQ-GRN-7"),
 ]
 
 # (key, date, lines[(name, qty, rate)], allow_negative)
@@ -100,6 +106,7 @@ SALES = [
     ("S8", "2026-09-19", [(MAT_DG, 65.0, 1750.0)], False),
     # Beyond every lot: allowed only because the operator ticked the override.
     ("S9", "2026-09-20", [(MAT_DG, 10.0, 1800.0)], True),
+    ("S10", "2026-09-21", [(MAT_SHEET, 10.0, 450.0)], False),
 ]
 
 # Hard-coded price layers for the two sales that matter most.  If the oracle
@@ -114,6 +121,7 @@ EXPECTED_LAYERS = {
     "S7": [(1400.0, 60.0)],
     "S8": [(1350.0, 40.0), (1500.0, 25.0)],
     "S9": [],
+    "S10": [(300.0, 10.0)],
 }
 
 EPS = 0.005
@@ -510,6 +518,9 @@ def phase_masters(app, client: Http, report: Reporter) -> dict[str, int]:
     resp = client.post("/material_categories/add", {"category_name": CATEGORY_SAND})
     report.check("category 'Sand & Gravel' added", resp.status_code in (302, 303),
                  f"HTTP {resp.status_code}")
+    resp = client.post("/material_categories/add", {"category_name": CATEGORY_SHEETS})
+    report.check("category 'Sheets & Covers' added", resp.status_code in (302, 303),
+                 f"HTTP {resp.status_code}")
     resp = post_flash(client, "/material_categories/add",
                       {"category_name": CATEGORY_CEMENT})
     report.check(
@@ -531,6 +542,7 @@ def phase_masters(app, client: Http, report: Reporter) -> dict[str, int]:
         (MAT_DG, "Bags", CATEGORY_CEMENT),
         (MAT_PIONEER, "Bags", CATEGORY_CEMENT),
         (MAT_SAND, "CFT", CATEGORY_SAND),
+        (MAT_SHEET, "Sheets", CATEGORY_SHEETS),
     ):
         with app.app_context():
             cat_id = MaterialCategory.query.filter_by(name=cat_name).one().id
@@ -559,11 +571,12 @@ def phase_masters(app, client: Http, report: Reporter) -> dict[str, int]:
     with app.app_context():
         mats = {m.name: m for m in Material.query.all()}
         cats = {c.id: c.name for c in MaterialCategory.query.all()}
-    report.check("three materials exist", len(mats) == 3, f"{sorted(mats)}")
+    report.check("four materials exist", len(mats) == 4, f"{sorted(mats)}")
     for name, unit, cat_name in (
         (MAT_DG, "Bags", CATEGORY_CEMENT),
         (MAT_PIONEER, "Bags", CATEGORY_CEMENT),
         (MAT_SAND, "CFT", CATEGORY_SAND),
+        (MAT_SHEET, "Sheets", CATEGORY_SHEETS),
     ):
         row = mats.get(name)
         report.check(
@@ -575,6 +588,39 @@ def phase_masters(app, client: Http, report: Reporter) -> dict[str, int]:
             f"category={cats.get(getattr(row, 'category_id', None))} "
             f"unit={getattr(row, 'unit', None)} total={getattr(row, 'total', None)}",
         )
+
+    report.section("PHASE 2b — a physical material whose name contains 'rent' is NOT a service")
+    from app.services.grn_consumption import _is_service, _service_names
+    from app.services.lookups import is_rent_like_name, is_service_name
+    from app.services.profit_loss import _service_classifier
+
+    with app.app_context():
+        classifier = _service_classifier()
+        service_keys = _service_names()
+    for name in (MAT_SHEET, "CURRENT STOCK", "PARENT BOARD", "DIFFERENT SAND"):
+        report.check(
+            f"'{name}' is a material, not a rent charge, everywhere",
+            is_service_name(name) is False
+            and classifier(name) is False
+            and _is_service(name, service_keys) is False
+            and is_rent_like_name(name) is False,
+            f"lookups={is_service_name(name)} p&l={classifier(name)} "
+            f"grn={_is_service(name, service_keys)}",
+        )
+    for name in ("RENT-CEMENT", "RENT STEEL", "RENTAL MIXER", "CEMENT RENT", "rent-cement"):
+        report.check(
+            f"'{name}' is still recognised as a rent charge everywhere",
+            is_service_name(name) is True and classifier(name) is True
+            and _is_service(name, service_keys) is True,
+            "",
+        )
+    with app.app_context():
+        sheet = Material.query.filter_by(name=MAT_SHEET).one()
+    report.check(
+        "the material master row for the sheet was never hidden as a service",
+        sheet is not None and (sheet.unit or "") == "Sheets",
+        f"unit={getattr(sheet, 'unit', None)}",
+    )
 
     report.section("PHASE 3 — client")
     resp = post_flash(
@@ -983,6 +1029,11 @@ def phase_sales(app, client: Http, report: Reporter, oracle_before: FifoOracle) 
         f"remaining={oracle.remaining(norm(MAT_PIONEER)):g}",
     )
     report.check(
+        "the sheet material is real stock (40 bought − 10 sold = 30 left)",
+        abs(oracle.remaining(norm(MAT_SHEET)) - 30.0) < EPS,
+        f"remaining={oracle.remaining(norm(MAT_SHEET)):g}",
+    )
+    report.check(
         "the sold-out sale left 10 bags un-covered (honest, not invented)",
         abs(oracle.total_uncovered() - 10.0) < EPS,
         f"uncovered={oracle.total_uncovered():g}",
@@ -1108,6 +1159,31 @@ def phase_sales(app, client: Http, report: Reporter, oracle_before: FifoOracle) 
                 - 10.0 * float(frozen[0].get("rate") or 0)) < 0.01
         and "beyond every GRN lot" in over_basis,
         f"frozen={frozen} basis={over_basis[:120]!r}",
+    )
+    short_warnings = [
+        warning for warning in report_obj.get("stock_warnings", [])
+        if warning.get("code") == "short_stock_cost"
+    ]
+    report.check(
+        "the over-sold bill raises a stock-shortfall warning on the report",
+        len(short_warnings) == 1
+        and "10.00 sold beyond every GRN lot" in short_warnings[0]["message"],
+        f"warnings={[w['message'][:80] for w in short_warnings]}",
+    )
+    report.check(
+        "a fully lot-backed bill raises no stock-shortfall warning",
+        not any(norm(MAT_SHEET) in (w.get("material") or "")
+                for w in short_warnings),
+        "",
+    )
+    pl_page = client.get("/profit_reports?start_date=2026-09-01&end_date=2026-09-30")
+    pl_text = body_text(pl_page)
+    report.check(
+        "the Profit & Loss page shows the stock-shortfall warning block",
+        pl_page.status_code == 200
+        and "stock shortfall / unresolved-cost warning" in pl_text
+        and "sold beyond every GRN lot" in pl_text,
+        f"HTTP {pl_page.status_code}",
     )
     report.check(
         "the over-sold bill takes nothing from the real lots",

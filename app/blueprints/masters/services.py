@@ -16,6 +16,7 @@ from ._common import *  # noqa
 from flask import current_app
 from app.services.lookups import (
     invalidate_service_cache,
+    is_rent_like_name,
     is_service_name,
     _material_lookup_key,
     _material_norm_key,
@@ -134,9 +135,12 @@ def services():
 
 
 def _is_rent_like(name):
-    """The historic rent rule, used to find candidate rows to convert."""
-    txt = (name or '').strip().lower().replace('-', ' ').replace('_', ' ')
-    return 'rent' in txt
+    """The historic rent rule, used to find candidate rows to convert.
+
+    Delegates to the shared word-boundary rule so the conversion offer never
+    suggests a physical material whose name merely contains "rent".
+    """
+    return is_rent_like_name(name)
 
 
 def _find_orphan_rent_entry_names(existing_services, pending_materials):

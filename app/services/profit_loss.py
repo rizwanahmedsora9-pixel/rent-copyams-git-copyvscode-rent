@@ -86,6 +86,7 @@ from app.services.profit_loss_breakdown import (
     build_breakdown,
 )
 from app.services.grn_consumption import build_grn_consumption
+from app.services.lookups import is_rent_like_name
 from app.services.sales_core import _direct_sale_default_bill_ref, normalize_sale_category
 from app.services.time_money import pk_now, pk_today
 
@@ -365,7 +366,9 @@ def _service_classifier():
 
     def is_service(name):
         key = _mat_key(name)
-        return bool(key and (key in names or "rent" in str(name or "").casefold()))
+        # Word-boundary rent rule, shared with lookups/GRN/stock: a material
+        # named "TRANSPARENT SHEET" or "DIFFERENT SAND" is NOT a rent charge.
+        return bool(key and (key in names or is_rent_like_name(name)))
 
     return is_service
 
@@ -934,11 +937,28 @@ class _Projection:
                         and not lots_by_material.get(_mat_key(item.product_name))
                         and abs(frozen - master_price(item.product_name)) <= max(0.01, master_price(item.product_name) * 1e-9)
                     )
-                    if not add_frozen_source(
+                    if add_frozen_source(
                         still_uncovered,
                         "Frozen sale-line cost for quantity beyond every GRN lot",
                         actual=has_history or not frozen_is_placeholder,
                     ):
+                        # No real lot covered these units.  The cost is an
+                        # honest disclosure, but the shop floor should still see
+                        # that stock went negative: warn even though the row is
+                        # costed, otherwise the loss of a lot appears only on a
+                        # detail page.
+                        self.warn(
+                            "short_stock_cost",
+                            f"{line_reference()} / {item.product_name}: "
+                            f"{still_uncovered:,.2f} sold beyond every GRN lot; "
+                            f"costed from the posting-time frozen rate, not from a purchase lot",
+                            document_type=("DirectSale" if getattr(item, "sale_id", None) else None),
+                            document_id=getattr(item, "sale_id", None),
+                            reference=line_reference(),
+                            amount=still_uncovered * frozen,
+                            material=item.product_name,
+                        )
+                    else:
                         single_rate_sources(still_uncovered)
             status = COST_MISSING if missing else (COST_ESTIMATED if estimated else COST_ACTUAL)
             sources = _merge_sources(sources)
@@ -2577,6 +2597,10 @@ def build_profit_loss_report(
         "explorer": explorer_args,
         "top_clients": top_clients[:20], "top_items": top_items[:20],
         "daily_insights": daily, "type_insights": types,
+        "stock_warnings": [
+            warning for warning in context.warnings
+            if warning.get("code") in ("short_stock_cost", "missing_cost")
+        ],
         "warnings": [
             warning for warning in context.warnings
             if (warning.get("document_type"), warning.get("document_id")) in current_document_keys

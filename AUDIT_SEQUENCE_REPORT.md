@@ -16,8 +16,8 @@ python tools/audit_sequence_smoke.py --keep       # keep the DB to inspect
 pytest tests/test_sequence_smoke.py               # same cycle inside CI
 ```
 
-Result of the final run: **220 / 220 checks passed** (exit 0).
-Full test suite on this branch: **378 passed, 6 skipped, 0 failed**.
+Result of the final run: **254 / 254 checks passed** (exit 0).
+Full test suite on this branch: **382 passed, 6 skipped, 0 failed**.
 
 ---
 
@@ -170,6 +170,36 @@ registered-with-recorded-cost-still-netted.
   the financial ledger (`/ledger/<id>`), which correctly shows the full
   545,250 receivable.
 
+### 3.4 Two more defects found while planning the next round (fixed here)
+
+**"rent" was a substring test.** `is_service_name`, the Profit & Loss
+projection and the GRN consumption replay each asked `'rent' in name`. Any
+physical material containing those four letters was therefore a service:
+`TRANSPARENT SHEET`, `CURRENT STOCK`, `PARENT BOARD`, `DIFFERENT SAND`,
+`INHERENT MORTAR`… For those materials the app showed **no stock**, the GRN page
+never reported their lots as consumed, and P&L dropped their purchase cost
+entirely — profit was silently overstated.
+
+The rule is now one shared function (`app/services/lookups.is_rent_like_name`)
+that matches the **word** rent/RENTS/RENTAL/RENTING…, and the three former call
+sites plus the Services page all delegate to it. On the production snapshot
+(`LEGACY DATA/AMS_SMOOTH_IMPORT.amsdb`, 70 materials) the new rule returns
+exactly the same four rent materials as the old one — no conversion changes
+meaning.
+
+**An over-sold bill went silent once it had a frozen rate.** The P&L costed
+those units from `FrozenRate` and labelled the row `actual`, so no warning was
+raised anywhere: selling 25 bags when 10 exist produced a plausible-looking
+profit with one *disclosed* frozen layer and nothing else. There is now a
+`short_stock_cost` warning ("15.00 sold beyond every GRN lot"), surfaced in
+`report["stock_warnings"]` and rendered as a red **stock shortfall** block on
+the Profit & Loss page with a link to the source document. Costing is unchanged
+— only the silence is gone.
+
+The sequence audit grew accordingly: a `TRANSPARENT SHEET` material with its own
+GRN (G7) and sale (S10), a word-rule matrix across all three modules, and the
+shortfall-warning assertions — **254 checks**.
+
 ---
 
 ## 4. How the verification works (why the numbers can be trusted)
@@ -211,10 +241,10 @@ Then, across the whole run:
 
 | Check | Result |
 |---|---|
-| `python tools/audit_sequence_smoke.py` | **220 / 220 passed**, exit 0 |
-| `pytest tests/test_sequence_smoke.py` | **6 passed** (cycle + 5 defect regressions) |
+| `python tools/audit_sequence_smoke.py` | **254 / 254 passed**, exit 0 |
+| `pytest tests/test_sequence_smoke.py` | **10 passed** (cycle + 9 defect regressions) |
 | `pytest` targeted (profit ×4, simple summary, wipe, services master) | **70 passed** |
-| Full `pytest` suite | **378 passed, 6 skipped, 11 subtests, 0 failed** (17m25s) |
+| Full `pytest` suite | **382 passed, 6 skipped, 11 subtests, 0 failed** (17m29s) |
 | `python tools/audit_full_cycle.py` (pre-existing cycle) | **76 / 76 passed** |
 
 ---
@@ -225,8 +255,18 @@ Then, across the whole run:
 |---|---|
 | `tools/audit_sequence_smoke.py` | **new** — the sequential audit (data 0 → … → P&L) with the independent FIFO oracle |
 | `tests/test_sequence_smoke.py` | **new** — the cycle in CI + 5 regressions for the two fixes |
-| `app/services/profit_loss.py` | registered services are income with zero COGS (`not_applicable`), unregistered rent labels unchanged |
+| `app/services/profit_loss.py` | registered services are income with zero COGS (`not_applicable`); unregistered rent labels unchanged; `short_stock_cost` warning + `stock_warnings` |
+| `app/services/lookups.py` | `is_rent_like_name()` — one word-boundary rent rule shared by every module |
+| `app/services/grn_consumption.py`, `app/blueprints/masters/services.py` | delegate to the shared rent rule |
+| `templates/partials/profit_loss_results.html` | stock-shortfall warning block |
+| `FIXING_PLAN.md` | prioritised next steps (P0 lot-date edge case, stock reconciliation, edit reconciler) |
 | `app/blueprints/misc/_wipe_delete_selected_data.py` | Services master is wiped (full wipe + standalone `services` target) |
 | `app/services/wipe.py` | `services` in the wipe registry/preview |
 | `templates/settings.html` | **Rent & Service Charges** wipe checkbox |
 | `tools/audit_full_cycle.py` | `services` in the target list |
+
+Follow-up defects found while writing the fixing plan (same branch, §3.4 below).
+Also fixed: `tools/predator_truth_engine.py` no longer reports a registered
+Service's booking-pool `Entry` rows as a "ghost material" — that false alarm made
+every service-billing dataset look inconsistent (raw-SQL truth engine only; the
+calculation it checks is unchanged).
