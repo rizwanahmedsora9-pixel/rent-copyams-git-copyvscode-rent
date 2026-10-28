@@ -142,7 +142,24 @@ def _latest_reconciliation(account_id):
 
 
 def _assert_period_open(account_id, posted_at, *, operation="change"):
-    """Prevent a mutation from silently rewriting a finalised closing period."""
+    """Prevent a mutation from silently rewriting a finalised closing period.
+
+    Two cutoffs apply, and this is the single place both are enforced:
+
+    * the accounting period (Ledger → Periods) must not be ``locked``;
+    * the cash account must not be inside a finalised reconciliation period.
+    """
+    # The accounting-period rule lives in the ledger so a sale, a GRN, a
+    # supplier payment and a journal posting can never disagree about whether
+    # a date is open.
+    try:
+        from app.services.ledger import periods as _ledger_periods
+
+        _ledger_periods.assert_can_post(posted_at)
+    except ValueError:
+        raise
+    except Exception:  # pragma: no cover - never let the guard itself fail
+        pass
     if not account_id or not posted_at:
         return
     latest = _latest_reconciliation(account_id)

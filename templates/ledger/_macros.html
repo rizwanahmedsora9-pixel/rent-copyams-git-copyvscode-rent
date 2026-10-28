@@ -1,0 +1,54 @@
+{% macro money(minor) -%}{{ "{:,.2f}".format((minor or 0) / 100.0) }}{%- endmacro %}
+{% macro money0(minor) -%}{{ "{:,.0f}".format((minor or 0) / 100.0) }}{%- endmacro %}
+
+{% macro pill(status) -%}
+{% if status == 'ok' %}<span class="badge bg-success-subtle text-success border border-success-subtle">OK</span>
+{% elif status == 'warn' %}<span class="badge bg-warning-subtle text-warning border border-warning-subtle">Differs</span>
+{% elif status == 'fail' %}<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Fail</span>
+{% else %}<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">{{ status }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro period_badge(status) -%}
+{% if status == 'locked' %}<span class="badge bg-danger-subtle text-danger">Locked</span>
+{% elif status == 'soft_closed' %}<span class="badge bg-warning-subtle text-warning">Soft-closed</span>
+{% else %}<span class="badge bg-success-subtle text-success">Open</span>{% endif %}
+{%- endmacro %}
+
+{% macro ledger_head(title, subtitle=None, actions=None) %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-journal-bookmark-fill text-warning me-2"></i>{{ title }}</h4>
+    {% if subtitle %}<div class="small text-muted">{{ subtitle }}</div>{% endif %}
+  </div>
+  <div class="d-flex flex-wrap gap-2">{{ actions|safe if actions else '' }}</div>
+</div>
+{% endmacro %}
+
+{% macro kpi(label, value, hint=None, tone='info') %}
+<div class="ledger-kpi">
+  <div class="ledger-kpi-label">{{ label }}</div>
+  <div class="ledger-kpi-value text-{{ tone }}">{{ value }}</div>
+  {% if hint %}<div class="ledger-kpi-hint">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro nav_tabs(active) %}
+<div class="ledger-tabs mb-3">
+  {% set tabs = [
+    ('ledger.overview', 'Overview'),
+    ('ledger.chart', 'Chart of accounts'),
+    ('ledger.journal', 'Journal'),
+    ('ledger.trial_balance', 'Trial balance'),
+    ('ledger.pnl', 'Profit & loss'),
+    ('ledger.balance_sheet', 'Balance sheet'),
+    ('ledger.cash', 'Cash'),
+    ('ledger.receivables', 'Receivables'),
+    ('ledger.payables', 'Payables'),
+    ('ledger.periods', 'Periods'),
+    ('ledger.books_agree', 'Books agree')
+  ] %}
+  {% for endpoint, label in tabs %}
+  <a href="{{ url_for(endpoint) }}" class="ledger-tab {{ 'active' if active == endpoint }}">{{ label }}</a>
+  {% endfor %}
+</div>
+{% endmacro %}

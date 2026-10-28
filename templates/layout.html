@@ -507,6 +507,9 @@
                 <a href="{{ url_for('accounts.dashboard') }}" class="nav-link {{ 'active' if request.path.startswith('/accounts') }}" onclick="closeSidebar()">
                     <i class="bi bi-calculator"></i> Accounts
                 </a>
+                <a href="/ledger/" class="nav-link {{ 'active' if request.path.startswith('/ledger') }}" onclick="closeSidebar()">
+                    <i class="bi bi-journal-bookmark-fill"></i> Ledger
+                </a>
                 <a href="{{ url_for('cash_flow') }}" class="nav-link {{ 'active' if request.path.startswith('/cash_flow') }}" onclick="closeSidebar()">
                     <i class="bi bi-water"></i> Cash Flow
                 </a>

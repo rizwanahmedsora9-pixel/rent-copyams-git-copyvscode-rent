@@ -88,6 +88,129 @@ _DB_HEALTH_DROP_RATIO = C._DB_HEALTH_DROP_RATIO
 _DB_HEALTH_DROP_MIN = C._DB_HEALTH_DROP_MIN
 _DB_HEALTH_MIN_BYTES = C._DB_HEALTH_MIN_BYTES
 
+_LEDGER_TRIGGERS = (
+    "trg_journal_line_no_update",
+    "trg_journal_line_no_delete",
+    "trg_journal_entry_no_delete",
+)
+
+
+def reset_ledger_domain(session=None):
+    """Clear the book together with the accounts it describes.
+
+    The journal is append-only in normal operation (database triggers reject
+    UPDATE/DELETE).  A deliberate domain wipe is the one exception, so the
+    triggers are dropped, the rows removed, the version reset and the triggers
+    put straight back.  Never call this from a request path — it exists for the
+    explicit "start the accounts over" workflow only.
+    """
+    logger = logging.getLogger("wipe.ledger")
+    s = session or db.session
+    operations = []
+    try:
+        for trigger in _LEDGER_TRIGGERS:
+            try:
+                s.execute(text(f"DROP TRIGGER IF EXISTS {trigger}"))
+            except Exception:
+                pass
+        for model_name in ("JournalLine", "JournalEntry", "LedgerSyncEvent"):
+            model = _resolve_model_class(model_name)
+            if model is None:
+                continue
+            try:
+                deleted = s.query(model).delete()
+                operations.append((getattr(model, "__tablename__", model_name), "deleted", int(deleted or 0)))
+            except Exception as exc:
+                if "no such table" in str(exc).lower():
+                    continue
+                raise
+        try:
+            s.execute(text(
+                "INSERT INTO ledger_version (id, version) VALUES (1, 0) "
+                "ON CONFLICT(id) DO UPDATE SET version = 0"
+            ))
+        except Exception:
+            pass
+        # Restore the immutability guards.
+        for statement in (
+            "CREATE TRIGGER IF NOT EXISTS trg_journal_line_no_update BEFORE UPDATE ON journal_line "
+            "BEGIN SELECT RAISE(ABORT, 'journal_line is immutable — post a reversal instead'); END",
+            "CREATE TRIGGER IF NOT EXISTS trg_journal_line_no_delete BEFORE DELETE ON journal_line "
+            "BEGIN SELECT RAISE(ABORT, 'journal_line is immutable — post a reversal instead'); END",
+            "CREATE TRIGGER IF NOT EXISTS trg_journal_entry_no_delete BEFORE DELETE ON journal_entry "
+            "BEGIN SELECT RAISE(ABORT, 'journal_entry is immutable — post a reversal instead'); END",
+        ):
+            try:
+                s.execute(text(statement))
+            except Exception:
+                logger.warning("Could not restore ledger trigger", exc_info=True)
+        try:
+            from app.services import cache
+
+            cache.reset()
+        except Exception:
+            pass
+        logger.info("Ledger domain reset. Ops: %s", operations)
+    except Exception:
+        logger.exception("Ledger domain reset failed")
+        raise
+    return operations
+
+
+def wipe_ledger_definition(session=None):
+    """Remove the chart, the periods and the book for a full data wipe.
+
+    A full wipe means "this installation has no data", so the chart of accounts
+    and its periods go too; the next boot (or the next ledger page) seeds them
+    again.  ``gl_account.linked_account_id`` references ``account``, so this
+    must run before the accounts themselves are deleted.
+    """
+    logger = logging.getLogger("wipe.ledger")
+    s = session or db.session
+    for trigger in _LEDGER_TRIGGERS:
+        try:
+            s.execute(text(f"DROP TRIGGER IF EXISTS {trigger}"))
+        except Exception:
+            pass
+    for model_name in ("JournalLine", "JournalEntry", "LedgerSyncEvent",
+                       "AccountingPeriod", "GLAccount"):
+        model = _resolve_model_class(model_name)
+        if model is None:
+            continue
+        try:
+            s.query(model).delete()
+        except Exception as exc:
+            if "no such table" in str(exc).lower():
+                continue
+            raise
+    try:
+        # The counter row goes with the book; ``posting.bump_version`` recreates
+        # it on the next posting.
+        s.query(_resolve_model_class("LedgerVersion")).delete()
+    except Exception:
+        pass
+    for statement in (
+        "CREATE TRIGGER IF NOT EXISTS trg_journal_line_no_update BEFORE UPDATE ON journal_line "
+        "BEGIN SELECT RAISE(ABORT, 'journal_line is immutable — post a reversal instead'); END",
+        "CREATE TRIGGER IF NOT EXISTS trg_journal_line_no_delete BEFORE DELETE ON journal_line "
+        "BEGIN SELECT RAISE(ABORT, 'journal_line is immutable — post a reversal instead'); END",
+        "CREATE TRIGGER IF NOT EXISTS trg_journal_entry_no_delete BEFORE DELETE ON journal_entry "
+        "BEGIN SELECT RAISE(ABORT, 'journal_entry is immutable — post a reversal instead'); END",
+    ):
+        try:
+            s.execute(text(statement))
+        except Exception:
+            logger.warning("Could not restore ledger trigger", exc_info=True)
+    try:
+        from app.services import cache
+        from app.services.ledger import accounts as coa
+
+        coa._reset_all_caches()
+        cache.reset()
+    except Exception:
+        logger.warning("Could not reset ledger caches after wipe", exc_info=True)
+
+
 def reset_accounts_domain(session=None):
     """Centralized reset for all account-related state.
 
@@ -97,8 +220,19 @@ def reset_accounts_domain(session=None):
     The function is the single source of truth for account-domain wipes and
     should be updated when new accounting tables are added.
     """
-    # Keep backward-compat shim: use the domain wipe engine to perform the reset.
-    return execute_domain_wipe('accounts_domain', session)
+    # The book describes the accounts, so it is cleared in the same transaction
+    # (otherwise every journal line would point at a deleted transaction).
+    # Automatic posting is suspended: deleting documents must not post reversals
+    # into a journal that is being cleared.
+    from app.services.ledger import sync as ledger_sync
+
+    with ledger_sync.suspend("accounts-domain-wipe"):
+        try:
+            reset_ledger_domain(session)
+        except Exception:
+            logging.getLogger("wipe").warning("Ledger reset failed", exc_info=True)
+        # Keep backward-compat shim: use the domain wipe engine to perform the reset.
+        return execute_domain_wipe('accounts_domain', session)
 
 
 def _resolve_model_class(model_name):

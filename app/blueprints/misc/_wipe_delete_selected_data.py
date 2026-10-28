@@ -199,6 +199,12 @@ def delete_selected_data():
             _tq(CashFlowSubcategory).delete()
             _tq(CashFlowCategory).delete()
             _tq(CashFlowParty).delete()
+            # The chart of accounts references ``account`` (linked cash
+            # masters) and the journal references the chart, so the book goes
+            # first.  It is re-seeded on the next boot.
+            from app.services.wipe import wipe_ledger_definition
+
+            wipe_ledger_definition(db.session)
             _tq(AccountCategory).delete()
             _tq(Account).delete()
             # --- masters (no remaining references) ---

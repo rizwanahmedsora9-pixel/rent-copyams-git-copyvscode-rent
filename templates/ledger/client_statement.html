@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Client statement', (view.client.name if view.client else 'Client') ~ ' · as at ' ~ as_of.strftime('%d %b %Y') ~ ' · balance ' ~ money(view.balance),
+   '<a class="btn btn-sm btn-outline-secondary" href="' ~ url_for('ledger.receivables') ~ '">All receivables</a>') }}
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>Date</th><th>Entry</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+    <tbody>
+      {% for row in view.rows %}
+      <tr>
+        <td>{{ row.entry.entry_date.strftime('%Y-%m-%d') }}</td>
+        <td><a href="{{ url_for('ledger.entry', entry_id=row.entry.id) }}">{{ row.entry.entry_no }}</a></td>
+        <td class="text-truncate" style="max-width: 360px;">{{ row.entry.description or '' }}</td>
+        <td class="num">{{ money(row.debit) if row.debit else '' }}</td>
+        <td class="num">{{ money(row.credit) if row.credit else '' }}</td>
+        <td class="num">{{ money(row.balance) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted">No journal lines for this client.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

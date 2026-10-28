@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Chart of accounts', 'Every posting resolves its account here — no silent fallbacks') }}
+{{ nav_tabs('ledger.chart') }}
+
+{% for class_name in class_order %}
+  {% set group = groups.get(class_name) %}
+  {% if group %}
+  <div class="ledger-section-title">{{ class_name.replace('_', ' ') }}</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-dark table-sm ledger-table align-middle mb-0">
+      <thead><tr><th>Code</th><th>Account</th><th>Type</th><th class="num">Debits</th><th class="num">Credits</th><th class="num">Balance</th></tr></thead>
+      <tbody>
+        {% for row in group %}
+        <tr>
+          <td class="ledger-mono">{{ row.account.code }}</td>
+          <td>{{ row.account.name }}
+            {% if row.account.is_control %}<span class="badge bg-info-subtle text-info ms-1">control</span>{% endif %}
+            {% if row.account.is_cash %}<span class="badge bg-success-subtle text-success ms-1">cash</span>{% endif %}
+            {% if not row.account.is_active %}<span class="badge bg-secondary ms-1">inactive</span>{% endif %}
+          </td>
+          <td class="text-muted">{{ row.account.subcategory or '' }}</td>
+          <td class="num">{{ money(row.debit) }}</td>
+          <td class="num">{{ money(row.credit) }}</td>
+          <td class="num">{{ money(row.natural) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if can_manage %}
+<div class="card bg-dark border-secondary">
+  <div class="card-header">Add an account</div>
+  <form class="card-body row g-2" method="post" action="{{ url_for('ledger.chart_new') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <div class="col-md-2"><input class="form-control" name="code" placeholder="Code (e.g. 6910)" required></div>
+    <div class="col-md-4"><input class="form-control" name="name" placeholder="Account name" required></div>
+    <div class="col-md-3">
+      <select class="form-select" name="account_class">
+        {% for option in ['asset','liability','equity','revenue','cost','expense','other_loss'] %}
+        <option value="{{ option }}">{{ option.replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select class="form-select" name="normal_side"><option value="debit">debit</option><option value="credit">credit</option></select>
+    </div>
+    <div class="col-md-1"><button class="btn btn-warning w-100" type="submit">Add</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

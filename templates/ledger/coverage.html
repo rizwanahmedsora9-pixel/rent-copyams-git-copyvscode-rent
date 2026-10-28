@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import ledger_head %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Document coverage', 'Every document that has reached the book — and those that have not',
+   '<a class="btn btn-sm btn-outline-warning" href="' ~ url_for('ledger.books_agree') ~ '">Books agree</a>') }}
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>Document</th><th class="num">Rows</th><th class="num">With a live entry</th><th class="num">Missing</th></tr></thead>
+    <tbody>
+      {% for name, row in coverage.items() %}
+      <tr>
+        <td>{{ name }}</td>
+        <td class="num">{{ row.documents }}</td>
+        <td class="num">{{ row.with_entries }}</td>
+        <td class="num {{ 'text-warning' if row.missing else 'text-muted' }}">{{ row.missing }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small text-muted">A missing count is repaired by the boot sync or by “Sync missing” on the books-agree page. Documents are never edited to make a number match.</p>
+{% endblock %}

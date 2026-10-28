@@ -1,0 +1,43 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Balance sheet', 'As at ' ~ as_of.strftime('%d %b %Y') ~ ' · ' ~ ('balanced' if statement.balanced else 'does not tie')) }}
+{{ nav_tabs('ledger.balance_sheet') }}
+<form class="row g-2 align-items-end mb-3" method="get">
+  <div class="col-md-3"><label class="form-label small">As at</label><input type="date" class="form-control" name="as_of" value="{{ as_of }}"></div>
+  <div class="col-md-2"><button class="btn btn-warning w-100" type="submit">Apply</button></div>
+  <div class="col-md-3 ms-auto text-end">{{ pill('ok' if statement.balanced else 'fail') }}</div>
+</form>
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="ledger-section-title">Assets</div>
+    <table class="table table-dark table-sm ledger-table">
+      {% for row in statement.assets %}
+      <tr><td class="ps-3">{{ row.code }} {{ row.name }}</td><td class="num">{{ money(row.amount) }}</td></tr>
+      {% endfor %}
+      <tr class="fw-bold border-top"><td class="text-end">Total assets</td><td class="num">{{ money(statement.asset_total) }}</td></tr>
+    </table>
+  </div>
+  <div class="col-lg-6">
+    <div class="ledger-section-title">Liabilities</div>
+    <table class="table table-dark table-sm ledger-table">
+      {% for row in statement.liabilities %}
+      <tr><td class="ps-3">{{ row.code }} {{ row.name }}</td><td class="num">{{ money(row.amount) }}</td></tr>
+      {% endfor %}
+      <tr class="fw-bold"><td class="text-end">Total liabilities</td><td class="num">{{ money(statement.liability_total) }}</td></tr>
+    </table>
+    <div class="ledger-section-title">Equity</div>
+    <table class="table table-dark table-sm ledger-table">
+      {% for row in statement.equity %}
+      <tr><td class="ps-3">{{ row.code }} {{ row.name }}</td><td class="num">{{ money(row.amount) }}</td></tr>
+      {% endfor %}
+      <tr><td class="ps-3">Earnings to date (not yet closed)</td><td class="num">{{ money(statement.earnings_to_date) }}</td></tr>
+      <tr class="fw-bold border-top"><td class="text-end">Liabilities + equity</td><td class="num">{{ money(statement.liabilities_and_equity) }}</td></tr>
+      {% if not statement.balanced %}
+      <tr class="text-danger"><td class="text-end">Difference</td><td class="num">{{ money(statement.difference) }}</td></tr>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endblock %}

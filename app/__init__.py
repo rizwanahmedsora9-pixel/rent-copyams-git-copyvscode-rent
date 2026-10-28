@@ -153,6 +153,11 @@ def create_app(test_config: dict | None = None) -> Flask:
     _configure_logging(app)
     db.init_app(app)
 
+    # Register the ledger session listeners before the first flush so every
+    # document save posts its journal entry in the same transaction
+    # (app/services/ledger/autopost.py). Import for the side effect only.
+    from app.services.ledger import autopost as _ledger_autopost  # noqa: F401
+
     # SQLite does not enforce declared foreign keys unless each connection
     # explicitly enables them. Register this before bootstrap opens the first
     # connection so future lifecycle regressions fail transactionally instead
@@ -329,6 +334,20 @@ def create_app(test_config: dict | None = None) -> Flask:
             logging.getLogger(__name__).warning(
                 "Automatic schema migrations failed to run at startup; "
                 "the app continues on the current schema.",
+                exc_info=True,
+            )
+
+        # The book: seed the chart of accounts, map the cash accounts, and keep
+        # history posted (one-time replay when the journal is empty, incremental
+        # otherwise). Never blocks boot — a bookkeeping problem is reported on
+        # Ledger → Books agree instead of stopping the store.
+        try:
+            from app.services.ledger import replay as _ledger_replay
+
+            app.config["AMS_LEDGER_BOOT"] = _ledger_replay.bootstrap_ledger()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Ledger bootstrap failed; the journal may be incomplete.",
                 exc_info=True,
             )
 

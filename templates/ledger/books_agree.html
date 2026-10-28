@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Books agree', 'Every invariant, one page · ledger v' ~ view.ledger_version ~ ' · ' ~ view.entry_count ~ ' entries',
+   '<form method="post" action="' ~ url_for('ledger.run_sync') ~ '" class="d-inline">
+      <input type="hidden" name="_csrf_token" value="' ~ csrf_token ~ '">
+      <button class="btn btn-sm btn-outline-warning" name="mode" value="missing">Sync missing</button>
+    </form>
+    <form method="post" action="' ~ url_for('ledger.run_sync') ~ '" class="d-inline">
+      <input type="hidden" name="_csrf_token" value="' ~ csrf_token ~ '">
+      <button class="btn btn-sm btn-outline-secondary" name="mode" value="full">Full replay</button>
+    </form>') }}
+{{ nav_tabs('ledger.books_agree') }}
+<div class="alert alert-{{ 'success' if view.status == 'ok' else ('warning' if view.status == 'warn' else 'danger') }}">
+  {% if view.status == 'ok' %}All invariants hold: the book is balanced and every control account ties.
+  {% elif view.status == 'warn' %}{{ view.warnings|length }} comparison(s) differ. Each row below names the amount and the reason.
+  {% else %}{{ view.failures|length }} structural check(s) failed — do not close a period until these are zero.{% endif %}
+</div>
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table align-middle">
+    <thead><tr><th>Check</th><th class="num">Book</th><th class="num">Documents</th><th class="num">Difference</th><th>Status</th><th></th></tr></thead>
+    <tbody class="ledger-check-row">
+      {% for row in view.checks %}
+      <tr>
+        <td><strong>{{ row.title }}</strong><div class="small text-muted">{{ row.detail }}</div></td>
+        <td class="num">{{ money(row.book) }}</td>
+        <td class="num">{{ money(row.operational) }}</td>
+        <td class="num {{ 'text-danger' if row.difference else 'text-muted' }}">{{ money(row.difference) }}</td>
+        <td>{{ pill(row.status) }}</td>
+        <td class="text-end">{% if row.href %}<a class="btn btn-sm btn-outline-secondary" href="{{ row.href }}">Open</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="ledger-section-title">Coverage by document type</div>
+<table class="table table-dark table-sm ledger-table">
+  <thead><tr><th>Document</th><th class="num">Rows</th><th class="num">With entry</th><th class="num">Missing</th></tr></thead>
+  <tbody>
+    {% for name, row in view.coverage.items() %}
+    <tr>
+      <td>{{ name }}</td>
+      <td class="num">{{ row.documents }}</td>
+      <td class="num">{{ row.with_entries }}</td>
+      <td class="num {{ 'text-warning' if row.missing else 'text-muted' }}">{{ row.missing }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

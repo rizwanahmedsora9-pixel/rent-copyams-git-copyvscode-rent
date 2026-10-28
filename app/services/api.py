@@ -632,3 +632,36 @@ __all__ = [
     'verify_accounts_domain_wipe_integrity',
     'hard_delete_transaction',
 ]
+
+# --- Ledger read-model serializers (master plan §16 S11) --------------------
+# The API is a serializer over the read models, so an API number and a page
+# number are the same number by construction.
+from app.services.api_ledger import (  # noqa: E402,F401
+    api_balance_sheet,
+    api_cash,
+    api_dashboard,
+    api_drivers,
+    api_ledger_version,
+    api_payables,
+    api_periods,
+    api_pnl,
+    api_receivables,
+    api_stock,
+    api_trial_balance,
+    jsonable,
+)
+
+__all__ += [
+    'api_balance_sheet',
+    'api_cash',
+    'api_dashboard',
+    'api_drivers',
+    'api_ledger_version',
+    'api_payables',
+    'api_periods',
+    'api_pnl',
+    'api_receivables',
+    'api_stock',
+    'api_trial_balance',
+    'jsonable',
+]

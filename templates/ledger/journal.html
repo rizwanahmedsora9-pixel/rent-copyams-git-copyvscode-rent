@@ -1,0 +1,64 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Journal', result.total ~ ' entries · page ' ~ result.page ~ ' of ' ~ result.pages) }}
+{{ nav_tabs('ledger.journal') }}
+
+<form class="row g-2 align-items-end mb-3" method="get">
+  <div class="col-md-2"><label class="form-label small">From</label><input type="date" class="form-control" name="start" value="{{ filters.start or '' }}"></div>
+  <div class="col-md-2"><label class="form-label small">To</label><input type="date" class="form-control" name="end" value="{{ filters.end or '' }}"></div>
+  <div class="col-md-2"><label class="form-label small">Document</label>
+    <select class="form-select" name="source">
+      <option value="">Any</option>
+      {% for source in sources %}<option value="{{ source }}" {{ 'selected' if filters.source_type == source }}>{{ source }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2"><label class="form-label small">Event</label>
+    <select class="form-select" name="event">
+      <option value="">Any</option>
+      {% for event in events %}<option value="{{ event }}" {{ 'selected' if filters.event == event }}>{{ event }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3"><label class="form-label small">Search</label><input class="form-control" name="q" value="{{ filters.text or '' }}" placeholder="entry no, reference, material"></div>
+  <div class="col-md-1"><button class="btn btn-warning w-100" type="submit">Filter</button></div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-dark table-sm table-hover ledger-table align-middle">
+    <thead><tr><th>Entry</th><th>Date</th><th>Event</th><th>Source</th><th>Description</th><th>By</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody>
+      {% for entry in result.entries %}
+      <tr>
+        <td class="ledger-mono">{{ entry.entry_no }}</td>
+        <td>{{ entry.entry_date.strftime('%Y-%m-%d') }}</td>
+        <td>{{ entry.event }}{% if entry.is_adjustment %} <span class="badge bg-warning-subtle text-warning">adj</span>{% endif %}</td>
+        <td class="text-muted">{{ entry.source_type }} #{{ entry.source_id }}</td>
+        <td class="text-truncate" style="max-width: 320px;">{{ entry.description or '' }}</td>
+        <td class="text-muted">{{ entry.created_by or '' }}</td>
+        <td class="num">{{ money(entry.total_minor) }}</td>
+        <td class="text-end">
+          {% if entry.reversed_at %}<span class="badge bg-secondary">reversed</span>{% endif %}
+          {% if entry.is_reversal_of %}<span class="badge bg-info-subtle text-info">mirror</span>{% endif %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('ledger.entry', entry_id=entry.id) }}">Open</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-muted">No entries match these filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if result.pages > 1 %}
+<nav><ul class="pagination pagination-sm">
+  {% for page_no in range(1, result.pages + 1) %}
+  {% if page_no <= 3 or page_no > result.pages - 3 or (page_no >= result.page - 2 and page_no <= result.page + 2) %}
+  <li class="page-item {{ 'active' if page_no == result.page }}">
+    <a class="page-link" href="{{ url_for('ledger.journal', page=page_no, start=filters.start, end=filters.end, source=filters.source_type, event=filters.event, q=filters.text) }}">{{ page_no }}</a>
+  </li>
+  {% endif %}
+  {% endfor %}
+</ul></nav>
+{% endif %}
+{% endblock %}

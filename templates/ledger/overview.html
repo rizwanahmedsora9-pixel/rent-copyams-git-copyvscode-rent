@@ -1,0 +1,92 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, pill, ledger_head, kpi, nav_tabs %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('The book', 'One journal behind every page · ledger version ' ~ summary.ledger_version,
+   '<a class="btn btn-sm btn-outline-warning" href="' ~ url_for('ledger.journal') ~ '">Journal</a>
+    <a class="btn btn-sm btn-outline-secondary" href="' ~ url_for('ledger.books_agree') ~ '">Books agree</a>') }}
+{{ nav_tabs('ledger.overview') }}
+
+<div class="alert alert-{{ 'success' if agree.status == 'ok' else ('warning' if agree.status == 'warn' else 'danger') }} d-flex justify-content-between align-items-center flex-wrap gap-2">
+  <div>
+    <strong>Books agree:</strong>
+    {% if agree.status == 'ok' %}every control account ties to its supporting list.
+    {% elif agree.status == 'warn' %}{{ agree.warnings|length }} comparison(s) differ — the details name each one.
+    {% else %}{{ agree.failures|length }} structural check(s) failed.{% endif %}
+  </div>
+  <a class="btn btn-sm btn-dark" href="{{ url_for('ledger.books_agree') }}">Open gate</a>
+</div>
+
+<div class="ledger-kpi-grid">
+  {{ kpi('Cash (book)', money(summary.cash_balance), 'all cash / bank / wallet accounts', 'info') }}
+  {{ kpi('Receivables', money(summary.receivable_total), summary.receivable_count ~ ' clients', 'warning') }}
+  {{ kpi('Payables', money(summary.payable_total), summary.payable_count ~ ' suppliers', 'danger') }}
+  {{ kpi('Driver payable', money(summary.driver_payable_total), 'accrued rent − settlements', 'secondary') }}
+  {{ kpi('Inventory (book)', money(summary.inventory_value), 'suspense ' ~ money(summary.inventory_suspense), 'light') }}
+</div>
+<div class="ledger-kpi-grid">
+  {{ kpi('Cash in today', money(summary.cash_in_today), summary.as_of.strftime('%d %b %Y'), 'success') }}
+  {{ kpi('Cash out today', money(summary.cash_out_today), 'net ' ~ money(summary.cash_net_today), 'danger') }}
+  {{ kpi('Revenue this month', money(summary.month_revenue), month_start.strftime('%d %b') ~ ' → today', 'info') }}
+  {{ kpi('Gross profit', money(summary.month_gross_profit), 'COGS ' ~ money(summary.month_cogs), 'warning') }}
+  {{ kpi('Net profit', money(summary.month_profit), 'after expenses and losses', 'success' if summary.month_profit >= 0 else 'danger') }}
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Latest postings</span>
+        <a class="small" href="{{ url_for('ledger.journal') }}">All entries →</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-dark table-sm mb-0 ledger-table">
+          <thead><tr><th>Entry</th><th>Date</th><th>Event</th><th>Source</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            {% for entry in summary.recent_entries %}
+            <tr>
+              <td><a href="{{ url_for('ledger.entry', entry_id=entry.id) }}">{{ entry.entry_no }}</a></td>
+              <td>{{ entry.entry_date.strftime('%Y-%m-%d') }}</td>
+              <td>{{ entry.event }}</td>
+              <td class="text-muted">{{ entry.source_type }} #{{ entry.source_id }}</td>
+              <td class="num">{{ money(entry.total_minor) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted">No entries yet — save a sale, a GRN or a payment and it appears here.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header">This month, at a glance</div>
+      <div class="card-body">
+        <table class="table table-sm table-dark mb-0 ledger-table">
+          <tbody>
+            <tr><td>Gross revenue</td><td class="num">{{ money(pnl.gross_revenue) }}</td></tr>
+            <tr><td>Trade discounts</td><td class="num text-warning">−{{ money(pnl.discount_total) }}</td></tr>
+            <tr><td><strong>Net revenue</strong></td><td class="num"><strong>{{ money(pnl.net_revenue) }}</strong></td></tr>
+            <tr><td>Cost of sales</td><td class="num text-danger">−{{ money(pnl.cost_total) }}</td></tr>
+            <tr><td><strong>Gross profit</strong></td><td class="num"><strong>{{ money(pnl.gross_profit) }}</strong></td></tr>
+            <tr><td>Expenses</td><td class="num text-danger">−{{ money(pnl.expense_total) }}</td></tr>
+            <tr><td>Other losses (waive-offs)</td><td class="num text-danger">−{{ money(pnl.other_loss_total) }}</td></tr>
+            <tr><td><strong>Net profit</strong></td><td class="num"><strong class="{{ 'text-success' if pnl.net_profit >= 0 else 'text-danger' }}">{{ money(pnl.net_profit) }}</strong></td></tr>
+          </tbody>
+        </table>
+        <a class="btn btn-sm btn-outline-warning w-100 mt-3" href="{{ url_for('ledger.pnl') }}">Open statement</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mt-3">
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.cash') }}">Cash control</a>
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.receivables') }}">Receivables</a>
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.payables') }}">Payables</a>
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.inventory') }}">Inventory control</a>
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.coverage') }}">Coverage</a>
+  <a class="btn btn-sm btn-outline-info" href="{{ url_for('ledger.cash_flow') }}">Cash flow statement</a>
+</div>
+{% endblock %}
