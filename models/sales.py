@@ -52,6 +52,16 @@ class BookingItem(db.Model):
     material_name = db.Column(db.String(100))
     qty = db.Column(db.Float, default=0)
     price_at_time = db.Column(db.Float, default=0)
+    # --- Per-line discount (total for this line, not per unit) --------------
+    # Stored once when the booking is posted; each delivery recognises
+    # ``discount * delivered_qty / line_qty`` rounded to paisa, so a partially
+    # delivered booking can never recognise more discount than it delivered.
+    discount = db.Column(db.Float, default=0)
+    discount_reason = db.Column(db.String(200))
+
+    @property
+    def gross_amount(self):
+        return round(float(self.qty or 0) * float(self.price_at_time or 0), 2)
 
 
 class BookingAllocation(db.Model):
@@ -236,8 +246,31 @@ class DirectSaleItem(db.Model):
     price_at_time = db.Column(db.Float, default=0)
     grn_item_id = db.Column(db.Integer, db.ForeignKey('grn_item.id'), nullable=True)  # Link to specific GRN item
     cost_rate_at_sale = db.Column(db.Float, nullable=True)  # Frozen FIFO cost at post time
+    # --- Per-line discount -------------------------------------------------
+    # The authoritative discount for *this line*, in rupees (two decimals).
+    # A bill-level discount is allocated once, at posting, by
+    # app.services.pricing and stored here; reports read it instead of dividing
+    # the bill discount again.  ``discount_kind`` records how it was chosen:
+    # ``manual``    - typed against this line in the discount panel
+    # ``allocated`` - split from the bill-level amount (largest remainder)
+    # ``legacy``    - derived for a row posted before this column existed
+    discount = db.Column(db.Float, default=0)
+    # NULL on rows posted before per-line storage existed; the report derives
+    # those with the same largest-remainder rule and never divides again.
+    discount_kind = db.Column(db.String(20), default='allocated')
+    discount_reason = db.Column(db.String(200))
 
     grn_item = db.relationship('GRNItem', backref='sale_items')
+
+    @property
+    def gross_amount(self):
+        """qty x rate, rounded once to paisa (never a repeating decimal)."""
+        return round(float(self.qty or 0) * float(self.price_at_time or 0), 2)
+
+    @property
+    def net_amount(self):
+        """Gross minus this line's own stored discount."""
+        return max(0.0, round(self.gross_amount - float(self.discount or 0), 2))
 
 
 class GRNAllocation(db.Model):
@@ -279,4 +312,8 @@ class MaterialReturnItem(db.Model):
     unit_rate = db.Column(db.Float, default=0)
     rent_rate = db.Column(db.Float, default=0)
     price_at_time = db.Column(db.Float, default=0)
+    # Discount that was recognized on the original sale line for the returned
+    # quantity, and is therefore withdrawn by this return.  Stored so the
+    # reversal is exact instead of reversing the gross rate.
+    discount_reversed = db.Column(db.Float, default=0)
 

@@ -17,6 +17,23 @@
 <div id="plResults" class="pl-results" data-pl-results aria-live="polite"
      data-pl-start="{{ start_date or '' }}" data-pl-end="{{ end_date or '' }}">
 
+  {# ------------------------ GROSS > DISCOUNT > NET STRIP -------------------- #}
+  {# The discount split is stored per line, so these three figures always add
+     up.  They are shown before every other table because "why is revenue not
+     qty x rate?" is the question this strip answers. #}
+  <div class="ui-card">
+    <div class="ui-card-body py-3">
+      <div class="d-flex flex-wrap align-items-center justify-content-center gap-3 small">
+        <span class="text-muted">Gross sales <strong class="ms-1 fs-6">Rs. {{ money(summary.total_gross_revenue) }}</strong></span>
+        <span class="text-muted">−</span>
+        <span class="text-muted">Discounts given <strong class="ms-1 fs-6">Rs. {{ money(summary.total_discounts) }}</strong></span>
+        <span class="text-muted">=</span>
+        <span class="text-muted">Net revenue <strong class="ms-1 fs-6">Rs. {{ money(summary.total_revenue) }}</strong></span>
+        <span class="status-pill"><i class="bi bi-check2-circle text-success"></i> Discounts are stored per bill line — nothing is divided while this page loads</span>
+      </div>
+    </div>
+  </div>
+
   {# ------------------------------- NET RESULT ------------------------------- #}
   <div class="profit-hero">
     <div class="row align-items-center g-3">

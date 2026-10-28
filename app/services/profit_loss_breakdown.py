@@ -34,6 +34,7 @@ from app.services.financial_ledgers import (
     _make_client_obligations,
     _same_name_id_groups,
 )
+from app.services import pricing as _pricing
 from app.services.grn_consumption import build_grn_consumption
 from app.services.time_money import pk_today
 
@@ -487,7 +488,19 @@ def build_breakdown(context, rows, *, start_date=None, end_date=None, filters=No
         bucket["day"] = day_key
         _add(bucket, row)
 
+    MONEY_KEYS = (
+        "revenue", "material_revenue", "service_revenue", "cogs",
+        "material_cost", "service_cost", "expenses", "other_income",
+        "other_gain", "other_loss", "profit", "cost",
+    )
+
     def _finalise(bucket, *, profit_key="profit"):
+        # Buckets are sums of stored line amounts; rounding each to paisa here
+        # keeps a table total (and its Excel export) free of float drift such as
+        # 4756.09756097561 or 8999.999999999996.
+        for key in MONEY_KEYS:
+            if key in bucket:
+                bucket[key] = float(_pricing.round_money(bucket[key]))
         bucket["margin_pct"] = _margin(bucket[profit_key], bucket["revenue"])
         bucket["cost"] = bucket["cogs"]
         return bucket
