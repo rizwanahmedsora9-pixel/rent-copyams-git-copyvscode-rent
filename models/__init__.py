@@ -12,6 +12,7 @@ from .rentals import *  # noqa
 from .imports import *  # noqa
 from .migration import *  # noqa
 from .events import *  # noqa
+from .ledger import *  # noqa
 
 import sys as _sys
 from types import ModuleType as _ModuleType

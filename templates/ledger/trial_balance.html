@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Trial balance', 'As at ' ~ as_of.strftime('%d %b %Y'),
+   '<a class="btn btn-sm btn-outline-secondary" href="' ~ url_for('ledger.trial_balance') ~ '">Today</a>') }}
+{{ nav_tabs('ledger.trial_balance') }}
+<form class="row g-2 align-items-end mb-3" method="get">
+  <div class="col-md-3"><label class="form-label small">As at</label><input type="date" class="form-control" name="as_of" value="{{ as_of }}"></div>
+  <div class="col-md-2"><button class="btn btn-warning w-100" type="submit">Apply</button></div>
+  <div class="col-md-4 ms-auto text-end">{{ pill('ok' if statement.balanced else 'fail') }}</div>
+</form>
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>Code</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+    <tbody>
+      {% for row in statement.rows %}
+      <tr>
+        <td class="ledger-mono">{{ row.code }}</td>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ money(row.debit) if row.debit else '' }}</td>
+        <td class="num">{{ money(row.credit) if row.credit else '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted">Nothing posted yet.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="fw-bold border-top">
+        <td colspan="2" class="text-end">Total</td>
+        <td class="num">{{ money(statement.total_debit) }}</td>
+        <td class="num">{{ money(statement.total_credit) }}</td>
+      </tr>
+      {% if not statement.balanced %}
+      <tr class="text-danger"><td colspan="2" class="text-end">Difference</td><td class="num" colspan="2">{{ money(statement.difference) }}</td></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</div>
+{% endblock %}

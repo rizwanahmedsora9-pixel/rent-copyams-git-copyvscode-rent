@@ -1,0 +1,69 @@
+<style>
+  .ledger-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .ledger-kpi {
+    border: 1px solid var(--border-color, #33415c);
+    border-radius: 12px;
+    background: var(--surface-1, #101a2b);
+    padding: 0.75rem 0.9rem;
+  }
+  .ledger-kpi-label {
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted, #93a4bd);
+    font-weight: 700;
+  }
+  .ledger-kpi-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-top: 0.15rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .ledger-kpi-hint { font-size: 0.72rem; color: var(--text-muted, #93a4bd); }
+  .ledger-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    border-bottom: 1px solid var(--border-color, #33415c);
+    padding-bottom: 0.4rem;
+  }
+  .ledger-tab {
+    font-size: 0.8rem;
+    padding: 0.28rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    color: var(--text-muted, #93a4bd);
+    text-decoration: none;
+  }
+  .ledger-tab:hover { color: #fff; border-color: var(--border-color, #33415c); }
+  .ledger-tab.active {
+    color: #0b1220;
+    background: #f0b429;
+    border-color: #f0b429;
+    font-weight: 700;
+  }
+  .ledger-table { font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+  .ledger-table th {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted, #93a4bd);
+    white-space: nowrap;
+  }
+  .ledger-table td.num, .ledger-table th.num { text-align: right; white-space: nowrap; }
+  .ledger-section-title {
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted, #93a4bd);
+    margin: 1rem 0 0.35rem;
+    font-weight: 700;
+  }
+  .ledger-check-row td { vertical-align: middle; }
+  .ledger-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+</style>

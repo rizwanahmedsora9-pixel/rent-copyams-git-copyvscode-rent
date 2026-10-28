@@ -1,0 +1,63 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head(entry.entry_no, entry.entry_date.strftime('%d %b %Y') ~ ' · ' ~ entry.event ~ ' · ' ~ entry.source_type ~ ' #' ~ entry.source_id,
+   '<a class="btn btn-sm btn-outline-secondary" href="' ~ url_for('ledger.journal') ~ '">Back to journal</a>') }}
+
+<div class="card bg-dark border-secondary mb-3">
+  <div class="card-body">
+    <div class="row g-2 small">
+      <div class="col-md-6"><span class="text-muted">Description:</span> {{ entry.description or '—' }}</div>
+      <div class="col-md-3"><span class="text-muted">Reference:</span> {{ entry.reference or '—' }}</div>
+      <div class="col-md-3"><span class="text-muted">Created by:</span> {{ entry.created_by or 'system' }}</div>
+      {% if entry.is_reversal_of %}<div class="col-md-6"><span class="text-muted">Reversal of:</span>
+        <a href="{{ url_for('ledger.entry', entry_id=entry.is_reversal_of) }}">entry #{{ entry.is_reversal_of }}</a></div>{% endif %}
+      {% if entry.reversed_at %}<div class="col-md-6"><span class="text-muted">Reversed:</span>
+        {{ entry.reversed_at.strftime('%Y-%m-%d %H:%M') }} — {{ entry.reversal_reason or '' }}</div>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>#</th><th>Account</th><th>Memo</th><th>Dimensions</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+    <tbody>
+      {% for line in display.lines %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ line.account }}</td>
+        <td class="text-muted">{{ line.memo or '' }}</td>
+        <td class="small text-muted">
+          {% if line.client_id %}client #{{ line.client_id }}{% endif %}
+          {% if line.supplier_id %}supplier #{{ line.supplier_id }}{% endif %}
+          {% if line.delivery_person_id %}driver #{{ line.delivery_person_id }}{% endif %}
+        </td>
+        <td class="num">{{ money(line.debit) if line.debit else '' }}</td>
+        <td class="num">{{ money(line.credit) if line.credit else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr class="fw-bold"><td colspan="4" class="text-end">Total</td><td class="num">{{ money(display.total) }}</td><td class="num">{{ money(display.total) }}</td></tr></tfoot>
+  </table>
+</div>
+
+{% if history|length > 1 %}
+<div class="ledger-section-title">History of this document</div>
+<table class="table table-dark table-sm ledger-table">
+  <thead><tr><th>Entry</th><th>Date</th><th>Event</th><th>Revision</th><th>Status</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+    {% for row in history %}
+    <tr>
+      <td><a href="{{ url_for('ledger.entry', entry_id=row.id) }}">{{ row.entry_no }}</a></td>
+      <td>{{ row.entry_date.strftime('%Y-%m-%d') }}</td>
+      <td>{{ row.event }}</td>
+      <td>{{ row.revision }}</td>
+      <td>{% if row.reversed_at %}reversed{% elif row.is_reversal_of %}mirror{% else %}active{% endif %}</td>
+      <td class="num">{{ money(row.total_minor) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs, period_badge, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Accounting periods', 'Open → soft-closed → locked. Locked months never move again.') }}
+{{ nav_tabs('ledger.periods') }}
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table align-middle">
+    <thead><tr><th>Period</th><th>Status</th><th class="num">Entries</th><th class="num">Net result</th><th>State</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      {% set period = row.period %}
+      <tr>
+        <td>{{ period.year }}-{{ '%02d'|format(period.month) }}</td>
+        <td>{{ period_badge(period.status) }}</td>
+        <td class="num">{{ row.totals.entries if row.totals else 0 }}</td>
+        <td class="num">{{ money(row.totals.net_profit if row.totals else 0) }}</td>
+        <td class="small text-muted">
+          {% if period.locked_at %}locked {{ period.locked_at.strftime('%Y-%m-%d %H:%M') }} by {{ period.locked_by }}{% endif %}
+          {% if period.reopened_at %}<br>reopened {{ period.reopened_at.strftime('%Y-%m-%d') }} by {{ period.reopened_by }}{% endif %}
+          {% if period.closed_result_minor is not none %}<br>closed result {{ money(period.closed_result_minor) }}{% endif %}
+        </td>
+        <td>
+          <div class="d-flex flex-wrap gap-1">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('ledger.period_checklist', period_id=period.id) }}">Checklist</a>
+            {% if can_manage and period.status != 'locked' %}
+            <form method="post" action="{{ url_for('ledger.soft_close', period_id=period.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <button class="btn btn-sm btn-outline-warning" type="submit">Soft-close</button>
+            </form>
+            <form method="post" action="{{ url_for('ledger.lock', period_id=period.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <button class="btn btn-sm btn-danger" type="submit">Close &amp; lock</button>
+            </form>
+            {% endif %}
+            {% if can_manage and period.status != 'open' %}
+            <form method="post" action="{{ url_for('ledger.reopen', period_id=period.id) }}" class="d-flex gap-1">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input class="form-control form-control-sm" name="reason" placeholder="Reason (required)" required style="min-width: 160px;">
+              <button class="btn btn-sm btn-outline-light" type="submit">Reopen</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted">No periods yet — the first posting creates its month.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small text-muted">A locked month refuses new postings. Corrections are reversals posted into the current open month, so history is evidence, not a draft.</p>
+{% endblock %}

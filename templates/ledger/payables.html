@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Payables', 'Supplier subledger from the book · as at ' ~ view.as_of.strftime('%d %b %Y') ~ ' · total ' ~ money(view.total)) }}
+{{ nav_tabs('ledger.payables') }}
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>Supplier</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Outstanding</th><th></th></tr></thead>
+    <tbody>
+      {% for row in view.rows %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ money(row.debit) }}</td>
+        <td class="num">{{ money(row.credit) }}</td>
+        <td class="num fw-bold">{{ money(row.amount) }}</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('ledger.supplier_statement', supplier_id=row.id) }}">Statement</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-muted">No open payables in the book.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head(title, subtitle ~ ' · as at ' ~ as_of.strftime('%d %b %Y'),
+   '<a class="btn btn-sm btn-outline-secondary" href="' ~ back ~ '">Back</a>') }}
+{% if check %}
+<div class="card bg-dark border-secondary mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap gap-4 align-items-end">
+      <div><div class="ledger-kpi-label">Book</div><div class="ledger-kpi-value">{{ money(check.book) }}</div></div>
+      <div><div class="ledger-kpi-label">Documents</div><div class="ledger-kpi-value">{{ money(check.operational) }}</div></div>
+      <div><div class="ledger-kpi-label">Difference</div><div class="ledger-kpi-value {{ 'text-danger' if check.difference else 'text-success' }}">{{ money(check.difference) }}</div></div>
+      <div class="ms-auto">{{ pill(check.status) }}</div>
+    </div>
+    <div class="small text-muted mt-3">{{ check.detail }}</div>
+  </div>
+</div>
+{% endif %}
+{% if extra %}
+<div class="alert alert-{{ 'success' if extra.status == 'ok' else 'warning' }}">
+  <strong>{{ extra.title }}:</strong> {{ extra.detail }}
+</div>
+{% endif %}
+{% endblock %}

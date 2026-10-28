@@ -1,0 +1,54 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, nav_tabs %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Profit & loss', start.strftime('%d %b %Y') ~ ' → ' ~ end.strftime('%d %b %Y') ~ ' · ledger v' ~ view.ledger_version) }}
+{{ nav_tabs('ledger.pnl') }}
+<form class="row g-2 align-items-end mb-3" method="get">
+  <div class="col-md-3"><label class="form-label small">From</label><input type="date" class="form-control" name="start" value="{{ start }}"></div>
+  <div class="col-md-3"><label class="form-label small">To</label><input type="date" class="form-control" name="end" value="{{ end }}"></div>
+  <div class="col-md-2"><button class="btn btn-warning w-100" type="submit">Apply</button></div>
+</form>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <table class="table table-dark table-sm ledger-table">
+      <tbody>
+        <tr><td>Sales — goods</td><td class="num">{{ money(view.by_kind.goods) }}</td></tr>
+        <tr><td>Sales — services</td><td class="num">{{ money(view.by_kind.services) }}</td></tr>
+        <tr class="fw-bold"><td>Gross revenue</td><td class="num">{{ money(view.gross_revenue) }}</td></tr>
+        <tr class="text-warning"><td>Trade discounts allowed</td><td class="num">−{{ money(view.discount_total) }}</td></tr>
+        <tr class="fw-bold"><td>Net revenue</td><td class="num">{{ money(view.net_revenue) }}</td></tr>
+        {% for row in view.statement.costs %}
+        <tr class="text-danger"><td class="ps-4">{{ row.code }} {{ row.name }}</td><td class="num">−{{ money(row.amount) }}</td></tr>
+        {% endfor %}
+        <tr class="fw-bold"><td>Gross profit</td><td class="num">{{ money(view.gross_profit) }}</td></tr>
+        {% for row in view.statement.other_income %}
+        <tr class="text-success"><td class="ps-4">{{ row.code }} {{ row.name }}</td><td class="num">{{ money(row.amount) }}</td></tr>
+        {% endfor %}
+        {% for row in view.expenses %}
+        <tr class="text-danger"><td class="ps-4">{{ row.code }} {{ row.name }}</td><td class="num">−{{ money(row.amount) }}</td></tr>
+        {% endfor %}
+        {% for row in view.statement.other_losses %}
+        <tr class="text-danger"><td class="ps-4">{{ row.code }} {{ row.name }}</td><td class="num">−{{ money(row.amount) }}</td></tr>
+        {% endfor %}
+        <tr class="fw-bold border-top"><td>Net profit</td>
+          <td class="num {{ 'text-success' if view.net_profit >= 0 else 'text-danger' }}">{{ money(view.net_profit) }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col-lg-5">
+    <div class="card bg-dark border-secondary">
+      <div class="card-header">How this is built</div>
+      <div class="card-body small text-muted">
+        Every number above is a sum of posted journal lines for the period. Revenue is credited
+        gross and discounts are debited to <span class="ledger-mono">4090</span>, so the discount
+        total is visible instead of being divided into the lines at render time. COGS comes from
+        the frozen FIFO cost stored on each sale line (<span class="ledger-mono">5010</span>), and
+        a line with no known cost posts nothing rather than an invented number — it is listed on
+        the books-agree page.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

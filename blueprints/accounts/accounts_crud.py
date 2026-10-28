@@ -625,6 +625,11 @@ def delete_account(account_id):
         for table in db.metadata.sorted_tables:
             for column in table.columns:
                 if any(fk.target_fullname == 'account.id' for fk in column.foreign_keys):
+                    # ``gl_account.linked_account_id`` is the account's own
+                    # bookkeeping mirror, not a historical reference: it is
+                    # detached below when the master row is deleted.
+                    if table.name == 'gl_account' and column.name == 'linked_account_id':
+                        continue
                     reference_count += int(db.session.query(func.count()).select_from(table).filter(column == a.id).scalar() or 0)
         from utils.accounting_audit import record_accounting_audit
         if reference_count:
@@ -648,6 +653,18 @@ def delete_account(account_id):
                 before=before, after={'deleted': True}, amount_before=before['balance'], amount_after=0,
                 account_before_id=a.id, reason='Unreferenced account hard-deleted',
             )
+            # Keep the book: detach the GL mirror, and drop it only when nothing
+            # was ever posted to it.
+            from models import GLAccount, JournalLine
+            for mirror in GLAccount.query.filter_by(linked_account_id=a.id).all():
+                posted = db.session.query(func.count(JournalLine.id)).filter(
+                    JournalLine.gl_account_id == mirror.id
+                ).scalar() or 0
+                if posted:
+                    mirror.linked_account_id = None
+                    mirror.is_active = False
+                else:
+                    db.session.delete(mirror)
             db.session.delete(a)
             db.session.commit()
             flash('Unreferenced account deleted.', 'success')

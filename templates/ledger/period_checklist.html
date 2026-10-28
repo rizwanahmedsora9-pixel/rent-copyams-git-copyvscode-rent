@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% from "ledger/_macros.html" import money, ledger_head, period_badge, pill %}
+{% block content %}
+{% include "ledger/_style.html" %}
+{{ ledger_head('Close checklist', period.year ~ '-' ~ ('%02d'|format(period.month)) ~ ' · result ' ~ money(totals.net_profit if totals else 0),
+   '<a class="btn btn-sm btn-outline-secondary" href="' ~ url_for('ledger.periods') ~ '">All periods</a>') }}
+<div class="mb-3">{{ period_badge(period.status) }}</div>
+<div class="table-responsive">
+  <table class="table table-dark table-sm ledger-table">
+    <thead><tr><th>Check</th><th>Detail</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td class="small text-muted">{{ item.detail }}</td>
+        <td>{{ pill('ok' if item.ok else 'fail') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if can_manage and period.status != 'locked' %}
+<div class="d-flex gap-2">
+  <form method="post" action="{{ url_for('ledger.lock', period_id=period.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn-danger" type="submit">Close &amp; lock this month</button>
+  </form>
+  <form method="post" action="{{ url_for('ledger.soft_close', period_id=period.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn-outline-warning" type="submit">Soft-close only</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -252,6 +252,29 @@ def cash_flow_entry_json(entry_id):
     })
 
 
+def _book_cash_context(day=None):
+    """Cash per the journal, for the reconciliation strip.
+
+    Never raises: the cash-flow page must render even if the book is being
+    rebuilt, and the strip says so.
+    """
+    try:
+        from app.services.read_models import cash_view
+
+        view = cash_view.load(as_of=day or pk_today())
+        return {
+            'total_book': view['total_book'],
+            'total_master': view['total_master'],
+            'difference': view['difference'],
+            'matches': view['matches'],
+            'rows': view['rows'],
+            'ledger_version': view['ledger_version'],
+        }
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+
 @bp.route('/cash_flow', methods=['GET', 'POST'])
 @login_required
 def cash_flow():
@@ -906,6 +929,11 @@ def cash_flow():
         fresh_start_clamped=fresh_start_clamped,
         today_opening_override=today_opening_override,
         is_fresh_start_view=hide_existing_today_entries,
+        # The book's answer, from read_models.cash_view (master plan §16 S11).
+        # This page keeps its document-level detail; the reconciliation strip
+        # uses the ledger so a difference between the two is visible instead of
+        # being buried in a second formula.
+        book_cash=_book_cash_context(),
     )
 
     if export_pdf == '1':

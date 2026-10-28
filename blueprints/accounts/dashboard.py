@@ -11,73 +11,18 @@ def dashboard():
     _backfill_legacy_account_groups()
     today = pk_today()
     
-    # Calculate KPIs
-    # Total ledger payments from clients today (Payment table).
-    client_payments_today = db.session.query(func.sum(Payment.amount)).filter(
-        Payment.date_posted >= today,
-        Payment.date_posted < today + timedelta(days=1),
-        Payment.is_void == False,
-        Payment.payment_account_id.isnot(None),
-        Payment.amount > 0
-    ).scalar() or 0
-    
-    # SupplierPayment is the canonical payment row for new GRNs.  Add only
-    # legacy GRN payments that do not have the marked auto-payment row, or
-    # the dashboard counts every GRN payment twice.
-    supplier_payments_core_today = db.session.query(func.sum(SupplierPayment.amount)).filter(
-        SupplierPayment.date_posted >= today,
-        SupplierPayment.date_posted < today + timedelta(days=1),
-        SupplierPayment.is_void == False
-    ).scalar() or 0
-    legacy_grns_today = GRN.query.filter(
-        GRN.date_posted >= today,
-        GRN.date_posted < today + timedelta(days=1),
-        GRN.is_void == False,
-        GRN.paid_amount > 0
-    ).all()
-    grn_supplier_paid_today = _legacy_unrepresented_grn_paid_total(legacy_grns_today)
+    # KPIs come from the book (read_models.dashboard, cached against
+    # ledger_version), not from a local sum of Payment/Booking/DirectSale rows.
+    # One definition of "received today" for the dashboard, the ledger and the
+    # API (master plan §16 S11).
+    from app.services.read_models import dashboard as dashboard_model
 
-    supplier_payments_today = float(supplier_payments_core_today or 0) + float(grn_supplier_paid_today or 0)
-    
-    # Total expenditures today
-    expenditures_today = db.session.query(func.sum(FbmCashDrawerEntry.amount)).filter(
-        FbmCashDrawerEntry.date_posted >= today,
-        FbmCashDrawerEntry.date_posted < today + timedelta(days=1),
-        FbmCashDrawerEntry.entry_type == 'out',
-        FbmCashDrawerEntry.is_void == False
-    ).scalar() or 0
-    
-    # Total receipts today (paid amounts only): bookings + direct sales.
-    booking_paid_today = db.session.query(func.sum(Booking.paid_amount)).filter(
-        Booking.date_posted >= today,
-        Booking.date_posted < today + timedelta(days=1),
-        Booking.is_void == False,
-        Booking.paid_amount > 0
-    ).scalar() or 0
+    book = dashboard_model.load(today)
+    client_payments_today = book['receivable_collected_today'] / 100.0
+    supplier_payments_today = book['payable_paid_today'] / 100.0
+    expenditures_today = book['cash_out_today'] / 100.0
+    receipts_today = book['cash_in_today'] / 100.0
 
-    sales_paid_today = db.session.query(func.sum(DirectSale.paid_amount)).filter(
-        DirectSale.date_posted >= today,
-        DirectSale.date_posted < today + timedelta(days=1),
-        DirectSale.is_void == False
-    ).scalar() or 0
-
-    tx_receipts_today = db.session.query(func.sum(AccountTransaction.amount)).filter(
-        AccountTransaction.date_posted >= today,
-        AccountTransaction.date_posted < today + timedelta(days=1),
-        AccountTransaction.is_void == False,
-        AccountTransaction.transaction_type == 'Receipt',
-        AccountTransaction.to_account_id.isnot(None),
-        # Booking/direct-sale/payment source rows are already represented by
-        # their source document totals above.  Only standalone receipts belong
-        # in this additional bucket.
-        or_(
-            AccountTransaction.note.is_(None),
-            ~AccountTransaction.note.ilike('%[SRC:%')
-        )
-    ).scalar() or 0
-
-    receipts_today = float(booking_paid_today or 0) + float(sales_paid_today or 0) + float(client_payments_today or 0) + float(tx_receipts_today or 0)
-    
     # Account balances + due clients + company liquidity KPI
     accounts = _active_accounts().order_by(Account.name.asc()).all()
     from app.services.payments_crud import ledger_balance
@@ -128,6 +73,8 @@ def dashboard():
                           delivery_persons=delivery_persons,
                           driver_outstanding=driver_outstanding_map,
                           submission_token=uuid4().hex,
-                          default_tx_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'))
+                          default_tx_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'),
+                          book=book,
+                          ledger_version=book['ledger_version'])
 
 

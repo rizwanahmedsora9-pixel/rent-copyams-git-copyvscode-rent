@@ -151,6 +151,73 @@ be run against a copy of a live DB for an independent raw-SQL check.
 
 ---
 
+## The book: journal, periods, and one set of numbers
+
+The application keeps a real double-entry book next to the documents. It is
+additive — no document table changed — and it is the reason the dashboard, the
+P&L and the ledger pages can no longer disagree.
+
+**The layers (one direction only):**
+
+```
+documents  →  journal (the book)  →  read models  →  pages / exports / API
+```
+
+1. **Documents own the event.** Saving, editing or voiding a GRN, sale, booking,
+   payment, return, driver settlement, cash-flow row or opening balance makes
+   that document post its own journal entry inside the same transaction
+   (`app/services/ledger/autopost.py` → `sync.py` → `posting_rules.py`).
+2. **The book owns the numbers.** Only `app/services/ledger/query.py` aggregates
+   journal lines. Nothing else sums money tables for a report.
+3. **Read models own the page shapes.** `app/services/read_models/` (dashboard,
+   client_account, supplier_account, stock_view, pnl_view, cash_view,
+   payables_view, driver_view, books_agree) returns plain dicts in whole paisa,
+   cached in `app/services/cache.py` and keyed by `ledger_version`. A posting
+   bumps the version, so the next page load rebuilds instead of showing stale
+   numbers — no restart, no manual refresh button.
+
+**Rules the book enforces**
+
+| Rule | Where |
+|---|---|
+| One balanced entry per document event; retries do not duplicate | `journal_entry.idempotency_key` (unique), `posting.post_spec` |
+| Editing a document = reversal + re-post, both visible | `posting.reverse_entry`, `sync.sync_document` |
+| A voided/deleted document reverses every entry it posted | `sync.release_document` |
+| `journal_line` can never be updated or deleted | SQLite triggers in `app/migrations/0003_create_ledger_tables.sql` |
+| A locked month refuses postings; corrections land in the open month | `ledger/periods.py::assert_can_post`, `posting.reverse_entry` |
+| Discounts are contra-revenue (`4090`), never divided into lines at render time | `posting_rules.build_direct_sale` |
+| Anything with no known classification goes to suspense (`1400`), never dropped | `posting_rules`, `books_agree` |
+
+**Where to look** — `/ledger` is the module: Overview, Chart of accounts,
+Journal (with entry drill-down), Trial balance, Profit & loss, Balance sheet,
+Cash, Receivables, Payables, Periods (checklist → soft close → lock → reopen),
+Coverage and **Books agree**. The books-agree gate compares every control
+account with the list that supports it (receivables with clients, payables with
+suppliers, inventory with GRN lots minus FIFO consumption, cash with the cash
+masters, driver payable with allocations) and names each difference.
+
+**Periods.** `accounting_period` is one row per calendar month with three
+states: `open` (post freely), `soft_closed` (post, but the entry is flagged as
+an adjustment) and `locked` (nothing posts; a reversal of a locked entry is
+dated into the current open month). Closing runs a checklist, records the
+month's result and rolls it into retained earnings. `payments_crud
+._assert_period_open` delegates to the same rule, so a locked month also stops
+payments and reconciliations.
+
+**Boot behaviour.** On start the app seeds the chart of accounts, maps every
+cash/bank/wallet master to its own GL account, and — when the journal is empty —
+replays the existing history once (`ledger/replay.py`). Later boots only post
+documents that have no live entry. Set `AMS_LEDGER_AUTOPOST=0` or
+`AMS_LEDGER_SYNC_ON_BOOT=0` to disable this for a diagnostic run.
+
+**Tests.** `tests/test_journal_posting.py` (posting matrix per event),
+`tests/test_period_close.py` (the state machine and the lock), 
+`tests/test_ledger_pages.py` (pages render the book, API equals the pages) and
+`tests/test_read_model_consistency.py` (dashboard = P&L = subledgers = API, and
+the cache rebuilds after a posting).
+
+---
+
 ## Supplier ledger shift (moving a whole ledger)
 
 When a supplier's ledger was entered under the wrong name (a typo, a duplicate
