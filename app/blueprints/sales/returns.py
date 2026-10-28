@@ -1,5 +1,25 @@
 """returns — split from sales.py."""
 from ._common import *  # noqa
+from app.services.return_discounts import discount_for_return_line
+
+
+def _return_discount_reversed(client_name, item, posted_at, return_type):
+    """Discount this return line withdraws, taken from the original sale line.
+
+    Returns 0.0 when the goods were sold without a discount, so a plain return
+    is unaffected.
+    """
+    try:
+        return discount_for_return_line(
+            client_name,
+            item.get('material_name'),
+            item.get('qty'),
+            as_of=posted_at,
+            return_type=return_type,
+        )
+    except Exception:  # noqa: BLE001 - a lookup failure must never block a return
+        return 0.0
+
 
 @bp.route('/material_returns')
 @login_required
@@ -251,7 +271,13 @@ def add_material_return():
                 qty=item['qty'],
                 unit_rate=item['unit_rate'],
                 rent_rate=item['rent_rate'],
-                price_at_time=legacy_rate
+                price_at_time=legacy_rate,
+                # The discount the original line earned on this quantity.  Stored
+                # at posting so the profit report reverses the net amount instead
+                # of reversing the gross and leaving a phantom loss behind.
+                discount_reversed=_return_discount_reversed(
+                    client.name, item, posted_at, return_type
+                ),
             ))
             db.session.add(Entry(
                 date=posted_at.strftime('%Y-%m-%d'),
@@ -448,7 +474,10 @@ def edit_material_return(id):
                 qty=item['qty'],
                 unit_rate=item['unit_rate'],
                 rent_rate=item['rent_rate'],
-                price_at_time=legacy_rate
+                price_at_time=legacy_rate,
+                discount_reversed=_return_discount_reversed(
+                    client.name, item, posted_at, existing_type
+                ),
             ))
             db.session.add(Entry(
                 date=posted_at.strftime('%Y-%m-%d'),

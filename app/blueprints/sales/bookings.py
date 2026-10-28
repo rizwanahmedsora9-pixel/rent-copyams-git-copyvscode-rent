@@ -2,6 +2,91 @@
 from sqlalchemy.exc import IntegrityError
 
 from ._common import *  # noqa
+from app.services import pricing as _pricing
+
+
+def _form_named_discounts(form):
+    """Per-item amounts chosen in the booking discount panel."""
+    names = form.getlist('item_discount_name[]')
+    values = form.getlist('item_discount_value[]')
+    named = {}
+    for name, raw in zip_longest(names, values, fillvalue=''):
+        key = str(name or '').strip()
+        if not key:
+            continue
+        try:
+            amount = _pricing.round_money(raw)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        named[key] = named.get(key, _pricing.ZERO) + amount
+    return named
+
+
+def _booking_line_discounts(materials_list, qtys, rates, bill_discount, named=None):
+    """Split a booking discount across its lines, once, in whole paisa.
+
+    Returns (bill_discount, shares aligned with ``materials_list``, errors).
+    Amounts typed against individual items win; anything else is split by
+    ``qty x rate`` across goods lines, with services keeping their full value
+    unless selected.  The arithmetic lives in app.services.pricing so this
+    booking agrees with every other document.
+    """
+    lines = []
+    for mat, qty, rate in zip_longest(materials_list, qtys, rates, fillvalue=''):
+        name = str(mat or '').strip()
+        qty_val = _to_float_or_zero(qty)
+        rate_val = _to_float_or_zero(rate)
+        lines.append({
+            'name': name,
+            'qty': qty_val,
+            'rate': rate_val,
+            'gross': _pricing.cents_to_float(_pricing.line_gross_cents(qty_val, rate_val)),
+            'is_service': bool(name and is_service_name(name)),
+        })
+    total, shares, errors = _pricing.resolve_line_discounts(lines, bill_discount, named)
+    return total, [float(share) for share in shares], errors
+
+
+def _restore_booking_line_discounts(booking):
+    """Re-store the per-line split after a booking is created or edited.
+
+    Editing a booking can change its lines, quantities or the header discount.
+    The stored per-line shares must follow, otherwise a later delivery would
+    recognise a discount that no longer matches the booking.  This recomputes
+    from the saved header and the saved lines, so the two always agree.
+    """
+    db.session.flush()
+    items = (
+        BookingItem.query
+        .filter_by(booking_id=booking.id)
+        .order_by(BookingItem.id.asc())
+        .all()
+    )
+    bill = _pricing.round_money(float(booking.discount or 0))
+    if not items:
+        return
+    if bill <= 0:
+        for item in items:
+            item.discount = 0.0
+        return
+    lines = [
+        {
+            'name': (item.material_name or '').strip(),
+            'qty': float(item.qty or 0),
+            'rate': float(item.price_at_time or 0),
+            'gross': _pricing.cents_to_float(
+                _pricing.line_gross_cents(item.qty, item.price_at_time)
+            ),
+            'is_service': bool(item.material_name and is_service_name(item.material_name)),
+        }
+        for item in items
+    ]
+    shares = _pricing.cap_shares(_pricing.allocate_document_discount(bill, lines), lines)
+    for item, share in zip(items, shares):
+        item.discount = float(share)
+
 
 
 def _sync_booking_paid_into_account(booking, *, payment_account_id, method='Cash', require_account=True):
@@ -277,12 +362,23 @@ def add_booking():
             flash(f"Manual bill '{manual_bill_no}' already exists in {conflict[0]} #{conflict[1]}.", 'danger')
             return redirect(url_for('bookings_page'))
 
-    # Calculate pending amount (what's still owed)
-    pending_amount = max(0.0, amount - discount - paid_amount)
-
     auto_bill_no = get_next_bill_no(AUTO_BILL_NAMESPACES['BOOKING'])
 
     booking_posted_at = resolve_posted_datetime(date_str)
+
+    # Per-line discount: the booking discount is split once, here, and stored on
+    # each line.  Every delivery then recognises its own share of that line's
+    # discount (whole paisa), so a partly delivered booking cannot recognise
+    # more discount than it delivered and no report has to divide again.
+    discount, booking_line_discounts, discount_errors = _booking_line_discounts(
+        materials_list, qtys, rates, discount, _form_named_discounts(request.form)
+    )
+    if discount_errors:
+        flash(discount_errors[0], 'danger')
+        return redirect(url_for('bookings_page'))
+
+    # What is still owed, using the discount this booking actually stores.
+    pending_amount = max(0.0, amount - discount - paid_amount)
 
     # Create the booking
     booking = Booking(client_name=client.name,
@@ -300,7 +396,9 @@ def add_booking():
     db.session.flush()
 
     # Add booking items from existing Material or Service records.
-    for mat, qty, rate, mid, sid in zip_longest(materials_list, qtys, rates, material_ids, service_ids, fillvalue=''):
+    for line_index, (mat, qty, rate, mid, sid) in enumerate(
+        zip_longest(materials_list, qtys, rates, material_ids, service_ids, fillvalue='')
+    ):
         mat_name = str(mat or '').strip()
         qty_val = _to_float_or_zero(qty)
         rate_val = _to_float_or_zero(rate)
@@ -322,11 +420,17 @@ def add_booking():
             return redirect(url_for('bookings_page'))
         if not mat_obj or qty_val <= 0:
             continue
+        line_discount = (
+            booking_line_discounts[line_index]
+            if line_index < len(booking_line_discounts) else 0.0
+        )
         db.session.add(
             BookingItem(booking_id=booking.id,
                         material_name=mat_obj.name,
                         qty=qty_val,
-                        price_at_time=rate_val))
+                        price_at_time=rate_val,
+                        discount=float(line_discount or 0),
+                        discount_reason=(discount_reason or None) if float(line_discount or 0) > 0 else None))
 
     # Pending bills are derived from the booking source. Rebuild this source's row
     # instead of incrementing an existing snapshot.
@@ -406,6 +510,7 @@ def edit_booking(id):
             allow_inactive_names=existing_item_names,
         )
         _apply_booking_item_updates(booking, desired_rows)
+        _restore_booking_line_discounts(booking)
     except ValueError as ve:
         db.session.rollback()
         flash(str(ve), 'danger')

@@ -6,6 +6,69 @@ from app.services.sales_core import (
     _direct_sale_payload_hash,
     _direct_sale_idem_key_is_recent,
 )
+from app.services import pricing as _pricing
+
+
+def _line_rows_for_discount(items):
+    """Describe sale lines for the discount allocator.
+
+    ``items`` are the final ``processed_items`` rows (after booking split,
+    de-duplication and FIFO expansion), which is exactly what becomes a
+    ``DirectSaleItem``.  Weighting on the stored gross keeps the stored shares
+    reproducible from the document itself.
+    """
+    rows = []
+    for item in items:
+        name = (item.get('product_name') or '').strip()
+        qty = float(item.get('qty') or 0)
+        rate = float(item.get('price_at_time') or 0)
+        rows.append({
+            'name': name,
+            'qty': qty,
+            'rate': rate,
+            'gross': _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate)),
+            'is_service': bool(is_service_name(name)),
+        })
+    return rows
+
+
+def _form_named_discounts(form):
+    """Read the per-item amounts chosen in the discount panel.
+
+    Returns ``{item name: amount}``.  Names are the values the panel showed,
+    so the selection survives booking splits, duplicate-line merging and FIFO
+    lot expansion (which all keep the product name).
+    """
+    names = form.getlist('item_discount_name[]')
+    values = form.getlist('item_discount_value[]')
+    named = {}
+    for name, raw in zip_longest(names, values, fillvalue=''):
+        key = str(name or '').strip()
+        if not key:
+            continue
+        try:
+            amount = _pricing.round_money(raw)
+        except Exception:
+            continue
+        if amount <= 0:
+            continue
+        named[key] = named.get(key, _pricing.ZERO) + amount
+    return named
+
+
+def _resolve_line_discounts(form, items, *, bill_discount, discount_reason):
+    """Return ``(bill_discount, reason, per_line_discounts, errors)``.
+
+    The arithmetic itself lives in :mod:`app.services.pricing` so bookings and
+    returns resolve their discounts the same way.  This wrapper only adapts the
+    request form to it.
+    """
+    rows = _line_rows_for_discount(items)
+    total, shares, errors = _pricing.resolve_line_discounts(
+        rows, bill_discount, _form_named_discounts(form)
+    )
+    return total, discount_reason, [float(share) for share in shares], errors
+
 
 @bp.route('/add_direct_sale', methods=['POST'])
 @login_required
@@ -502,6 +565,30 @@ def add_direct_sale():
     if category != 'Booking Delivery' and discount > (amount + 0.01):
         return _fail_sale('Discount cannot exceed total amount.')
 
+    # ------------------------------------------------------------------ #
+    # Per-line discount: split ONCE, here, and store it on the line.
+    #
+    # The discount panel may send a typed amount per selected item
+    # (``item_discount_name[]`` / ``item_discount_value[]``).  Anything left
+    # over is allocated from the bill-level amount.  Both paths go through
+    # app.services.pricing, which works in whole paisa with largest-remainder
+    # rounding, so the shares always add back to the discount exactly and no
+    # repeating decimal ever reaches a report.
+    # ------------------------------------------------------------------ #
+    discount, discount_reason, item_discount_shares, discount_errors = _resolve_line_discounts(
+        request.form,
+        processed_items,
+        bill_discount=discount,
+        discount_reason=discount_reason,
+    )
+    if discount_errors:
+        return _fail_sale(discount_errors[0])
+    if category == 'Booking Delivery':
+        # Booked dispatch is fulfilment only; it carries no sale discount.
+        discount = 0.0
+        discount_reason = ''
+        item_discount_shares = [0.0] * len(processed_items)
+
     # Validation: Unbilled Cash Sale must be fully paid
     if category == 'Cash' and (paid_amount + discount) < (amount - 0.01):
         return _fail_sale('Cash Sale must be fully paid. Transaction not complete.')
@@ -654,14 +741,27 @@ def add_direct_sale():
     # Create DirectSaleItems and Entries
     now = sale_posted_at
     sale_item_records = []
-    for item in processed_items:
+    for line_index, item in enumerate(processed_items):
+        # Per-line discount resolved above (whole paisa, sums to the bill
+        # discount exactly).  Reports read this column instead of dividing the
+        # bill discount again.
+        line_discount = (
+            item_discount_shares[line_index]
+            if line_index < len(item_discount_shares) else 0.0
+        )
+        line_discount_kind = 'manual' if _form_named_discounts(request.form) else 'allocated'
+        if line_discount <= 0:
+            line_discount_kind = 'none'
         # Create Sale Item
         dsi = DirectSaleItem(sale_id=sale.id,
                            product_name=item['product_name'],
                            qty=item['qty'],
                            price_at_time=item['price_at_time'],
                            grn_item_id=item.get('grn_item_id'),
-                           cost_rate_at_sale=item.get('cost_rate_at_sale'))
+                           cost_rate_at_sale=item.get('cost_rate_at_sale'),
+                           discount=line_discount,
+                           discount_kind=line_discount_kind,
+                           discount_reason=(discount_reason or None) if line_discount > 0 else None)
         db.session.add(dsi)
         sale_item_records.append((dsi, item))
 

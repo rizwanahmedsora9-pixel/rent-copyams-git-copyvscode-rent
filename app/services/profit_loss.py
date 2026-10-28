@@ -86,6 +86,7 @@ from app.services.profit_loss_breakdown import (
     build_breakdown,
 )
 from app.services.grn_consumption import build_grn_consumption
+from app.services import pricing as _pricing
 from app.services.lookups import is_rent_like_name
 from app.services.sales_core import _direct_sale_default_bill_ref, normalize_sale_category
 from app.services.time_money import pk_now, pk_today
@@ -327,6 +328,9 @@ def _base_row(**kwargs):
         "warnings": [],
     }
     row.update(kwargs)
+    # A unit rate is money too: keep it at two decimals so a value-weighted
+    # service rate can never print as 666.6666666666666.
+    row["sale_rate"] = _pricing.money_float(row.get("sale_rate"))
     signed_revenue = row["material_revenue"] + row["delivery_revenue"] + row["other_income"]
     signed_cost = row["material_cost"] + row["delivery_cost"]
     calculated_profit = signed_revenue - signed_cost - row["expense"] - row["other_loss"] + row["other_gain"]
@@ -474,6 +478,20 @@ class _Projection:
                 for item in sale.items
                 if _f(item.price_at_time) > 0
             )
+        # ---- Per-line discounts -------------------------------------------
+        # The discount a report must show for each line is the one stored on
+        # that line when the bill was posted (app.services.pricing does the
+        # split once, in whole paisa).  Rows posted before that column existed
+        # have no stored value; for those only, the bill discount is allocated
+        # here with the same largest-remainder rule, so a legacy row and a new
+        # row can never disagree and no repeating decimal reaches the screen.
+        self.sale_item_discount = {}
+        self.booking_item_discount_total = {}
+        self.booking_item_discount_recognized = defaultdict(float)
+        for sale in self.sales:
+            self._resolve_sale_item_discounts(sale)
+        for booking in self.bookings:
+            self._resolve_booking_item_discounts(booking)
         self.pending_by_sale = defaultdict(list)
         for pending in self.pending_bills:
             if _active(pending) and pending.source_table == "direct_sale" and pending.source_id:
@@ -495,6 +513,126 @@ class _Projection:
         # proven to agree with the FIFO cost this report recognizes.
         self.grn_lot_balances = {}
         self._build_fifo_cost_plan()
+
+    # ------------------------------------------------------------------ #
+    # Stored per-line discounts
+    # ------------------------------------------------------------------ #
+    def _resolve_sale_item_discounts(self, sale):
+        """Discount per sale line, in whole paisa, resolved once per sale.
+
+        * A line posted after per-line storage carries ``discount_kind`` and its
+          own stored ``discount``.  That value is used verbatim — it is the
+          amount the customer was actually given on that line.
+        * A line posted before it (``discount_kind IS NULL``) has no stored
+          value; the bill discount is allocated across the *goods* lines with
+          largest-remainder rounding.  This is the only place a legacy split is
+          computed, and it produces whole paisa that add back to the header
+          discount — so a legacy bill and a newly posted bill reconcile.
+        """
+        items = list(getattr(sale, "items", None) or [])
+        if not items:
+            return
+        header_discount = _pricing.round_money(max(0.0, _f(getattr(sale, "discount", 0))))
+        legacy = []
+        for item in items:
+            kind = getattr(item, "discount_kind", None)
+            stored = getattr(item, "discount", None)
+            if kind or stored is None:
+                legacy.append(item)
+                continue
+            self.sale_item_discount[item.id] = _pricing.round_money(stored)
+        if not legacy:
+            return
+
+        rows = []
+        for item in items:
+            qty = self.chargeable_qty(sale, item)
+            rate = _f(item.price_at_time)
+            rows.append({
+                "name": (item.product_name or "").strip(),
+                "qty": qty,
+                "rate": rate,
+                "gross": _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate)),
+                "is_service": bool(self.is_service(item.product_name)),
+            })
+        shares = _pricing.allocate_document_discount(header_discount, rows)
+        shares = _pricing.cap_shares(shares, rows)
+        legacy_ids = {item.id for item in legacy}
+        for item, share in zip(items, shares):
+            if item.id in legacy_ids:
+                self.sale_item_discount[item.id] = share
+            else:
+                self.sale_item_discount.setdefault(item.id, share)
+
+    def _resolve_booking_item_discounts(self, booking):
+        """Total discount per booking line, resolved once per booking.
+
+        A booking discount is a document-level amount.  Storing it per line makes
+        recognition exact: each delivery recognises
+        ``line_discount x delivered_qty / line_qty`` (see
+        :meth:`_booking_discount_for_delivery`), so partial delivery can never
+        recognise more discount than was delivered, and the rounding error is
+        carried forward instead of being lost.
+        """
+        items = list(getattr(booking, "items", None) or [])
+        if not items:
+            return
+        header_discount = _pricing.round_money(max(0.0, _f(getattr(booking, "discount", 0))))
+        rows = []
+        for item in items:
+            qty = _f(item.qty)
+            rate = _f(item.price_at_time)
+            rows.append({
+                "name": (item.material_name or "").strip(),
+                "qty": qty,
+                "rate": rate,
+                "gross": _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate)),
+                "is_service": bool(self.is_service(item.material_name)),
+            })
+        shares = None
+        for index, item in enumerate(items):
+            stored = _f(getattr(item, "discount", 0))
+            if stored > EPS:
+                self.booking_item_discount_total[item.id] = _pricing.round_money(stored)
+                continue
+            # No stored value on the line.  If the header carries a discount this
+            # is a pre-migration booking and the line needs its share; a header
+            # without a discount needs no split at all.
+            if header_discount <= 0:
+                self.booking_item_discount_total[item.id] = _pricing.ZERO
+                continue
+            if shares is None:
+                shares = _pricing.cap_shares(
+                    _pricing.allocate_document_discount(header_discount, rows), rows
+                )
+            self.booking_item_discount_total[item.id] = shares[index]
+
+    def _booking_discount_for_delivery(self, item, qty):
+        """Discount recognised for ``qty`` of a booking line, in whole paisa.
+
+        Recognised cumulatively: the discount for the delivered-so-far quantity
+        is computed exactly, less what was already recognised.  Delivering the
+        whole line therefore recognises the whole line discount to the paisa,
+        and no delivery can recognise more than the line holds.
+        """
+        total = float(self.booking_item_discount_total.get(item.id) or 0.0)
+        if total <= 0:
+            return 0.0
+        line_qty = _f(item.qty)
+        if line_qty <= EPS:
+            return 0.0
+        already = self.booking_item_discount_recognized.get(item.id, 0.0)
+        delivered_before = max(0.0, line_qty - max(0.0, self.booking_remaining.get(item.id, line_qty)))
+        delivered_now = min(line_qty, delivered_before + max(0.0, _f(qty)))
+        target = _pricing.money_float(total * delivered_now / line_qty)
+        share = _pricing.money_float(target - already)
+        if share <= 0:
+            return 0.0
+        remaining = _pricing.money_float(total - already)
+        if share > remaining:
+            share = remaining
+        self.booking_item_discount_recognized[item.id] = _pricing.money_float(already + share)
+        return share
 
     def available_fifo_lots(self, material_name, as_of_dt=None):
         """Open GRN lots on a supply date, from this projection's FIFO replay.
@@ -1308,9 +1446,22 @@ class _Projection:
                     continue
                 # A zero-rate line outside booking workflows is a genuine free
                 # direct-sale line: recognize no revenue, but retain its cost.
-                gross = qty * rate
-                discount_share = min(gross, gross / sale_gross * discount) if sale_gross > 0 else 0.0
-                net = max(0.0, gross - discount_share)
+                #
+                # The discount on this line is the one STORED at posting.  The
+                # old code divided the bill discount by the line's share of the
+                # bill, which produced repeating decimals (2,000 / 41,000 gave
+                # 1,756.0975609... on a 36,000 line) and made Rate x Qty stop
+                # matching Revenue.  No division happens here any more.
+                gross = _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate))
+                discount_share = _pricing.cents_to_float(
+                    _pricing.to_cents(min(gross, max(0.0, float(
+                        self.sale_item_discount.get(item.id, _pricing.ZERO)
+                    ))))
+                )
+                net = _pricing.cents_to_float(
+                    _pricing.to_cents(gross) - _pricing.to_cents(discount_share)
+                )
+                unit_discount = (discount_share / qty) if qty > 0 else 0.0
                 if self.is_service(item.product_name):
                     self.delivery_components[sale.id].append({
                         "material": item.product_name,
@@ -1330,6 +1481,7 @@ class _Projection:
                         "client": client_name, "client_code": code, "date": sale.date_posted,
                         "qty": qty, "remaining_return_qty": qty, "unit_cost": 0.0,
                         "cost_status": COST_NA, "unit_revenue": net / qty,
+                        "unit_discount": unit_discount,
                         "is_service": True, "reference": _sale_ref(sale),
                     })
                     continue
@@ -1371,7 +1523,8 @@ class _Projection:
                     "client": client_name, "client_code": code, "date": sale.date_posted,
                     "qty": qty, "remaining_return_qty": qty,
                     "unit_cost": (cost / qty if include else 0.0), "cost_status": cost_status,
-                    "unit_revenue": net / qty, "is_service": False, "reference": row["reference"],
+                    "unit_revenue": net / qty, "unit_discount": unit_discount,
+                    "is_service": False, "reference": row["reference"],
                     "cost_sources": sources,
                 })
             # Older records can persist rent_item_revenue without a positive
@@ -1410,10 +1563,18 @@ class _Projection:
                 continue
             code, client_name = self.client_info(sale.client_name or booking.client_name, sale.client_code)
             rate = _f(booking_item.price_at_time)
-            gross = qty * rate
-            booking_gross = self.booking_gross.get(booking.id, 0.0)
-            discount_share = min(gross, gross / booking_gross * max(0.0, _f(booking.discount))) if booking_gross > 0 else 0.0
-            net = max(0.0, gross - discount_share)
+            gross = _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate))
+            # Discount recognised for the delivered quantity, taken from the
+            # booking line's own stored share (cumulative, whole paisa).  The
+            # old code divided the WHOLE booking discount by the line's share of
+            # the booking, which is why a partly delivered booking showed
+            # fractions and could over-recognise the discount.
+            discount_share = self._booking_discount_for_delivery(booking_item, qty)
+            discount_share = min(gross, max(0.0, discount_share))
+            net = _pricing.cents_to_float(
+                _pricing.to_cents(gross) - _pricing.to_cents(discount_share)
+            )
+            unit_discount = (discount_share / qty) if qty > 0 else 0.0
             is_service = self.is_service(sale_item.product_name)
             self.booking_remaining[booking_item.id] = self.booking_remaining.get(booking_item.id, _f(booking_item.qty)) - qty
             self.booking_original_qty[booking_item.id] = _f(booking_item.qty)
@@ -1436,7 +1597,8 @@ class _Projection:
                     "sale_id": sale.id, "booking_item_id": booking_item.id, "material": sale_item.product_name,
                     "client": client_name, "client_code": code, "date": sale.date_posted,
                     "qty": qty, "remaining_return_qty": qty, "unit_cost": 0.0,
-                    "cost_status": COST_NA, "unit_revenue": net / qty, "is_service": True,
+                    "cost_status": COST_NA, "unit_revenue": net / qty,
+                    "unit_discount": unit_discount, "is_service": True,
                     "reference": _sale_ref(sale), "booking_id": booking.id,
                 })
                 continue
@@ -1471,7 +1633,8 @@ class _Projection:
                 "sale_id": sale.id, "booking_item_id": booking_item.id, "material": sale_item.product_name,
                 "client": client_name, "client_code": code, "date": sale.date_posted,
                 "qty": qty, "remaining_return_qty": qty, "unit_cost": (cost / qty if include else 0.0),
-                "cost_status": cost_status, "unit_revenue": net / qty, "is_service": False,
+                "cost_status": cost_status, "unit_revenue": net / qty,
+                "unit_discount": unit_discount, "is_service": False,
                 "reference": row["reference"], "booking_id": booking.id,
                 "cost_sources": sources,
             })
@@ -1540,10 +1703,14 @@ class _Projection:
                 if qty <= EPS:
                     continue
                 rate = _f(item.price_at_time)
-                gross = qty * rate
+                gross = _pricing.cents_to_float(_pricing.line_gross_cents(qty, rate))
+                discount_share = self._booking_discount_for_delivery(item, qty)
+                discount_share = min(gross, max(0.0, discount_share))
+                net = _pricing.cents_to_float(
+                    _pricing.to_cents(gross) - _pricing.to_cents(discount_share)
+                )
+                unit_discount = (discount_share / qty) if qty > 0 else 0.0
                 booking_gross = self.booking_gross.get(booking.id, 0.0)
-                discount_share = min(gross, gross / booking_gross * max(0.0, _f(booking.discount))) if booking_gross > 0 else 0.0
-                net = max(0.0, gross - discount_share)
                 code, client_name = self.client_info(entry.client or booking.client_name, entry.client_code)
                 self.booking_remaining[item.id] = self.booking_remaining.get(item.id, _f(item.qty)) - qty
                 self.booking_original_qty[item.id] = _f(item.qty)
@@ -1688,9 +1855,20 @@ class _Projection:
             gross_total = sum(value["gross"] for value in by_material.values())
             quantity_total = sum(max(0.0, value["qty"]) for value in by_material.values())
             allocation_total = gross_total if gross_total > EPS else quantity_total
-            for material, value in by_material.items():
-                allocation_value = value["gross"] if gross_total > EPS else max(0.0, value["qty"])
-                share = recorded_cost * allocation_value / allocation_total if allocation_total > EPS else 0.0
+            # The recorded delivery cost is split across the service lines in
+            # whole paisa with largest-remainder rounding.  It used to be a plain
+            # division, so two service lines on one bill could show a cost of
+            # 666.6666... and a margin to match.
+            service_rows = list(by_material.items())
+            service_weights = [
+                (value["gross"] if gross_total > EPS else max(0.0, value["qty"]))
+                for _material, value in service_rows
+            ]
+            cost_shares = _pricing.allocate_cents(
+                _pricing.to_cents(recorded_cost), service_weights
+            )
+            for row_index, (material, value) in enumerate(service_rows):
+                share = _pricing.cents_to_float(cost_shares[row_index])
                 # A registered Service is a charge we sell, not goods: it has no
                 # purchase cost by definition, so its income is recognised with
                 # zero COGS.  A rent-like/delivery-charge label with no Service
@@ -1800,7 +1978,35 @@ class _Projection:
                         rate = _f(item.unit_rate) + _f(item.rent_rate)
                     else:
                         rate = _f(item.unit_rate) or _f(item.price_at_time)
-                    reversal_revenue = -qty * rate
+                    # ---- Reverse what was actually recognised --------------
+                    # The original line was recognised NET of the discount
+                    # stored on it.  Reversing the gross rate here (the old
+                    # behaviour) left the discount behind and produced a
+                    # phantom loss: a 5,000 rent line discounted to 4,756.10
+                    # returned at +4,756.10 - 5,000.00 = -243.90.
+                    #
+                    # The return therefore reverses the gross value AND the
+                    # discount share that belonged to the returned quantity, so
+                    # the pair nets to exactly the net amount that was earned.
+                    gross_rate = rate
+                    unit_discount = 0.0
+                    if candidate is not None:
+                        unit_discount = max(0.0, _f(candidate.get("unit_discount")))
+                    reversal_gross = -qty * gross_rate
+                    reversal_discount = -qty * unit_discount
+                    # Returns posted after the per-line discount columns existed
+                    # carry the withdrawn discount themselves; trusting the
+                    # stored figure keeps the return and the sale in lock-step
+                    # even if the sale was later edited.
+                    stored_reversal = _f(getattr(item, "discount_reversed", 0))
+                    if stored_reversal > 0:
+                        reversal_discount = -stored_reversal
+                    if abs(reversal_discount) < EPS:
+                        # Avoid showing "-0.00" on an undiscounted return.
+                        reversal_discount = 0.0
+                    reversal_revenue = _pricing.cents_to_float(
+                        _pricing.to_cents(reversal_gross) - _pricing.to_cents(reversal_discount)
+                    )
                     if candidate is None:
                         cost_status = COST_MISSING
                         cost = 0.0
@@ -1849,7 +2055,11 @@ class _Projection:
                         reference=_return_ref(ret), document_type="MaterialReturn", document_id=ret.id,
                         source_type="MaterialReturnItem", source_id=item.id, client=client_name, client_code=code,
                         material=item.material_name, qty=-qty, sale_rate=rate, cost_rate=unit_cost,
-                        gross_revenue=reversal_revenue, material_revenue=material_revenue,
+                        # gross_revenue is the value reversed before discount and
+                        # ``discount`` is the (negative) discount withdrawn with
+                        # it; their difference is the net revenue reversal.
+                        gross_revenue=reversal_gross, discount=reversal_discount,
+                        material_revenue=material_revenue,
                         delivery_revenue=delivery_revenue, material_cost=material_cost,
                         cost_status=cost_status, cost_basis=basis, cost_amount_recorded=abs(cost),
                         cost_sources=reversed_cost_sources,
@@ -2115,7 +2325,16 @@ def _select_rows(rows, start_date, end_date, filters=None):
 
 
 def _sum(rows, key):
-    return sum(_f(row.get(key)) for row in rows)
+    """Total a money column in whole paisa.
+
+    Adding floats directly is how a report ended up printing
+    ``8999.999999999996``.  Each value is rounded to paisa with ``Decimal``
+    first, so the returned total is always an exact two-decimal figure.
+    """
+    total = _pricing.ZERO
+    for row in rows:
+        total += _pricing.round_money(row.get(key))
+    return float(_pricing.round_money(total))
 
 
 def _merge_sources(sources):
@@ -2171,6 +2390,10 @@ def summarize_rows(rows):
     included = [row for row in rows if row.get("include_in_net")]
     unresolved = [row for row in rows if not row.get("include_in_net")]
     total_revenue = _sum(rows, "revenue")
+    total_discounts = _sum(rows, "discount")
+    # Gross sales are the value before discount; the P&L shows
+    # Gross - Discounts = Net so the two can never be confused again.
+    total_gross_revenue = float(_pricing.round_money(total_revenue + total_discounts))
     total_cogs = _sum(included, "cogs")
     total_expenses = _sum(rows, "expense")
     other_losses = _sum(rows, "other_loss")
@@ -2192,6 +2415,7 @@ def summarize_rows(rows):
         "total_delivery_revenue": _sum(rows, "delivery_revenue"),
         "total_other_income": _sum(rows, "other_income"),
         "total_revenue": total_revenue,
+        "total_gross_revenue": total_gross_revenue,
         "total_material_cost": _sum(included, "material_cost"),
         "actual_material_cost": actual_material_cost,
         "estimated_material_cost": estimated_material_cost,
@@ -2219,8 +2443,10 @@ def summarize_rows(rows):
         "estimated_cost_rows": sum(1 for row in included if row.get("cost_status") == COST_ESTIMATED),
         "known_cost_revenue": recognized_revenue,
         "recognized_revenue": recognized_revenue,
-        "margin_pct": (total_profit / recognized_revenue * 100.0 if abs(recognized_revenue) > EPS else 0.0),
-        "markup_pct": (total_profit / total_cogs * 100.0 if abs(total_cogs) > EPS else 0.0),
+        # Percentages are rounded where they are produced, so a report never
+        # shows something like 11.922021629816264%.  Money is unaffected.
+        "margin_pct": (round(total_profit / recognized_revenue * 100.0, 2) if abs(recognized_revenue) > EPS else 0.0),
+        "markup_pct": (round(total_profit / total_cogs * 100.0, 2) if abs(total_cogs) > EPS else 0.0),
         "material_row_count": len(material_rows),
         "delivery_row_count": len(delivery_rows),
         "row_count": len(rows),

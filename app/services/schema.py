@@ -173,6 +173,140 @@ def _ensure_discount_columns():
         db.session.rollback()
 
 
+def _ensure_line_discount_columns():
+    """Per-line discount storage (see ``app.services.pricing``).
+
+    A bill keeps **one** discount, but the profit report needs revenue per line.
+    The split used to be recomputed in the report with a plain division, which
+    is where repeating decimals such as ``4,756.0975609756`` came from.  The
+    split now happens once, at posting, and is stored on the document line:
+
+    * ``direct_sale_item.discount`` / ``discount_kind`` / ``discount_reason``
+    * ``booking_item.discount`` / ``discount_reason``
+    * ``material_return_item.discount_reversed``
+
+    ``db.create_all()`` adds these on a fresh database; this helper adds them to
+    an existing one, exactly like ``_ensure_discount_columns`` does for the
+    header columns.  It is idempotent (PRAGMA check first) so it is safe to run
+    on every boot.
+    """
+    tables = {
+        'direct_sale_item': [
+            ('discount', 'REAL DEFAULT 0'),
+            # Left NULL on purpose for rows that already exist: NULL means
+            # "posted before per-line storage", and the report then derives the
+            # share with the same largest-remainder rule.  New rows always set
+            # ``manual``/``allocated``/``none`` explicitly.
+            ('discount_kind', 'VARCHAR(20)'),
+            ('discount_reason', 'VARCHAR(200)'),
+        ],
+        'booking_item': [
+            ('discount', 'REAL DEFAULT 0'),
+            ('discount_reason', 'VARCHAR(200)'),
+        ],
+        'material_return_item': [
+            ('discount_reversed', 'REAL DEFAULT 0'),
+        ],
+    }
+    try:
+        for table, cols in tables.items():
+            rows = db.session.execute(text(f"PRAGMA table_info('{table}')")).fetchall()
+            existing = {r[1] for r in rows}
+            if not existing:
+                # Table does not exist yet in this database; create_all owns it.
+                continue
+            for col, col_type in cols:
+                if col not in existing:
+                    db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _backfill_line_discounts():
+    """Give legacy document lines their stored discount, once.
+
+    Rows posted before per-line discount storage have a NULL ``discount_kind``.
+    The profit report can derive those shares on the fly, but deriving on every
+    page load is exactly what caused the original defect.  This fills the
+    column once, using the same largest-remainder rule, so from then on every
+    page reads a stored amount.
+
+    Safe to run on every boot: it only selects rows whose ``discount_kind`` is
+    still NULL, and a clean database has none.
+    """
+    from app.services import pricing
+    try:
+        from app.services.lookups import is_service_name
+    except Exception:
+        def is_service_name(_name):
+            return False
+
+    try:
+        legacy_ids = [
+            row[0]
+            for row in db.session.execute(text(
+                "SELECT id FROM direct_sale_item WHERE discount_kind IS NULL LIMIT 5000"
+            )).fetchall()
+        ]
+    except Exception:
+        db.session.rollback()
+        return
+    if not legacy_ids:
+        return
+
+    try:
+        sale_ids = [
+            row[0]
+            for row in db.session.execute(text(
+                "SELECT DISTINCT sale_id FROM direct_sale_item "
+                "WHERE discount_kind IS NULL AND sale_id IS NOT NULL"
+            )).fetchall()
+        ]
+        for sale_id in sale_ids:
+            header = db.session.execute(text(
+                "SELECT discount FROM direct_sale WHERE id = :sid"
+            ), {'sid': sale_id}).fetchone()
+            bill = pricing.round_money(header[0] if header else 0)
+            lines = db.session.execute(text(
+                "SELECT id, product_name, qty, price_at_time FROM direct_sale_item "
+                "WHERE sale_id = :sid ORDER BY id ASC"
+            ), {'sid': sale_id}).fetchall()
+            rows = [
+                {
+                    'name': (line[1] or '').strip(),
+                    'qty': float(line[2] or 0),
+                    'rate': float(line[3] or 0),
+                    'gross': pricing.cents_to_float(
+                        pricing.line_gross_cents(line[2] or 0, line[3] or 0)
+                    ),
+                    # Same rule as the report: services (rent) keep their full
+                    # value, so the backfill cannot move money onto them.
+                    'is_service': bool(line[1] and is_service_name(line[1])),
+                }
+                for line in lines
+            ]
+            if bill <= 0 or not rows:
+                db.session.execute(text(
+                    "UPDATE direct_sale_item SET discount = 0, discount_kind = 'none' "
+                    "WHERE sale_id = :sid AND discount_kind IS NULL"
+                ), {'sid': sale_id})
+                continue
+            shares = pricing.cap_shares(pricing.allocate_document_discount(bill, rows), rows)
+            for line, share in zip(lines, shares):
+                db.session.execute(text(
+                    "UPDATE direct_sale_item SET discount = :amount, discount_kind = :kind "
+                    "WHERE id = :iid"
+                ), {
+                    'amount': float(share),
+                    'kind': 'allocated' if share > 0 else 'none',
+                    'iid': line[0],
+                })
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def _ensure_bill_counter_namespace_defaults():
     """Backfill namespace for legacy bill_counter rows after schema upgrades."""
     try:
@@ -871,6 +1005,14 @@ def _bootstrap_database():
         pass
     try:
         _ensure_discount_columns()
+    except Exception:
+        pass
+    try:
+        _ensure_line_discount_columns()
+    except Exception:
+        pass
+    try:
+        _backfill_line_discounts()
     except Exception:
         pass
     try:

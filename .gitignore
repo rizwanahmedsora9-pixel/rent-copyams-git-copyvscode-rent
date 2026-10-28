@@ -31,3 +31,6 @@ Thumbs.db
 
 # Deployment secret (never commit a live webhook secret)
 deploy_secret.txt
+
+# Arena sandbox virtualenv
+.venv-arena/

@@ -815,8 +815,15 @@
                             <div class="col-sm-4">
                                 <div class="mb-3" id="saleDiscountGroup">
                                     <label class="text-white-50 small fw-bold mb-1">DISCOUNT</label>
-                                    <input type="number" step="any" name="discount" class="form-control bg-dark text-white border-secondary" value="0">
+                                    <div class="input-group">
+                                        <input type="number" step="0.01" name="discount" class="form-control bg-dark text-white border-secondary" value="0">
+                                        <button type="button" class="btn btn-outline-warning" data-discount-panel
+                                                title="Choose which items get the discount">
+                                            <i class="bi bi-list-check me-1"></i>Items
+                                        </button>
+                                    </div>
                                     <input type="text" name="discount_reason" class="form-control bg-dark text-white border-secondary mt-1 form-control-sm" placeholder="Reason (optional)">
+                                    <div class="mt-1" data-discount-summary></div>
                                 </div>
                             </div>
                             <div class="col-sm-4">
@@ -3130,4 +3137,5 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+<script src="{{ url_for('static', filename='discount_panel.js') }}?v=1"></script>
 {% endblock %}
