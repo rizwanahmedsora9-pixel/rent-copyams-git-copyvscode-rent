@@ -36,6 +36,8 @@
     function userIsEditing() {
         var el = document.activeElement;
         if (!el) return false;
+        var selection = window.getSelection && window.getSelection();
+        if (selection && !selection.isCollapsed) return true;
         if (el.isContentEditable) return true;
         return !!(el.matches && el.matches("input, select, textarea, [contenteditable='true']"));
     }
@@ -68,7 +70,7 @@
         setStatus("Live · updating…");
         Promise.all([refreshGrn(), refreshProfit()]).then(function (results) {
             var ok = results.every(Boolean);
-            state.revision = revision;
+            if (ok) state.revision = revision;
             setStatus(ok ? "Live · updated " + clock() : "Live · refresh failed " + clock(), !ok);
             document.dispatchEvent(new CustomEvent("ledger:refreshed", { detail: { revision: revision, ok: ok } }));
         }).catch(function () {

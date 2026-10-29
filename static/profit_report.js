@@ -211,6 +211,7 @@
         var controller = null;
         var timer = null;
         var lastUrl = window.location.href;
+        var requestId = 0;
 
         function setBusy(busy) {
             var surface = region.querySelector("[data-pl-results]") || region;
@@ -301,18 +302,51 @@
             options = options || {};
             if (controller) controller.abort();
             controller = window.AbortController ? new AbortController() : null;
-            setBusy(true);
+            var id = ++requestId;
+            if (!options.background) setBusy(true);
             clearError();
             var target = splitPartial(url);
             return fetch(target.fetchUrl, {
                 headers: { "X-Requested-With": "fetch" },
                 credentials: "same-origin",
+                cache: "no-store",
                 signal: controller ? controller.signal : undefined
             }).then(function (response) {
                 if (!response.ok) throw new Error("The report could not be generated (HTTP " + response.status + ").");
                 return response.text();
             }).then(function (html) {
+                if (id !== requestId) return false;
+                if (options.background) {
+                    var selection = window.getSelection && window.getSelection();
+                    var focused = document.activeElement;
+                    if ((selection && !selection.isCollapsed) ||
+                        (focused && focused.matches("input, select, textarea, [contenteditable='true']"))) return false;
+                }
+                // A login redirect is not a report; leave the current analysis intact.
+                var incoming = document.createElement("div");
+                incoming.innerHTML = html;
+                if (!incoming.querySelector("[data-pl-results]")) {
+                    throw new Error("The report could not be updated. Please check your session.");
+                }
+                // Capture at response time, not request time: the reader may
+                // have continued scrolling while the server built the report.
+                var x = window.pageXOffset, y = window.pageYOffset;
+                var scrolls = Array.from(region.querySelectorAll(".pl-scroll, .table-responsive")).map(function (el) {
+                    return [el.scrollLeft, el.scrollTop];
+                });
+                var expanded = Array.from(region.querySelectorAll("details")).map(function (el) { return el.open; });
                 region.innerHTML = html;
+                if (options.keepScroll) {
+                    each(region, ".pl-scroll, .table-responsive", function (el) {
+                        var pos = scrolls.shift();
+                        if (pos) { el.scrollLeft = pos[0]; el.scrollTop = pos[1]; }
+                    });
+                    each(region, "details", function (el) {
+                        var open = expanded.shift();
+                        if (open !== undefined) el.open = open;
+                    });
+                    window.scrollTo({ left: x, top: y, behavior: "instant" });
+                }
                 syncDateInputs();
                 var cleanUrl = target.cleanUrl;
                 if (!options.keepScroll) {
@@ -326,20 +360,25 @@
                 region.dispatchEvent(new CustomEvent("pl:updated"));
                 return true;
             }).catch(function (error) {
-                if (error && error.name === "AbortError") return true;
+                if (id !== requestId || (error && error.name === "AbortError")) return false;
                 setBusy(false);
-                showError((error && error.message ? error.message : "The report could not be updated.") + " <a href=\"" + splitPartial(url).cleanUrl + "\">Open the full page</a>.");
+                if (!options.background) showError((error && error.message ? error.message : "The report could not be updated.") + " <a href=\"" + splitPartial(url).cleanUrl + "\">Open the full page</a>.");
                 return false;
             });
         }
 
         function refresh(overrides) {
             window.clearTimeout(timer);
+            timer = null;
             return load(buildUrl(overrides));
         }
         // The live-ledger watcher calls this after another user posts a sale or
         // GRN.  It uses exactly the same partial request as a filter change.
-        activeRefresh = refresh;
+        activeRefresh = function () {
+            // Do not interrupt an explicit filter request or a pending keystroke.
+            if (timer || region.querySelector(".is-loading")) return Promise.resolve(false);
+            return load(lastUrl, { keepScroll: true, background: true });
+        };
 
         function refreshDebounced(overrides) {
             window.clearTimeout(timer);
