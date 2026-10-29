@@ -124,8 +124,12 @@
                     <td class="text-end"><span class="led-running {% if r.running < 0 %}neg{% endif %}">Rs. {{ "%.2f"|format(r.running) }}</span></td>
                     <td class="text-end">
                         {% if not tx.is_void %}
-                        <form method="POST" action="{{ url_for('accounts.void_transaction', tx_id=tx.id) }}" style="display:inline" onsubmit="return confirm('Permanently delete this transaction? Account balances will be reversed.');">
+                        <form method="POST" action="{{ url_for('accounts.void_transaction', tx_id=tx.id) }}" style="display:inline" onsubmit="return confirm('Delete this transaction? Account balances will be reversed and the audit history retained.');">
                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-x-octagon"></i></button>
+                        </form>
+                        {% elif tx.source_type == 'CashFlowEntry' %}
+                        <form method="POST" action="{{ url_for('accounts.restore_account_transaction', tx_id=tx.id) }}" style="display:inline" onsubmit="return confirm('Restore this legacy Cash Flow entry and re-apply its account balance effect?');">
+                            <button type="submit" class="btn btn-sm btn-outline-success" title="Restore"><i class="bi bi-arrow-counterclockwise"></i></button>
                         </form>
                         {% endif %}
                     </td>

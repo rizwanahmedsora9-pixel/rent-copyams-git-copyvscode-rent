@@ -15,30 +15,9 @@ from app.services.cash_flow_svc import (
     cf_used_party_ids,
     cf_used_subcategory_ids,
     collect_cash_flow_rows,
-    compute_physical_cash_difference,
-    delete_cf_category,
-    delete_cf_party,
-    delete_cf_subcategory,
-    disable_cf_category,
-    disable_cf_party,
-    disable_cf_subcategory,
-    enable_cf_category,
-    enable_cf_party,
-    enable_cf_subcategory,
     filter_cash_flow_rows,
-    parse_physical_cash_amount,
-    rename_cf_category,
-    rename_cf_subcategory,
-    restore_manual_cash_flow_entry,
-    save_cf_category,
-    save_cf_party,
-    save_cf_subcategory,
-    save_manual_cash_flow_entry,
     subcategories_for_category,
     summarize_cash_flow_rows,
-    update_cf_party,
-    update_manual_cash_flow_entry,
-    void_manual_cash_flow_entry,
     _cf_account_label,
     _cf_company_accounts,
     _cf_ensure_indexes,
@@ -46,11 +25,6 @@ from app.services.cash_flow_svc import (
     _cf_sort_key,
     _cf_type_label,
 )
-
-
-def _cf_redirect(**kwargs):
-    params = {k: v for k, v in kwargs.items() if v not in (None, '')}
-    return redirect(url_for('cash_flow', **params))
 
 
 def _cf_filter_kwargs(source):
@@ -75,42 +49,10 @@ def _cf_filter_kwargs(source):
     }
 
 
-def _cf_json_payload():
-    if request.is_json:
-        return request.get_json(silent=True) or {}
-    return request.form
-
-
-@bp.route('/cash_flow/meta/categories', methods=['GET', 'POST'])
+@bp.route('/cash_flow/meta/categories', methods=['GET'])
 @login_required
 def cash_flow_categories_meta():
-    if request.method == 'POST':
-        payload = _cf_json_payload()
-        try:
-            cat, created = save_cf_category(
-                payload.get('name') or payload.get('new_category_name'),
-                payload.get('direction') or payload.get('new_category_direction') or 'both',
-                notes=payload.get('notes') or payload.get('new_category_notes'),
-                actor=current_user,
-            )
-            db.session.commit()
-            return jsonify({
-                'ok': True,
-                'created': created,
-                'category': {
-                    'id': cat.id,
-                    'name': cat.name,
-                    'direction': cat.direction or 'both',
-                    'notes': cat.notes or '',
-                },
-            })
-        except ValueError as exc:
-            db.session.rollback()
-            return jsonify({'ok': False, 'error': str(exc)}), 400
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow quick-add category failed')
-            return jsonify({'ok': False, 'error': 'Unable to save category.'}), 500
+    """Read-only category choices for legacy display widgets."""
     direction = _cf_normalize_direction(request.args.get('direction') or '')
     cats = categories_for_direction(direction or 'both')
     return jsonify({
@@ -121,45 +63,9 @@ def cash_flow_categories_meta():
     })
 
 
-@bp.route('/cash_flow/meta/subcategories', methods=['GET', 'POST'])
+@bp.route('/cash_flow/meta/subcategories', methods=['GET'])
 @login_required
 def cash_flow_subcategories_meta():
-    if request.method == 'POST':
-        payload = _cf_json_payload()
-        try:
-            raw_parent = payload.get('category_id') or payload.get('new_sub_category_id')
-            try:
-                parent_id = int(raw_parent) if raw_parent not in (None, '') else None
-            except (TypeError, ValueError):
-                parent_id = None
-            if not parent_id and payload.get('category_name'):
-                cat_obj = CashFlowCategory.query.filter(func.lower(CashFlowCategory.name) == payload.get('category_name').strip().lower()).first()
-                if cat_obj:
-                    parent_id = cat_obj.id
-            sub, created = save_cf_subcategory(
-                parent_id,
-                payload.get('name') or payload.get('new_subcategory_name'),
-                notes=payload.get('notes') or payload.get('new_subcategory_notes'),
-                actor=current_user,
-            )
-            db.session.commit()
-            return jsonify({
-                'ok': True,
-                'created': created,
-                'subcategory': {
-                    'id': sub.id,
-                    'name': sub.name,
-                    'category_id': sub.category_id,
-                    'notes': sub.notes or '',
-                },
-            })
-        except (TypeError, ValueError) as exc:
-            db.session.rollback()
-            return jsonify({'ok': False, 'error': str(exc)}), 400
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow quick-add subcategory failed')
-            return jsonify({'ok': False, 'error': 'Unable to save sub-category.'}), 500
     category_id = request.args.get('category_id', type=int)
     if not category_id:
         return jsonify({'subcategories': []})
@@ -171,36 +77,9 @@ def cash_flow_subcategories_meta():
     })
 
 
-@bp.route('/cash_flow/meta/parties', methods=['GET', 'POST'])
+@bp.route('/cash_flow/meta/parties', methods=['GET'])
 @login_required
 def cash_flow_parties_meta():
-    if request.method == 'POST':
-        payload = _cf_json_payload()
-        try:
-            party, created = save_cf_party(
-                payload.get('name') or payload.get('new_party_name'),
-                payload.get('party_type') or payload.get('new_party_type') or 'person',
-                note=payload.get('note') or payload.get('new_party_note'),
-                actor=current_user,
-            )
-            db.session.commit()
-            return jsonify({
-                'ok': True,
-                'created': created,
-                'party': {
-                    'id': party.id,
-                    'name': party.name,
-                    'party_type': party.party_type or 'other',
-                    'note': party.note or '',
-                },
-            })
-        except ValueError as exc:
-            db.session.rollback()
-            return jsonify({'ok': False, 'error': str(exc)}), 400
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow quick-add party failed')
-            return jsonify({'ok': False, 'error': 'Unable to save party.'}), 500
     parties = CashFlowParty.query.filter_by(is_active=True).order_by(CashFlowParty.name).all()
     return jsonify({
         'parties': [
@@ -275,11 +154,13 @@ def _book_cash_context(day=None):
 
 
 
-@bp.route('/cash_flow', methods=['GET', 'POST'])
+@bp.route('/cash_flow', methods=['GET'])
 @login_required
 def cash_flow():
+    # Standalone cash movements are entered via Accounts. Linked business
+    # events remain attached to their source records and feed this view.
     _cf_ensure_indexes()
-    source = request.form if request.method == 'POST' else request.args
+    source = request.args
     fresh_start_dt = pk_today()
     fresh_start_date = fresh_start_dt.strftime('%Y-%m-%d')
     from_date = source.get('from_date', fresh_start_date)
@@ -292,329 +173,6 @@ def cash_flow():
     export_scope = (request.args.get('export_scope') or 'filtered').strip().lower()
 
     adjustment_date_input = to_date
-    physical_cash_input = ''
-    reconciliation_reason = ''
-    action = ''
-    if request.method == 'POST':
-        adjustment_date_input = request.form.get('adjustment_date', to_date).strip() or to_date
-        physical_cash_input = request.form.get('physical_cash_available', '').strip()
-        reconciliation_reason = request.form.get('reconciliation_reason', '').strip()
-        action = request.form.get('action', '').strip()
-
-    def _back():
-        return _cf_redirect(**{**filter_kwargs, 'from_date': from_date, 'to_date': to_date})
-
-    if request.method == 'POST' and action == 'add_category':
-        try:
-            save_cf_category(
-                request.form.get('new_category_name'),
-                request.form.get('new_category_direction') or 'both',
-                notes=request.form.get('new_category_notes'),
-                actor=current_user,
-            )
-            db.session.commit()
-            flash('Category saved.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow add category failed')
-            flash('Unable to save category.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'add_subcategory':
-        try:
-            save_cf_subcategory(
-                request.form.get('new_sub_category_id', type=int),
-                request.form.get('new_subcategory_name'),
-                notes=request.form.get('new_subcategory_notes'),
-                actor=current_user,
-            )
-            db.session.commit()
-            flash('Sub-category saved.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow add subcategory failed')
-            flash('Unable to save sub-category.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'add_party':
-        try:
-            save_cf_party(
-                request.form.get('new_party_name'),
-                request.form.get('new_party_type') or 'person',
-                note=request.form.get('new_party_note'),
-                actor=current_user,
-            )
-            db.session.commit()
-            flash('Party saved.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow add party failed')
-            flash('Unable to save party.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'disable_category':
-        try:
-            disable_cf_category(request.form.get('category_id', type=int))
-            db.session.commit()
-            flash('Category disabled. Historical rows keep the name.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'disable_subcategory':
-        try:
-            disable_cf_subcategory(request.form.get('subcategory_id', type=int))
-            db.session.commit()
-            flash('Sub-category disabled. Historical rows keep the name.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'enable_category':
-        try:
-            enable_cf_category(request.form.get('category_id', type=int))
-            db.session.commit()
-            flash('Category enabled.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'enable_subcategory':
-        try:
-            enable_cf_subcategory(request.form.get('subcategory_id', type=int))
-            db.session.commit()
-            flash('Sub-category enabled.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'update_party':
-        try:
-            update_cf_party(
-                request.form.get('party_id', type=int),
-                request.form.get('party_name'),
-                party_type=request.form.get('party_type'),
-                note=request.form.get('party_note'),
-            )
-            db.session.commit()
-            flash('Party updated.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'disable_party':
-        try:
-            disable_cf_party(request.form.get('party_id', type=int))
-            db.session.commit()
-            flash('Party disabled. Historical rows keep the name.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'enable_party':
-        try:
-            enable_cf_party(request.form.get('party_id', type=int))
-            db.session.commit()
-            flash('Party enabled.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'rename_category':
-        try:
-            rename_cf_category(
-                request.form.get('category_id', type=int),
-                request.form.get('category_name'),
-                direction=request.form.get('category_direction'),
-                notes=request.form.get('category_notes'),
-            )
-            db.session.commit()
-            flash('Category updated. Historical rows stay linked to the same category.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'rename_subcategory':
-        try:
-            rename_cf_subcategory(
-                request.form.get('subcategory_id', type=int),
-                request.form.get('subcategory_name'),
-                notes=request.form.get('subcategory_notes'),
-            )
-            db.session.commit()
-            flash('Sub-category updated.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'delete_category':
-        try:
-            delete_cf_category(request.form.get('category_id', type=int))
-            db.session.commit()
-            flash('Unused category deleted.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow delete category failed')
-            flash('Unable to delete category.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'delete_subcategory':
-        try:
-            delete_cf_subcategory(request.form.get('subcategory_id', type=int))
-            db.session.commit()
-            flash('Unused sub-category deleted.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow delete subcategory failed')
-            flash('Unable to delete sub-category.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'delete_party':
-        try:
-            delete_cf_party(request.form.get('party_id', type=int))
-            db.session.commit()
-            flash('Unused party deleted.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow delete party failed')
-            flash('Unable to delete party.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action in ('delete_entry', 'void_entry'):
-        entry_id = request.form.get('entry_id', type=int)
-        entry = CashFlowEntry.query.get(entry_id) if entry_id else None
-        try:
-            void_manual_cash_flow_entry(
-                entry, reason=request.form.get('void_reason'), actor=current_user,
-            )
-            db.session.commit()
-            audit_log(current_user, 'cash_flow.entry.void', f'id={entry_id}')
-            flash('Transaction voided. The financial effect was reversed and the history was kept.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow void failed')
-            flash('Unable to void transaction.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action == 'restore_entry':
-        entry_id = request.form.get('entry_id', type=int)
-        entry = CashFlowEntry.query.get(entry_id) if entry_id else None
-        try:
-            restore_manual_cash_flow_entry(
-                entry, reason=request.form.get('restore_reason'), actor=current_user,
-            )
-            db.session.commit()
-            audit_log(current_user, 'cash_flow.entry.restore', f'id={entry_id}')
-            flash('Transaction restored and the account effect was re-applied.', 'success')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow restore failed')
-            flash('Unable to restore transaction.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action in ('record_movement', 'edit_entry'):
-        entry_id = request.form.get('entry_id', type=int) if action == 'edit_entry' else None
-        payload = dict(
-            direction=request.form.get('direction'),
-            amount=request.form.get('amount', 0),
-            account_id=request.form.get('cash_account_id', type=int) or request.form.get('from_account_id', type=int),
-            destination_account_id=request.form.get('to_account_id', type=int),
-            category_id=request.form.get('category_id', type=int),
-            category_name=request.form.get('category_name'),
-            subcategory_id=request.form.get('subcategory_id', type=int),
-            subcategory_name=request.form.get('subcategory_name'),
-            party_id=request.form.get('party_id', type=int),
-            party_name=request.form.get('party_name'),
-            party_type=request.form.get('party_type') or 'other',
-            description=request.form.get('description'),
-            note=request.form.get('movement_note') or request.form.get('note'),
-            reference=request.form.get('reference'),
-            actor=current_user,
-            create_missing=True,
-        )
-        date_raw = (request.form.get('movement_date') or '').strip()
-        payload['date_posted'] = resolve_posted_datetime(date_raw or None)
-        try:
-            if action == 'edit_entry':
-                entry = CashFlowEntry.query.get(entry_id) if entry_id else None
-                update_manual_cash_flow_entry(
-                    entry, reason=request.form.get('edit_reason'), **payload,
-                )
-                db.session.commit()
-                audit_log(current_user, 'cash_flow.entry.edit', f'id={entry_id}')
-                flash('Cash flow transaction updated.', 'success')
-            else:
-                payload['idempotency_key'] = (request.form.get('idempotency_key') or '').strip() or None
-                entry, created = save_manual_cash_flow_entry(**payload)
-                db.session.commit()
-                if created:
-                    audit_log(current_user, 'cash_flow.record', f'dir={entry.direction}, amount={entry.amount}')
-                    flash(f'{_cf_type_label(entry.direction)} Rs. {float(entry.amount or 0):,.0f} recorded.', 'success')
-                else:
-                    flash('This transaction was already saved.', 'info')
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Cash flow save failed')
-            flash('Unable to save cash flow transaction.', 'danger')
-        return _back()
-
-    if request.method == 'POST' and action in ('set_opening_override', 'clear_opening_override', 'reset_fresh_start'):
-        if action == 'reset_fresh_start':
-            session['cash_flow_fresh_start_cutoff'] = {
-                'date': fresh_start_date,
-                'at': pk_now().strftime('%Y-%m-%d %H:%M:%S'),
-                'user_set': True,
-            }
-            session.pop('cash_flow_today_opening_override', None)
-            flash('Cash Flow fresh-start view reset. Existing entries are hidden from this report and today opening is Rs. 0.', 'success')
-            return redirect(url_for('cash_flow', from_date=fresh_start_date, to_date=fresh_start_date, filter_type='all'))
-        if action == 'clear_opening_override':
-            session.pop('cash_flow_today_opening_override', None)
-            flash('Today cash flow opening override cleared. Opening is back to the automatic carry-forward.', 'success')
-        else:
-            opening_override_amount = _money_round(request.form.get('today_opening_override', 0))
-            session['cash_flow_today_opening_override'] = {
-                'date': fresh_start_date,
-                'amount': opening_override_amount,
-            }
-            flash(f'Today cash flow opening override set to Rs. {opening_override_amount:,.0f}. Source accounts were not changed.', 'success')
-        return redirect(url_for('cash_flow', from_date=fresh_start_date, to_date=fresh_start_date, filter_type='all'))
 
     try:
         from_date_dt = datetime.strptime(from_date, '%Y-%m-%d').date()
@@ -693,91 +251,6 @@ def cash_flow():
         adjustment_date_dt = datetime.strptime(adjustment_date_input, '%Y-%m-%d').date()
     except Exception:
         adjustment_date_dt = datetime.strptime(to_date, '%Y-%m-%d').date()
-
-    adjustment_entry = CashFlowDifferenceAdjustment.query.filter_by(adjustment_date=adjustment_date_dt).first()
-    if request.method == 'POST' and action == 'delete':
-        if adjustment_entry:
-            audit = CashFlowReconciliationAudit(
-                reconciliation_id=adjustment_entry.id,
-                adjustment_date=adjustment_entry.adjustment_date,
-                change_type='DELETE',
-                old_physical_cash=adjustment_entry.physical_cash_available,
-                old_difference=adjustment_entry.difference if adjustment_entry.difference is not None else adjustment_entry.amount,
-                old_reason=adjustment_entry.reason or adjustment_entry.note,
-                changed_by=_current_username(),
-                changed_at=pk_model_now(),
-            )
-            db.session.add(audit)
-            adjustment_entry.physical_cash_available = None
-            adjustment_entry.calculated_closing = None
-            adjustment_entry.difference = None
-            adjustment_entry.reason = None
-            adjustment_entry.amount = 0
-            adjustment_entry.note = 'Reconciliation removed; audit trail retained.'
-            adjustment_entry.edited_by = _current_username()
-            adjustment_entry.edited_date = pk_model_now()
-            adjustment_entry.edit_count = (adjustment_entry.edit_count or 0) + 1
-            db.session.commit()
-            flash(f'Reconciliation removed for {adjustment_date_dt.strftime("%Y-%m-%d")}. Audit trail retained.', 'success')
-        return _back()
-
-    if request.method == 'POST' and action == 'save_reconciliation':
-        try:
-            physical_cash_available = parse_physical_cash_amount(physical_cash_input)
-        except ValueError as exc:
-            flash(str(exc), 'danger')
-            return _back()
-        difference = compute_physical_cash_difference(physical_cash_available, reconciliation_closing)
-        username = _current_username()
-        if not adjustment_entry:
-            adjustment_entry = CashFlowDifferenceAdjustment(
-                adjustment_date=adjustment_date_dt,
-                created_by=username,
-                created_at=pk_model_now(),
-                edit_count=0,
-            )
-            db.session.add(adjustment_entry)
-            db.session.flush()
-            change_type = 'CREATE'
-            old_physical_cash = None
-            old_difference = None
-            old_reason = None
-        else:
-            change_type = 'EDIT' if adjustment_entry.physical_cash_available is not None else 'CREATE'
-            old_physical_cash = adjustment_entry.physical_cash_available
-            old_difference = adjustment_entry.difference if adjustment_entry.difference is not None else adjustment_entry.amount
-            old_reason = adjustment_entry.reason or adjustment_entry.note
-            adjustment_entry.old_physical_cash = old_physical_cash
-            adjustment_entry.edited_by = username
-            adjustment_entry.edited_date = pk_model_now()
-
-        adjustment_entry.physical_cash_available = physical_cash_available
-        adjustment_entry.calculated_closing = _money_round(reconciliation_closing)
-        adjustment_entry.difference = difference
-        adjustment_entry.amount = difference
-        adjustment_entry.reason = reconciliation_reason
-        adjustment_entry.note = reconciliation_reason
-        adjustment_entry.edit_count = (adjustment_entry.edit_count or 0) + 1
-        db.session.add(CashFlowReconciliationAudit(
-            reconciliation_id=adjustment_entry.id,
-            adjustment_date=adjustment_date_dt,
-            change_type=change_type,
-            old_physical_cash=old_physical_cash,
-            new_physical_cash=physical_cash_available,
-            old_difference=old_difference,
-            new_difference=difference,
-            old_reason=old_reason,
-            new_reason=reconciliation_reason,
-            changed_by=username,
-            changed_at=pk_model_now(),
-        ))
-        db.session.commit()
-        flash(
-            f'Reconciliation saved for {adjustment_date_dt.strftime("%Y-%m-%d")}. '
-            f'Next day opening will be Rs. {physical_cash_available:,.0f}. Account balances were not changed.',
-            'success',
-        )
-        return _back()
 
     adjustment_entry = CashFlowDifferenceAdjustment.query.filter_by(adjustment_date=adjustment_date_dt).first()
     physical_cash_available = adjustment_entry.physical_cash_available if adjustment_entry and adjustment_entry.physical_cash_available is not None else None
@@ -949,6 +422,7 @@ def cash_flow():
     recon_day_arg = (request.args.get('recon_day') or '').strip()
     dr_ctx = _dr_build_context(recon_day_arg, embed=True)
     ft_ctx = _ft_build_context(request.args, prefix='ft_', embed=True, posted_after=posted_after)
+    ft_ctx['read_only'] = True
     initial_tab = ''
     if recon_day_arg:
         initial_tab = 'reconcile'
@@ -956,7 +430,7 @@ def cash_flow():
         initial_tab = 'transactions'
 
     return render_template(
-        'cash_flow.html', pdf_mode=False,
+        'cash_flow.html', pdf_mode=False, read_only=True,
         dr=dr_ctx, ft=ft_ctx, initial_tab=initial_tab,
         **common,
     )

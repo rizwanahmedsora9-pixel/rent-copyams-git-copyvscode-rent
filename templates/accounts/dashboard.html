@@ -120,7 +120,7 @@
         </div>
         <div class="acc-toolbar">
             <a href="{{ url_for('cash_flow') }}" class="btn btn-warning text-dark fw-bold">
-                <i class="bi bi-water me-1"></i> Cash Flow
+                <i class="bi bi-water me-1"></i> View Cash Flow
             </a>
             <a href="{{ url_for('accounts.manage_categories') }}" class="btn btn-outline-info">
                 <i class="bi bi-sliders me-1"></i> Accounts Categories
@@ -338,7 +338,7 @@
                         <div class="col-md-6 col-xl-3">
                             <a href="{{ url_for('cash_flow') }}" class="quick-action">
                                 <div class="qa-icon qa-7"><i class="bi bi-water"></i></div>
-                                <div><div class="qa-title">Cash Flow</div><div class="qa-sub">Record spend/receive; client &amp; supplier money shows as derived</div></div>
+                                <div><div class="qa-title">Cash Flow Report</div><div class="qa-sub">View cash movement; enter transactions from Accounts</div></div>
                             </a>
                         </div>
                         <div class="col-md-6 col-xl-3">
@@ -363,6 +363,9 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="bi bi-info-circle me-1"></i> Record receipts, expenses and transfers here. Cash Flow is a read-only report and updates from these account entries automatically.
+                </div>
                 <div class="mb-3">
                     <label class="form-label fw-semibold d-block mb-2">Transaction Type</label>
                     <div class="row g-2">

@@ -81,6 +81,13 @@ def delete_account_transaction(tx_id):
             payment = db.session.get(Payment, source_id)
             if not payment or not delete_client_payment(payment, actor=current_user):
                 raise ValueError('The linked payment is already deleted or missing.')
+        elif source_type == 'CashFlowEntry' and source_id:
+            from app.services.cash_flow_svc import void_manual_cash_flow_entry
+            from models import CashFlowEntry
+            entry = db.session.get(CashFlowEntry, source_id)
+            if not entry:
+                raise ValueError('The linked Cash Flow entry is missing.')
+            void_manual_cash_flow_entry(entry, reason=request.form.get('void_reason'), actor=current_user)
         elif source_type == 'SupplierPayment' and source_id:
             from app.services.payments_crud import delete_supplier_payment
             payment = db.session.get(SupplierPayment, source_id)
@@ -120,6 +127,32 @@ def delete_account_transaction(tx_id):
     return redirect(request.referrer or url_for('accounts.dashboard'))
 
 
+@accounts_bp.route('/transactions/<int:tx_id>/restore', methods=['POST'])
+@login_required
+def restore_account_transaction(tx_id):
+    """Restore a legacy Cash Flow entry from the Accounts transaction ledger."""
+    tx = AccountTransaction.query.get_or_404(tx_id)
+    try:
+        if (tx.source_type or '') != 'CashFlowEntry' or not tx.source_id:
+            raise ValueError('Only a linked legacy Cash Flow entry can be restored here.')
+        from app.services.cash_flow_svc import restore_manual_cash_flow_entry
+        from models import CashFlowEntry
+        entry = db.session.get(CashFlowEntry, tx.source_id)
+        if not entry:
+            raise ValueError('The linked Cash Flow entry is missing.')
+        restore_manual_cash_flow_entry(entry, actor=current_user)
+        db.session.commit()
+        flash('Cash Flow transaction restored from Accounts.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception('Restore account transaction failed')
+        flash(f'Unable to restore transaction: {exc}', 'danger')
+    return redirect(request.referrer or url_for('accounts.dashboard'))
+
+
 @accounts_bp.route('/transactions/<int:tx_id>/edit', methods=['POST'])
 @login_required
 def edit_account_transaction(tx_id):
@@ -143,6 +176,59 @@ def edit_account_transaction(tx_id):
                 new_dt = tx.date_posted
         else:
             new_dt = tx.date_posted
+
+        if (tx.source_type or '') == 'CashFlowEntry' and tx.source_id:
+            from app.services.cash_flow_svc import update_manual_cash_flow_entry
+            from models import CashFlowEntry
+            from app.services.payments_crud import _assert_period_open
+            from utils.accounting_audit import record_accounting_audit
+            entry = db.session.get(CashFlowEntry, tx.source_id)
+            if not entry:
+                raise ValueError('The linked Cash Flow entry is missing.')
+            from_id = request.form.get('from_account_id', type=int) or tx.from_account_id
+            to_id = request.form.get('to_account_id', type=int) or tx.to_account_id
+            if entry.direction == 'in':
+                account_id, destination_id = to_id, None
+            elif entry.direction == 'out':
+                account_id, destination_id = from_id, None
+            else:
+                account_id, destination_id = from_id, to_id
+            for account_id_to_check in {account_id, destination_id}:
+                if account_id_to_check:
+                    _assert_period_open(account_id_to_check, new_dt, operation='edited')
+            before = {'id': tx.id, 'amount': tx.amount, 'description': tx.description,
+                      'note': tx.note, 'date_posted': tx.date_posted,
+                      'from_account_id': tx.from_account_id, 'to_account_id': tx.to_account_id}
+            update_manual_cash_flow_entry(
+                entry,
+                direction=entry.direction,
+                amount=new_amount,
+                account_id=account_id,
+                destination_account_id=destination_id,
+                category_id=entry.category_id,
+                subcategory_id=entry.subcategory_id,
+                party_id=entry.party_id,
+                party_name=entry.party_name,
+                party_type=entry.party_type,
+                description=new_desc,
+                note=new_note,
+                reference=entry.reference,
+                date_posted=new_dt,
+                reason=new_note,
+                actor=current_user,
+            )
+            after = {'id': tx.id, 'amount': tx.amount, 'description': tx.description,
+                     'note': tx.note, 'date_posted': tx.date_posted,
+                     'from_account_id': tx.from_account_id, 'to_account_id': tx.to_account_id}
+            record_accounting_audit(
+                current_user, action='Edit', entity_type='AccountTransaction', entity_id=tx.id,
+                before=before, after=after, amount_before=before['amount'], amount_after=after['amount'],
+                account_before_id=before['from_account_id'] or before['to_account_id'],
+                account_after_id=after['from_account_id'] or after['to_account_id'], reason=new_note,
+            )
+            db.session.commit()
+            flash('Cash Flow entry updated from Accounts.', 'success')
+            return redirect(request.referrer or url_for('accounts.dashboard'))
 
         from app.services.accounting import _apply_account_tx_effect, _reverse_account_tx_effect
         from utils.accounting_audit import record_accounting_audit

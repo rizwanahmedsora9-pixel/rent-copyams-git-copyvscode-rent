@@ -138,9 +138,8 @@ def test_manual_entries_and_transfers_in_opening_rollforward(app):
         assert float(bank.balance) == 4000.0
 
 
-def test_reconciliation_ignores_display_filters(app, client):
-    """Saving a physical count while a Type filter is active must store the
-    FULL closing, not the filtered one."""
+def test_cash_flow_report_rejects_writes(app, client):
+    """Cash Flow is now a report; it cannot save transactions or reconciliations."""
     from models import db, Account, CashFlowDifferenceAdjustment
 
     with app.app_context():
@@ -153,8 +152,7 @@ def test_reconciliation_ignores_display_filters(app, client):
 
     _login(client)
 
-    # View day 1 with filter_type=received (hides the 1,000 spent row),
-    # then save physical cash 4,000 for that day.
+    # Attempts to post any data through the reporting page are rejected.
     resp = client.post(
         "/cash_flow?from_date=2026-08-25&to_date=2026-08-25&filter_type=received",
         data={
@@ -162,25 +160,12 @@ def test_reconciliation_ignores_display_filters(app, client):
             "adjustment_date": "2026-08-25",
             "physical_cash_available": "4000",
             "reconciliation_reason": "evening count",
-            "from_date": "2026-08-25",
-            "to_date": "2026-08-25",
-            "filter_type": "received",
         },
-        follow_redirects=True,
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 405
 
     with app.app_context():
-        rec = CashFlowDifferenceAdjustment.query.filter_by(
-            adjustment_date=d1
-        ).first()
-        assert rec is not None
-        # Full closing = 0 + 5,000 - 1,000 = 4,000 (NOT the filtered 5,000)
-        assert float(rec.calculated_closing) == 4000.0
-        assert float(rec.physical_cash_available) == 4000.0
-        # Counted 4,000 vs expected 4,000 -> difference 0 (filtered math
-        # would have wrongly said -1,000).
-        assert float(rec.difference) == 0.0
+        assert CashFlowDifferenceAdjustment.query.filter_by(adjustment_date=d1).first() is None
 
 
 def test_today_view_uses_automatic_carry_forward(app, client):
@@ -225,9 +210,8 @@ def test_today_view_uses_automatic_carry_forward(app, client):
     assert "Fresh start mode" not in html
 
 
-def test_fresh_start_remains_available_as_opt_in(app, client):
-    """Clicking the explicit reset button still hides existing entries and
-    starts today at Rs. 0."""
+def test_cash_flow_report_does_not_mutate_fresh_start_state(app, client):
+    """The report cannot mutate session/report state through POST actions."""
     from models import db, Account
     from app.services.time_money import pk_now
 
@@ -247,14 +231,10 @@ def test_fresh_start_remains_available_as_opt_in(app, client):
         db.session.commit()
 
     _login(client)
-    resp = client.post(
-        "/cash_flow",
-        data={"action": "reset_fresh_start"},
-        follow_redirects=True,
-    )
-    assert resp.status_code == 200
-    html = resp.get_data(as_text=True)
-    # Fresh-start banner is shown and the pre-existing ledger row (CF-1)
-    # is hidden. (Account balances are intentionally unchanged.)
-    assert "Fresh start mode" in html or "list starts from" in html
-    assert "CF-1" not in html
+    resp = client.post("/cash_flow", data={"action": "reset_fresh_start"})
+    assert resp.status_code == 405
+    report = client.get("/cash_flow")
+    assert report.status_code == 200
+    html = report.get_data(as_text=True)
+    assert "Fresh start mode" not in html
+    assert "4,444" in html

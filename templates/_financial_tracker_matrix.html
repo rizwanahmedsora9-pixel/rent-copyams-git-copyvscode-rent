@@ -193,7 +193,7 @@
             <th>Date &amp; Time</th><th>Type</th><th>Account</th><th>Category</th><th>Party</th>
             <th class="text-end">In</th><th class="text-end">Out</th><th class="text-end">Transfer</th>
             <th>Reference</th><th>Description</th>
-            {% if ft.embed %}<th class="text-end">Actions</th>{% endif %}
+            {% if ft.embed and not ft.read_only %}<th class="text-end">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -209,7 +209,7 @@
             <td class="text-end ft-mono text-primary">{% if r.transfer_amount %}Rs. {{ "{:,.0f}".format(r.transfer_amount) }}{% else %}—{% endif %}</td>
             <td class="ft-mono small">{{ r.reference or '—' }}</td>
             <td class="small">{{ r.description or '' }}</td>
-            {% if ft.embed %}
+            {% if ft.embed and not ft.read_only %}
             <td class="text-end text-nowrap">
               {% if r.entry_id %}
               <button type="button" class="btn btn-xs btn-light border cf-view-btn py-0 px-2" data-entry-id="{{ r.entry_id }}">View</button>
@@ -239,7 +239,7 @@
             {% endif %}
           </tr>
           {% else %}
-          <tr><td colspan="{% if ft.embed %}11{% else %}10{% endif %}" class="text-center text-muted py-4">No transactions match the current filters.</td></tr>
+          <tr><td colspan="{% if ft.embed and not ft.read_only %}11{% else %}10{% endif %}" class="text-center text-muted py-4">No transactions match the current filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>

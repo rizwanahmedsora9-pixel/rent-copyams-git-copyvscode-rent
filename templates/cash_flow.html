@@ -94,7 +94,15 @@
 {% else %}
 
 {% block content %}
-<div class="ui-v2">
+<div class="ui-v2{% if read_only %} cf-read-only{% endif %}">
+
+  {% if read_only %}
+  <style>
+    .cf-read-only #cfPanel-transaction,
+    .cf-read-only #cfPanel-master,
+    .cf-read-only #cfPanel-reconcile { display: none !important; }
+  </style>
+  {% endif %}
 
   {% from "_ui/page_header.html" import render as ui_header %}
   {% set _toolbar %}
@@ -117,7 +125,12 @@
       <i class="bi bi-clock-history me-1"></i> Differences
     </a>
   {% endset %}
-  {{ ui_header('bi-water', 'Cash Flow', subtitle='A transaction engine. Categories and sub-categories are yours to create — nothing is hard-coded. Company accounts come from Accounts.', toolbar=_toolbar) }}
+  {{ ui_header('bi-water', 'Cash Flow', subtitle='Read-only cash movement report. Record standalone receipts, expenses and transfers in Accounts; linked business transactions also appear here.', toolbar=_toolbar) }}
+
+  <div class="alert alert-info d-flex align-items-center justify-content-between gap-3 d-print-none" role="status">
+    <div><i class="bi bi-info-circle-fill me-2"></i><strong>View only:</strong> enter standalone cash movements in Accounts. Sales and linked client/supplier payments remain attached to their source records and appear here automatically.</div>
+    <a href="{{ url_for('accounts.dashboard') }}" class="btn btn-sm btn-primary text-nowrap"><i class="bi bi-bank2 me-1"></i>Open Accounts</a>
+  </div>
 
   <!-- TOP TAB NAVIGATION -->
   <nav class="cf-tabs d-print-none" id="cfTabs" role="tablist" aria-label="Cash flow sections">
@@ -125,14 +138,17 @@
       <span class="cf-tab-ico"><i class="bi bi-graph-up"></i></span>
       <span><span class="cf-tab-title">Financial Details</span><span class="cf-tab-sub">Balances &amp; totals</span></span>
     </button>
+    {% if not read_only %}
     <button type="button" class="cf-tab" data-cf-tab="transaction" role="tab" aria-selected="false">
       <span class="cf-tab-ico"><i class="bi bi-plus-circle"></i></span>
       <span><span class="cf-tab-title">New Transaction</span><span class="cf-tab-sub">Receive · Spend · Transfer</span></span>
     </button>
+    {% endif %}
     <button type="button" class="cf-tab" data-cf-tab="transactions" role="tab" aria-selected="false">
       <span class="cf-tab-ico"><i class="bi bi-table"></i></span>
       <span><span class="cf-tab-title">Transactions</span><span class="cf-tab-sub">Filter matrix &amp; ledger</span></span>
     </button>
+    {% if not read_only %}
     <button type="button" class="cf-tab" data-cf-tab="reconcile" role="tab" aria-selected="false">
       <span class="cf-tab-ico"><i class="bi bi-check2-circle"></i></span>
       <span><span class="cf-tab-title">Daily Reconciliations</span><span class="cf-tab-sub">Count, verify &amp; lock day</span></span>
@@ -141,6 +157,7 @@
       <span class="cf-tab-ico"><i class="bi bi-sliders2"></i></span>
       <span><span class="cf-tab-title">Master Data</span><span class="cf-tab-sub">Categories &amp; parties</span></span>
     </button>
+    {% endif %}
   </nav>
 
   {% if is_fresh_start_view %}
@@ -1820,7 +1837,7 @@
   }
 
   // ---- Top-level section tabs ----
-  const CF_TAB_NAMES = ['financial', 'transaction', 'transactions', 'reconcile', 'master'];
+  const CF_TAB_NAMES = {{ (['financial', 'transactions'] if read_only else ['financial', 'transaction', 'transactions', 'reconcile', 'master'])|tojson }};
 
   function activateCfTab(name) {
     if (CF_TAB_NAMES.indexOf(name) === -1) name = 'financial';
