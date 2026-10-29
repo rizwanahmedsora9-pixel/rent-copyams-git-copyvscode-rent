@@ -449,14 +449,13 @@ def test_crud_works_in_all_major_sections(app, client):
         assert sale is not None
         assert sale.client_code == "C-AHM-01"
 
-    # --- Cash flow category CRUD ---
+    # --- Cash Flow is now a read-only report; configuration is not edited there ---
     resp = client.post("/cash_flow", data={
         "action": "add_category",
         "new_category_name": "Office Expense",
         "new_category_direction": "out",
-    }, follow_redirects=True)
-    assert resp.status_code == 200
-    assert b"Category saved" in resp.data
+    })
+    assert resp.status_code == 405
 
     # --- Section pages must not 500 after writes ---
     for path in (
