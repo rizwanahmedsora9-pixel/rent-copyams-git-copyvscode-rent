@@ -303,6 +303,9 @@ def add_transaction():
             if (amount + discount) <= 0:
                 raise ValueError('Received amount and discount cannot both be zero.')
 
+            from utils.money import to_minor as _to_minor
+            from app.services.accounting import _apply_account_tx_effect as _apply_effect
+
             receive_account = Account.query.get(receive_account_id) if receive_account_id else None
             if amount > 0:
                 if not _is_account_active(receive_account):
@@ -333,17 +336,26 @@ def add_transaction():
                 if not receive_source_label:
                     raise ValueError('Please enter who or what this money was received from.')
 
-                receive_account.balance = float(receive_account.balance or 0) + amount
                 account_tx = AccountTransaction(
                     from_account_id=None,
                     to_account_id=receive_account.id,
                     amount=amount,
+                    amount_minor=_to_minor(amount),
                     description=f"Money received from {receive_source_label}",
                     note=note,
                     transaction_type='Receipt',
-                    date_posted=tx_date
+                    payee=receive_source_label,
+                    payment_method=(method or 'Cash'),
+                    date_posted=tx_date,
+                    created_by=getattr(current_user, 'username', None),
                 )
+                # Post the effect through the single authoritative applier so
+                # `balance` and the minor-unit baseline (`balance_minor`) can
+                # never drift apart (legacy code bumped the float only, which
+                # the next minor-unit write silently discarded).
                 db.session.add(account_tx)
+                db.session.flush()
+                _apply_effect(account_tx)
                 audit_log(current_user, 'account.transaction.receive', f'source_category=other_source, source={receive_source_label}, to={receive_account.name}, amount={amount}')
 
             else:
@@ -369,18 +381,21 @@ def add_transaction():
                     raise ValueError('Insufficient balance in selected source account.')
 
                 # For normal accounts this subtracts the amount; for Loan accounts this will produce a MORE NEGATIVE balance
-                from_account.balance = float(from_account.balance or 0) - amount
-                receive_account.balance = float(receive_account.balance or 0) + amount
                 account_tx = AccountTransaction(
                     from_account_id=from_account.id,
                     to_account_id=receive_account.id,
                     amount=amount,
+                    amount_minor=_to_minor(amount),
                     description=f"Funds received from account {from_account.name}",
                     note=note,
                     transaction_type='Transfer',
-                    date_posted=tx_date
+                    payment_method=(method or 'Cash'),
+                    date_posted=tx_date,
+                    created_by=getattr(current_user, 'username', None),
                 )
                 db.session.add(account_tx)
+                db.session.flush()
+                _apply_effect(account_tx)
                 audit_log(current_user, 'account.transaction.receive', f'source_category={category_exists.name}, from={from_account.name}, to={receive_account.name}, amount={amount}')
 
             _audit_pending_account_transactions()
@@ -396,6 +411,32 @@ def add_transaction():
             if amount <= 0:
                 raise ValueError('Payment amount must be greater than zero.')
 
+            from utils.money import to_minor as _to_minor
+            from app.services.accounting import _apply_account_tx_effect as _apply_effect
+
+            # Structured detail for expenses and other pay-mode entries: what
+            # it was for, who was paid, the voucher/slip number and an optional
+            # proof attachment — captured once, shown everywhere after.
+            expense_category = (request.form.get('expense_category') or '').strip()
+            expense_payee = (request.form.get('payee') or '').strip()
+            expense_reference = (request.form.get('expense_reference') or '').strip()
+            expense_proof = None
+            if pay_target in ('personal_expense', 'other_expense'):
+                try:
+                    from app.services.files_pdf import save_photo
+                    expense_proof = save_photo(request.files.get('expense_proof'))
+                except Exception:
+                    expense_proof = None
+                if expense_category:
+                    from models import CashFlowCategory
+                    cat_row = CashFlowCategory.query.filter(
+                        func.lower(func.trim(CashFlowCategory.name)) == expense_category.lower(),
+                        CashFlowCategory.is_active == True,
+                        CashFlowCategory.direction.in_(['out', 'both']),
+                    ).first()
+                    if not cat_row:
+                        raise ValueError('Select a valid expense category.')
+
             from_account = Account.query.get(from_account_id) if from_account_id else None
             if not _is_account_active(from_account):
                 raise ValueError('Please select a valid source account.')
@@ -404,24 +445,27 @@ def add_transaction():
                 raise ValueError('Insufficient balance in selected source account.')
 
             if pay_target == 'company_transfer':
-                from_account.balance = _money_round(float(from_account.balance or 0) - amount)
                 to_account = Account.query.get(to_account_id) if to_account_id else None
                 if not _is_account_active(to_account):
                     raise ValueError('Please select a valid destination account.')
                 if to_account.id == from_account.id:
                     raise ValueError('Source and destination accounts cannot be the same.')
 
-                to_account.balance = float(to_account.balance or 0) + amount
                 tx = AccountTransaction(
                     from_account_id=from_account.id,
                     to_account_id=to_account.id,
                     amount=amount,
+                    amount_minor=_to_minor(amount),
                     description='Intra-company transfer',
                     note=note,
                     transaction_type='Transfer',
-                    date_posted=tx_date
+                    payment_method=(method or 'Cash'),
+                    date_posted=tx_date,
+                    created_by=getattr(current_user, 'username', None),
                 )
                 db.session.add(tx)
+                db.session.flush()
+                _apply_effect(tx)
                 audit_log(current_user, 'account.transaction.transfer', f'from={from_account.name}, to={to_account.name}, amount={amount}')
                 flash('Transfer transaction recorded successfully.', 'success')
 
@@ -505,19 +549,24 @@ def add_transaction():
                 if to_account.id == from_account.id:
                     raise ValueError('Source and destination accounts cannot be the same.')
 
-                from_account.balance = _money_round(float(from_account.balance or 0) - amount)
-                to_account.balance = _money_round(float(to_account.balance or 0) + amount)
-
                 tx = AccountTransaction(
                     from_account_id=from_account.id,
                     to_account_id=to_account.id,
                     amount=amount,
+                    amount_minor=_to_minor(amount),
                     description=f'Loan repayment to {to_account.name}',
                     note=note,
                     transaction_type='Payment',
-                    date_posted=tx_date
+                    payee=to_account.name,
+                    reference_no=(expense_reference or None),
+                    payment_method=(method or 'Cash'),
+                    date_posted=tx_date,
+                    created_by=getattr(current_user, 'username', None),
                 )
                 db.session.add(tx)
+                db.session.flush()
+                _apply_effect(tx)
+
                 audit_log(current_user, 'account.transaction.loan_payment', f'from={from_account.name}, to_loan={to_account.name}, amount={amount}')
                 flash('Loan payment recorded successfully.', 'success')
 
@@ -531,18 +580,26 @@ def add_transaction():
                     else:
                         target_label = 'Other Payment'
 
-                from_account.balance = _money_round(float(from_account.balance or 0) - amount)
                 tx_type = 'Expense' if pay_target in ['personal_expense', 'other_expense'] else 'Payment'
                 tx = AccountTransaction(
                     from_account_id=from_account.id,
                     to_account_id=None,
                     amount=amount,
+                    amount_minor=_to_minor(amount),
                     description=target_label,
                     note=note,
                     transaction_type=tx_type,
-                    date_posted=tx_date
+                    category=(expense_category or None),
+                    payee=(expense_payee or None),
+                    reference_no=(expense_reference or None),
+                    payment_method=(method or 'Cash'),
+                    photo_path=expense_proof,
+                    date_posted=tx_date,
+                    created_by=getattr(current_user, 'username', None),
                 )
                 db.session.add(tx)
+                db.session.flush()
+                _apply_effect(tx)
                 audit_log(current_user, 'account.transaction.pay', f'from={from_account.name}, target={target_label}, amount={amount}')
                 flash('Outgoing payment recorded successfully.', 'success')
 

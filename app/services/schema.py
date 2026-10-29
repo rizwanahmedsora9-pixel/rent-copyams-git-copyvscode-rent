@@ -852,7 +852,18 @@ def _ensure_account_classification_columns():
         rows = db.session.execute(text("PRAGMA table_info('account_transaction')")).fetchall()
         existing = {r[1] for r in rows}
         if existing:
-            for column, sqltype in (("reason", "VARCHAR(300)",), ("idempotency_key", "VARCHAR(64)",)):
+            for column, sqltype in (
+                ("reason", "VARCHAR(300)",),
+                ("idempotency_key", "VARCHAR(64)",),
+                # Structured transaction detail (category / counterparty /
+                # voucher / method / proof) for every money movement.
+                ("category", "VARCHAR(120)",),
+                ("payee", "VARCHAR(160)",),
+                ("reference_no", "VARCHAR(80)",),
+                ("payment_method", "VARCHAR(50)",),
+                ("photo_path", "VARCHAR(200)",),
+                ("photo_url", "VARCHAR(500)",),
+            ):
                 if column in existing:
                     continue
                 try:

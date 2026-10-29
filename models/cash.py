@@ -105,6 +105,17 @@ class AccountTransaction(db.Model):
     # / double-clicked submission cannot post twice.
     reason = db.Column(db.String(300), nullable=True)
     idempotency_key = db.Column(db.String(64), nullable=True, index=True)
+    # --- Structured transaction detail (additive) ---------------------------
+    # Every money movement carries its own business context so the register is
+    # self-explanatory: what it was for (category), who the counterparty was
+    # (payee), the voucher/cheque/slip number, the method actually used, and
+    # an optional proof attachment.  All nullable: legacy rows keep working.
+    category = db.Column(db.String(120), nullable=True, index=True)
+    payee = db.Column(db.String(160), nullable=True, index=True)
+    reference_no = db.Column(db.String(80), nullable=True, index=True)
+    payment_method = db.Column(db.String(50), nullable=True)
+    photo_path = db.Column(db.String(200), nullable=True)
+    photo_url = db.Column(db.String(500), nullable=True)
     created_by = db.Column(db.String(80))
     voided_by = db.Column(db.String(80))
     voided_at = db.Column(db.DateTime, nullable=True)

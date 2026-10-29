@@ -344,14 +344,13 @@ def _parse_date_range(default_days=30):
 
 
 def _reverse_balance_effect(tx):
-    """Reverse the balance effect of an AccountTransaction (used for voiding)."""
-    if tx.from_account_id:
-        a = Account.query.get(tx.from_account_id)
-        if a:
-            a.balance = float(a.balance or 0) + float(tx.amount or 0)
-    if tx.to_account_id:
-        a = Account.query.get(tx.to_account_id)
-        if a:
-            a.balance = float(a.balance or 0) - float(tx.amount or 0)
+    """Reverse the balance effect of an AccountTransaction (used for voiding).
+
+    Delegates to the authoritative minor-unit applier so ``balance`` and
+    ``balance_minor`` move together (a float-only bump here used to be
+    silently discarded by the next minor-unit write).
+    """
+    from app.services.accounting import _reverse_account_tx_effect
+    _reverse_account_tx_effect(tx)
 
 

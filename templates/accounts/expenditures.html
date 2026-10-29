@@ -19,7 +19,7 @@
 
 <div class="container-fluid">
     <div class="acc-page-header">
-        <div><h2><i class="bi bi-wallet me-2 text-warning"></i>Expenditures</h2><div class="subtitle">Personal & operating expenses tracked from FBM cash drawer.</div></div>
+        <div><h2><i class="bi bi-wallet me-2 text-warning"></i>Expenditures</h2><div class="subtitle">Every operating expense and outward payment recorded from the Accounts ledger, Cash Flow and the legacy cash drawer.</div></div>
         <a href="{{ url_for('accounts.dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Dashboard</a>
     </div>
 
@@ -46,20 +46,28 @@
         <div class="table-responsive">
             <table class="table align-middle mb-0">
                 <thead><tr>
-                    <th style="width:140px">Date</th><th>Category</th>
-                    <th class="text-end">Amount</th><th>Method</th><th>Note</th>
+                    <th style="width:140px">Date</th><th>Category</th><th>Type</th>
+                    <th class="text-end">Amount</th><th>Method</th><th>Paid To</th><th>Voucher #</th><th>Note</th>
                 </tr></thead>
                 <tbody>
                 {% for e in expenditures.items %}
                 <tr>
                     <td class="small">{{ e.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td><span class="badge bg-warning text-dark">{{ e.category or '—' }}</span></td>
+                    <td class="small">{{ e.type or '' }}</td>
                     <td class="text-end fw-bold text-warning">Rs. {{ "%.2f"|format(e.amount) }}</td>
                     <td><span class="badge bg-secondary">{{ e.method or 'Cash' }}</span></td>
-                    <td class="small text-muted">{{ e.note or '' }}</td>
+                    <td class="small">{{ e.payee or '—' }}</td>
+                    <td class="small">{{ e.reference_no or '—' }}</td>
+                    <td class="small text-muted">
+                        {{ e.note or '' }}
+                        {% if e.photo_path %}
+                            <a href="{{ url_for('static', filename='uploads/' ~ e.photo_path) }}" target="_blank" class="ms-1" title="View attached proof"><i class="bi bi-paperclip"></i> proof</a>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="text-center text-muted py-4">No expenditures in this range.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">No expenditures in this range.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

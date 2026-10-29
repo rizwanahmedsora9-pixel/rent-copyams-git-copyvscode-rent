@@ -81,6 +81,10 @@
                     <td class="text-end fw-bold">Rs. {{ "%.2f"|format(tx.amount or 0) }}</td>
                     <td>
                         <div>{{ tx.description or '' }}</div>
+                        {% if tx.category %}<div class="small"><span class="badge bg-warning text-dark">{{ tx.category }}</span></div>{% endif %}
+                        {% if tx.payee %}<div class="small"><i class="bi bi-person me-1 text-muted"></i>{{ tx.payee }}</div>{% endif %}
+                        {% if tx.reference_no %}<div class="small text-muted"><i class="bi bi-upc-scan me-1"></i>{{ tx.reference_no }}</div>{% endif %}
+                        {% if tx.photo_path %}<a class="small" href="{{ url_for('static', filename='uploads/' ~ tx.photo_path) }}" target="_blank"><i class="bi bi-paperclip me-1"></i>proof</a>{% endif %}
                         {% if tx.note %}<div class="small text-muted">{{ tx.note }}</div>{% endif %}
                     </td>
                     <td class="text-end">

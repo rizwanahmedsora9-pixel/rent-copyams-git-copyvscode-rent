@@ -356,7 +356,7 @@
 
 <div class="modal fade" id="newTransactionModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
-        <form method="POST" action="{{ url_for('accounts.add_transaction') }}" class="modal-content" onsubmit="var b=this.querySelector('button[type=submit]'); if(b){setTimeout(function(){b.disabled=true;},0);}">
+        <form method="POST" action="{{ url_for('accounts.add_transaction') }}" enctype="multipart/form-data" class="modal-content" onsubmit="var b=this.querySelector('button[type=submit]'); if(b){setTimeout(function(){b.disabled=true;},0);}">
             <input type="hidden" name="idempotency_key" value="acctx-{{ submission_token }}">
             <div class="modal-header">
                 <h5 class="modal-title">Make New Transaction</h5>
@@ -594,6 +594,39 @@
                                 <div class="col-md-6 d-none" id="payReferenceWrap">
                                     <label class="form-label">Reference</label>
                                     <input type="text" class="form-control" name="reference" id="pay_reference" placeholder="Voucher / slip no.">
+                                </div>
+
+                                <div class="col-md-12 d-none" id="expenseDetailWrap">
+                                    <div class="card border-secondary-subtle h-100">
+                                        <div class="card-header bg-light py-2"><span class="fw-bold small"><i class="bi bi-tags me-1"></i>Expense Details</span></div>
+                                        <div class="card-body py-3">
+                                            <div class="row g-3">
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Expense Category</label>
+                                                    <select class="form-select" name="expense_category" id="expense_category">
+                                                        <option value="">— Select category —</option>
+                                                        {% for cat in expense_categories %}
+                                                        <option value="{{ cat.name }}">{{ cat.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <div class="small text-muted mt-1">Managed in Cash Flow settings (spending categories).</div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Paid To</label>
+                                                    <input type="text" class="form-control" name="payee" id="payee" placeholder="Shop / person / vendor name">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Voucher / Bill No.</label>
+                                                    <input type="text" class="form-control" name="expense_reference" id="expense_reference" placeholder="e.g. V-1024">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Proof (photo)</label>
+                                                    <input type="file" class="form-control" name="expense_proof" accept="image/*">
+                                                    <div class="small text-muted mt-1">Optional bill/receipt photo, kept with the ledger entry.</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                     </div>
                 </div>
@@ -883,6 +916,11 @@ function setPayTargetMode() {
     if (payReferenceWrap) payReferenceWrap.classList.toggle('d-none', target !== 'driver');
     if (driverInput) driverInput.required = isPayMode && target === 'driver';
     targetLabelWrap.classList.toggle('d-none', !['loan', 'personal_expense', 'other_expense'].includes(target));
+
+    // Structured expense details (category / paid-to / voucher / proof) are
+    // only relevant when money is going out as an expense.
+    const expenseDetailWrap = document.getElementById('expenseDetailWrap');
+    if (expenseDetailWrap) expenseDetailWrap.classList.toggle('d-none', !['personal_expense', 'other_expense'].includes(target));
 
     payTo.required = isPayMode && target === 'company_transfer';
     supplierHidden.required = false;
