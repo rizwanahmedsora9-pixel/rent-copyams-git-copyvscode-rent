@@ -45,6 +45,13 @@ def dashboard():
     
     suppliers = Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all()
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
+    # Expense categories for the Pay → Expense form: one shared category book
+    # with the Cash Flow page (out/both categories only).
+    from models import CashFlowCategory
+    expense_categories = CashFlowCategory.query.filter(
+        CashFlowCategory.is_active == True,
+        CashFlowCategory.direction.in_(['out', 'both']),
+    ).order_by(CashFlowCategory.sort_order.asc(), CashFlowCategory.name.asc()).all()
     # Drivers are payables like suppliers: the Accounts section can pay them
     # directly, and the resulting transaction appears in the driver ledger.
     from app.services.driver_payments import driver_outstanding
@@ -72,6 +79,7 @@ def dashboard():
                           clients=clients,
                           delivery_persons=delivery_persons,
                           driver_outstanding=driver_outstanding_map,
+                          expense_categories=expense_categories,
                           submission_token=uuid4().hex,
                           default_tx_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'),
                           book=book,

@@ -231,8 +231,8 @@ def supplier_payments():
 @accounts_bp.route('/payments/clients/void/<int:id>', methods=['POST'])
 @login_required
 def client_payment_void(id):
-    if not (current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)):
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to delete payments.', 'danger')
         return redirect(request.referrer or url_for('accounts.client_payments'))
 
     payment = Payment.query.get_or_404(id)
@@ -257,8 +257,8 @@ def client_payment_void(id):
 @accounts_bp.route('/payments/clients/restore/<int:id>', methods=['POST'])
 @login_required
 def client_payment_restore(id):
-    if not (current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)):
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to restore payments.', 'danger')
         return redirect(request.referrer or url_for('accounts.client_payments'))
 
     payment = Payment.query.get_or_404(id)
@@ -311,13 +311,18 @@ def expenditures():
         AccountTransaction.date_posted < date_to_excl,
         AccountTransaction.is_void == False,
         AccountTransaction.transaction_type.in_(['Expense', 'Payment', 'Driver Payment']),
-        AccountTransaction.from_account_id.isnot(None)
+        AccountTransaction.from_account_id.isnot(None),
+        # Money out to an outside party only: rows that also credit another
+        # company account (loan repayments) are internal movements, tracked in
+        # the account ledger and audit trail — not expenditures.
+        AccountTransaction.to_account_id.is_(None)
     )
     if search:
         like = f'%{search}%'
-        tx_q = tx_q.filter(or_(AccountTransaction.description.ilike(like), AccountTransaction.note.ilike(like)))
+        tx_q = tx_q.filter(or_(AccountTransaction.description.ilike(like), AccountTransaction.note.ilike(like),
+                               AccountTransaction.payee.ilike(like), AccountTransaction.reference_no.ilike(like)))
     if category_f:
-        tx_q = tx_q.filter(AccountTransaction.description == category_f)
+        tx_q = tx_q.filter(or_(AccountTransaction.category == category_f, AccountTransaction.description == category_f))
     if method_f:
         tx_q = tx_q.join(Account, AccountTransaction.from_account_id == Account.id).filter(func.lower(Account.category) == method_f.lower())
     tx_expenditures = tx_q.all()
@@ -330,18 +335,37 @@ def expenditures():
             'amount': float(e.amount or 0),
             'method': e.method or '',
             'note': e.note or '',
-            'type': 'FBM Cash Drawer'
+            'payee': '',
+            'reference_no': '',
+            'type': 'FBM Cash Drawer',
+            'photo_path': '',
         })
     for tx in tx_expenditures:
         acc = Account.query.get(tx.from_account_id)
+        # Manual cash-flow rows sync into the account ledger; surface their
+        # richer category/subcategory instead of the plain description.
+        cf_category = None
+        if (tx.source_type or '') == 'CashFlowEntry' and tx.source_id:
+            from models import CashFlowEntry
+            cf = db.session.get(CashFlowEntry, tx.source_id)
+            if cf and cf.category:
+                cf_category = cf.category.name
+                if cf.subcategory:
+                    cf_category = f"{cf_category} / {cf.subcategory.name}"
+        category = tx.category or cf_category or (
+            'Driver / Delivery Services' if tx.transaction_type == 'Driver Payment'
+            else (tx.description or 'Expense'))
         all_expenditures.append({
             'date_posted': tx.date_posted,
-            'category': ('Driver / Delivery Services' if tx.transaction_type == 'Driver Payment'
-                         else (tx.description or 'Expense')),
+            'category': category,
             'amount': float(tx.amount or 0),
-            'method': (acc.category.capitalize() if acc else 'Other'),
+            'method': (tx.payment_method or (acc.category.capitalize() if acc else 'Other')),
             'note': tx.note or '',
-            'type': 'Account Transaction'
+            'payee': tx.payee or '',
+            'reference_no': tx.reference_no or '',
+            'type': ('Driver Payment' if tx.transaction_type == 'Driver Payment' else (tx.transaction_type or 'Expense')),
+            'photo_path': tx.photo_path or '',
+            'tx_id': tx.id,
         })
 
     all_expenditures.sort(key=lambda x: x['date_posted'], reverse=True)
@@ -380,6 +404,18 @@ def expenditures():
         AccountTransaction.description != ''
     ).distinct(AccountTransaction.description).all():
         all_categories.add(r[0])
+    for r in db.session.query(AccountTransaction.category).filter(
+        AccountTransaction.is_void == False,
+        AccountTransaction.category.isnot(None),
+        AccountTransaction.category != ''
+    ).distinct(AccountTransaction.category).all():
+        all_categories.add(r[0])
+    from models import CashFlowCategory
+    for cat in CashFlowCategory.query.filter(
+        CashFlowCategory.is_active == True,
+        CashFlowCategory.direction.in_(['out', 'both'])
+    ).all():
+        all_categories.add(cat.name)
     categories = sorted(list(all_categories))
 
     all_methods = set()
@@ -410,14 +446,64 @@ def expenditures():
 @accounts_bp.route('/receipts')
 @login_required
 def receipts():
-    """View receipts from sales and GRN paid amounts within a date range."""
+    """The money-IN register for the Accounts section.
+
+    Everything that actually moved cash/bank INTO the company in the period,
+    each source shown separately with its own subtotal so the page always
+    reconciles with the account ledger:
+
+    * Client payments (``Payment`` receipts — cash/bank only)
+    * Direct-sale receipts (the paid-now portion of cash sales)
+    * Booking advances (paid-now on orders)
+    * Other receipts (money in with no source document: owner deposits,
+      refunds received, loan draws)
+
+    GRN paid amounts are money **OUT** (paying suppliers at receiving time).
+    They are listed in their own clearly-labelled section and included in the
+    totals only as an outflow, so the net movement is a real in-minus-out
+    figure instead of adding outgoing money to incoming.
+    """
     date_from, date_to_excl = _parse_date_range(default_days=0)
 
     sales = DirectSale.query.filter(
         DirectSale.date_posted >= date_from,
         DirectSale.date_posted < date_to_excl,
-        DirectSale.is_void == False
+        DirectSale.is_void == False,
+        DirectSale.paid_amount > 0
     ).order_by(DirectSale.date_posted.desc()).all()
+
+    bookings = Booking.query.filter(
+        Booking.date_posted >= date_from,
+        Booking.date_posted < date_to_excl,
+        Booking.is_void == False,
+        Booking.paid_amount > 0
+    ).order_by(Booking.date_posted.desc()).all()
+
+    # Client receipts: real money-in only.  Waive-offs carry amount 0 and
+    # material returns settle goods against dues without cash, so neither is
+    # a receipt; refunds are money out and are excluded here.
+    client_payments = Payment.query.filter(
+        Payment.date_posted >= date_from,
+        Payment.date_posted < date_to_excl,
+        Payment.is_void == False,
+        Payment.amount > 0,
+        func.lower(func.coalesce(Payment.payment_type, '')) != 'refund',
+        func.lower(func.coalesce(Payment.method, '')) != 'material return',
+        func.lower(func.coalesce(Payment.payment_type, '')) != 'material return'
+    ).order_by(Payment.date_posted.desc()).all()
+
+    # Other receipts: account-ledger money-in with no source document marker.
+    other_receipts = AccountTransaction.query.filter(
+        AccountTransaction.date_posted >= date_from,
+        AccountTransaction.date_posted < date_to_excl,
+        AccountTransaction.is_void == False,
+        AccountTransaction.transaction_type == 'Receipt',
+        AccountTransaction.to_account_id.isnot(None),
+        or_(
+            AccountTransaction.note.is_(None),
+            ~AccountTransaction.note.ilike('%[SRC:%')
+        )
+    ).order_by(AccountTransaction.date_posted.desc()).all()
 
     grns = GRN.query.filter(
         GRN.date_posted >= date_from,
@@ -426,7 +512,7 @@ def receipts():
         GRN.paid_amount > 0
     ).order_by(GRN.date_posted.desc()).all()
 
-    # The receipt line must show what the GRN was actually worth.  Summing only
+    # The GRN line must show what the GRN was actually worth.  Summing only
     # the landed-cost columns (loading / freight / other / adjustment) ignored
     # every received material line, so an ordinary purchase of 100 bags showed
     # "Total Rs. 0.00" while its paid amount was 50,000.  Use the same
@@ -434,8 +520,28 @@ def receipts():
     from app.services.grn_svc import calculate_grn_total
     grn_totals = {grn.id: calculate_grn_total(grn) for grn in grns}
 
-    return render_template('accounts/receipts.html', sales=sales, grns=grns,
+    client_receipts_total = float(sum(float(p.amount or 0) for p in client_payments))
+    sales_paid_total = float(sum(float(s.paid_amount or 0) for s in sales))
+    booking_paid_total = float(sum(float(b.paid_amount or 0) for b in bookings))
+    other_receipts_total = float(sum(float(tx.amount or 0) for tx in other_receipts))
+    total_money_in = client_receipts_total + sales_paid_total + booking_paid_total + other_receipts_total
+    grn_paid_total = float(sum(float(g.paid_amount or 0) for g in grns))
+    net_movement = total_money_in - grn_paid_total
+
+    return render_template('accounts/receipts.html',
+                           client_payments=client_payments,
+                           sales=sales,
+                           bookings=bookings,
+                           other_receipts=other_receipts,
+                           grns=grns,
                            grn_totals=grn_totals,
+                           client_receipts_total=client_receipts_total,
+                           sales_paid_total=sales_paid_total,
+                           booking_paid_total=booking_paid_total,
+                           other_receipts_total=other_receipts_total,
+                           total_money_in=total_money_in,
+                           grn_paid_total=grn_paid_total,
+                           net_movement=net_movement,
                            date_from=date_from, date_to=date_to_excl - timedelta(days=1))
 
 
@@ -443,6 +549,18 @@ def receipts():
 
 def _payments_permission_ok():
     return current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)
+
+
+def _payments_void_ok():
+    """Void / delete / restore is its own atomic switch on top of the module
+    grant: a payment clerk can record payments, but removing money history
+    additionally requires "Void / Delete / Restore Transactions"."""
+    if current_user.role in ('admin', 'root'):
+        return True
+    if not _payments_permission_ok():
+        return False
+    from app.services.permissions import _user_can
+    return _user_can('can_void_transactions')
 
 
 @accounts_bp.route('/payments/clients/save', methods=['POST'])
@@ -613,8 +731,8 @@ def supplier_payment_data(id):
 @login_required
 def supplier_payment_delete(id):
     """Soft-delete a supplier payment and reverse its accounting effects."""
-    if not _payments_permission_ok():
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to delete supplier payments.', 'danger')
         return redirect(url_for('accounts.supplier_payments'))
     payment = SupplierPayment.query.get_or_404(id)
     try:
@@ -638,8 +756,8 @@ def supplier_payment_delete(id):
 @login_required
 def supplier_payment_restore(id):
     """Restore a deleted supplier payment and re-apply its accounting effects."""
-    if not _payments_permission_ok():
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to restore supplier payments.', 'danger')
         return redirect(url_for('accounts.supplier_payments'))
     payment = SupplierPayment.query.get_or_404(id)
     try:

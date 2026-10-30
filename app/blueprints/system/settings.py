@@ -42,6 +42,7 @@ def settings():
     from app.services.constants import (
         EDITABLE_USER_PERMISSION_FIELDS,
         PERMISSION_GROUPS,
+        ROLE_PRESETS,
         USER_PERMISSION_DEFAULTS,
     )
     users_all = User.query.all()
@@ -64,6 +65,8 @@ def settings():
         permission_fields=EDITABLE_USER_PERMISSION_FIELDS,
         user_perm_values=user_perm_values,
         default_permissions=default_permissions,
+        role_presets=list(ROLE_PRESETS.keys()),
+        role_preset_data=ROLE_PRESETS,
     )
 
 

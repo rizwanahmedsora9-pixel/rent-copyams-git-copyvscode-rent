@@ -1,5 +1,6 @@
 {% extends "layout.html" %}
 {% block content %}
+<script>window.ROLE_PRESET_DATA = {{ role_preset_data|tojson }};</script>
 {% macro perm_groups(groups, values, id_prefix='') %}
 {% for group_title, fields in groups %}
 <h6 class="small fw-bold text-warning text-uppercase mt-3 mb-1">{{ group_title }}</h6>
@@ -154,6 +155,10 @@
                                         {% if u.can_manage_materials %}<span class="badge bg-dark border border-secondary text-light">Materials</span>{% endif %}
                                         {% if u.can_manage_delivery_persons %}<span class="badge bg-dark border border-secondary text-light">Delivery Persons</span>{% endif %}
                                         {% if u.can_manage_accounts %}<span class="badge bg-dark border border-secondary text-success">Financial Accounts</span>{% endif %}
+                                        {% if u.can_close_cash_day %}<span class="badge bg-dark border border-secondary text-warning" title="Day Close / Daily Reconciliation">Day Close</span>{% endif %}
+                                        {% if u.can_reconcile_accounts %}<span class="badge bg-dark border border-secondary text-warning" title="Account Reconciliation Settlement">Settlement</span>{% endif %}
+                                        {% if u.can_manage_account_masters %}<span class="badge bg-dark border border-secondary text-success" title="Manage Account Masters">Acct Masters</span>{% endif %}
+                                        {% if u.can_void_transactions == false %}<span class="badge bg-danger" title="Cannot void/delete transactions">No Void</span>{% endif %}
                                         {% if u.can_view_cash_flow %}<span class="badge bg-dark border border-secondary text-success">Cash Flow</span>{% endif %}
                                         {% if u.can_access_settings %}<span class="badge bg-dark border border-secondary text-light">Settings</span>{% endif %}
                                         {% if u.restrict_backdated_edit %}<span class="badge bg-dark border border-secondary text-danger">Restrict Back-Date GRN Editing</span>{% endif %}
@@ -586,6 +591,14 @@ document.addEventListener('DOMContentLoaded', function(){
                     </select>
                     <small class="text-white-50 d-block mt-1">Read Only keeps every module ticked below for <strong>viewing</strong>, but blocks every save / edit / delete. (Ignored for Administrators.)</small>
                 </div>
+                <h6 class="small fw-bold text-warning text-uppercase mb-2">Role Preset (atomic)</h6>
+                <div class="d-flex flex-wrap gap-1 mb-2" id="rolePresetBar">
+                    {% for preset_name in role_presets %}
+                    <button type="button" class="btn btn-sm btn-outline-info" onclick="applyRolePreset('{{ preset_name|e }}')">{{ preset_name }}</button>
+                    {% endfor %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearRolePreset()">Clear all</button>
+                </div>
+                <small class="text-white-50 d-block mb-1">A preset ticks a starting set of atomic permissions — fine-tune any switch below afterwards. Money controls (void, day close, settlement, account masters) live in their own group.</small>
                 <h6 class="small fw-bold text-warning text-uppercase mb-2">Module Access (Grouped)</h6>
                 {{ perm_groups(permission_groups, default_permissions, 'addUser') }}
                 <div class="mt-3">
@@ -650,4 +663,28 @@ document.addEventListener('DOMContentLoaded', function(){
 {% endif %}
 {% endfor %}
 {% endif %}
+
+<script>
+/* Role preset engine: ROLE_PRESET_DATA is rendered from the server-side
+   registry (constants.ROLE_PRESETS), so presets are data, not code. */
+(function(){
+    const DATA = window.ROLE_PRESET_DATA || {};
+    window.applyRolePreset = function(name){
+        const keys = DATA[name] || [];
+        const modal = document.getElementById('addUserModal');
+        if (!modal) return;
+        modal.querySelectorAll('input[type="checkbox"]').forEach(function(cb){
+            if (!cb.name || cb.name.indexOf('can_') !== 0) return;
+            cb.checked = keys.indexOf(cb.name) !== -1;
+        });
+    };
+    window.clearRolePreset = function(){
+        const modal = document.getElementById('addUserModal');
+        if (!modal) return;
+        modal.querySelectorAll('input[type="checkbox"]').forEach(function(cb){
+            if (cb.name && cb.name.indexOf('can_') === 0) cb.checked = false;
+        });
+    };
+})();
+</script>
 {% endblock %}

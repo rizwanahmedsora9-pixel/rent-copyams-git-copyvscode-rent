@@ -3,7 +3,18 @@ from ._common import *  # noqa
 
 
 def _account_master_permission_ok():
-    return (getattr(current_user, 'role', '') or '').strip().lower() in ('admin', 'root')
+    # Atomic grant: managing account masters (create/edit/archive) is its own
+    # switch, no longer hard-wired to admin/root only.
+    if (getattr(current_user, 'role', '') or '').strip().lower() in ('admin', 'root'):
+        return True
+    return bool(getattr(current_user, 'can_manage_account_masters', False))
+
+
+def _reconcile_permission_ok():
+    """Who may settle an account (post a reconciliation + adjustment entry)."""
+    if (getattr(current_user, 'role', '') or '').strip().lower() in ('admin', 'root'):
+        return True
+    return bool(getattr(current_user, 'can_reconcile_accounts', False))
 
 
 def _deny_account_master_mutation():
@@ -723,6 +734,9 @@ def reconcile_account(account_id):
     ).limit(5).all()
 
     if request.method == 'POST':
+        if not _reconcile_permission_ok():
+            flash('You need the "Account Reconciliation Settlement" permission to settle accounts.', 'danger')
+            return redirect(url_for('accounts.reconcile_account', account_id=account.id))
         try:
             actual = request.form.get('actual_balance', '').strip()
             if actual == '':

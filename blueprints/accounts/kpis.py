@@ -89,29 +89,37 @@ def api_expenditures_today():
     
     data = [{
         'id': e.id,
-        'amount': e.amount,
+        'amount': float(e.amount or 0),
         'category': e.category or 'Other',
         'method': e.method,
         'date_posted': e.date_posted.strftime('%Y-%m-%d %H:%M'),
         'note': e.note
     } for e in expenditures]
 
+    # Real money-out expense rows: paid FROM an account with no internal
+    # destination.  (The previous filter `to_account_id.isnot(None)` matched
+    # internal movements — transfers and loan repayments — and missed every
+    # actual expense, which has no destination account.)
     tx_receipts = AccountTransaction.query.filter(
         AccountTransaction.date_posted >= today,
         AccountTransaction.date_posted < today + timedelta(days=1),
         AccountTransaction.is_void == False,
         AccountTransaction.transaction_type.in_(['Expense', 'Payment', 'Driver Payment']),
-        AccountTransaction.transaction_type != 'Supplier Payment',
-        AccountTransaction.to_account_id.isnot(None)
+        AccountTransaction.from_account_id.isnot(None),
+        AccountTransaction.to_account_id.is_(None)
     ).all()
     
     for tx in tx_receipts:
-        acc = Account.query.get(tx.to_account_id)
+        acc = Account.query.get(tx.from_account_id)
+        category = tx.category or (
+            'Driver / Delivery Services' if tx.transaction_type == 'Driver Payment'
+            else (tx.description or 'Other Expense')
+        )
         data.append({
             'id': f"tx_{tx.id}",
-            'client_name': tx.description or 'Other Receipt',
+            'category': category,
             'amount': float(tx.amount or 0),
-            'method': (acc.category.capitalize() if acc else 'Other'),
+            'method': (tx.payment_method or (acc.category.capitalize() if acc else 'Other')),
             'date_posted': tx.date_posted.strftime('%Y-%m-%d %H:%M'),
             'note': tx.note or ''
         })
@@ -383,6 +391,10 @@ def kpi_expenditures():
         'amount': float(r.amount or 0),
         'method': r.method or '',
         'note': r.note or '',
+        'payee': '',
+        'reference_no': '',
+        'type': 'FBM Cash Drawer',
+        'photo_path': '',
     } for r in rows]
 
     tx_rows = AccountTransaction.query.filter(
@@ -391,7 +403,10 @@ def kpi_expenditures():
         AccountTransaction.is_void == False,
         AccountTransaction.transaction_type.in_(['Expense', 'Payment', 'Driver Payment']),
         AccountTransaction.transaction_type != 'Supplier Payment',
-        AccountTransaction.from_account_id.isnot(None)
+        AccountTransaction.from_account_id.isnot(None),
+        # Exclude internal movements (loan repayments post money to the
+        # borrower account, not to an outside party).
+        AccountTransaction.to_account_id.is_(None)
     ).all()
 
     if search:
@@ -400,16 +415,20 @@ def kpi_expenditures():
 
     for tx in tx_rows:
         acc = Account.query.get(tx.from_account_id)
-        method = (acc.category.capitalize() if acc else 'Other')
+        method = (tx.payment_method or (acc.category.capitalize() if acc else 'Other'))
         if method_f and method.lower() != method_f.lower():
             continue
         items.append({
             'date_posted': tx.date_posted,
-            'category': ('Driver / Delivery Services' if tx.transaction_type == 'Driver Payment'
-                         else (tx.description or 'Expense')),
+            'category': (tx.category or ('Driver / Delivery Services' if tx.transaction_type == 'Driver Payment'
+                                         else (tx.description or 'Expense'))),
             'amount': float(tx.amount or 0),
             'method': method,
             'note': tx.note or '',
+            'payee': tx.payee or '',
+            'reference_no': tx.reference_no or '',
+            'type': ('Driver Payment' if tx.transaction_type == 'Driver Payment' else (tx.transaction_type or 'Expense')),
+            'photo_path': tx.photo_path or '',
         })
 
     items.sort(key=lambda x: (x.get('date_posted') or pk_now()), reverse=True)
