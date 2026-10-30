@@ -334,6 +334,19 @@ ENDPOINT_PERMISSION_MAP = {
     'client_modals': 'can_manage_clients',
     'rename_material_label': 'can_manage_materials',
 
+    # --- Rebuilt Accounts workspace ---
+    # Viewing the workspace is allowed for finance users; every setup mutation
+    # is checked again inside the view against can_manage_account_masters.
+    'accounts.dashboard': ('can_manage_accounts', 'can_manage_payments', 'can_manage_account_masters', 'can_view_cash_flow'),
+    'accounts.manage_accounts': ('can_manage_accounts', 'can_manage_payments', 'can_manage_account_masters', 'can_view_cash_flow'),
+    'accounts.manage_categories': ('can_manage_accounts', 'can_manage_payments', 'can_manage_account_masters', 'can_view_cash_flow'),
+    'accounts.setup_save_account': 'can_manage_account_masters',
+    'accounts.setup_account_status': 'can_manage_account_masters',
+    'accounts.setup_delete_account': 'can_manage_account_masters',
+    'accounts.setup_save_category': 'can_manage_account_masters',
+    'accounts.setup_category_status': 'can_manage_account_masters',
+    'accounts.setup_delete_category': 'can_manage_account_masters',
+
     # --- Cash Flow module (new) ---
     'cash_flow': 'can_view_cash_flow',
     'cash_flow_categories_meta': 'can_view_cash_flow',

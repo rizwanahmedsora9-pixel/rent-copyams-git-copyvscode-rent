@@ -1,0 +1,95 @@
+<div class="aw-toolbar">
+  <div>
+    <h1 class="aw-heading">Accounts</h1>
+    <p class="aw-subheading">The places where your business holds money.</p>
+  </div>
+  {% if can_manage %}
+  <button type="button" class="aw-btn aw-btn-primary" data-bs-toggle="modal" data-bs-target="#accountModal" data-account-create>
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> New account
+  </button>
+  {% endif %}
+</div>
+
+<form class="aw-filters" method="get" action="{{ url_for('accounts.manage_accounts') }}">
+  <label class="aw-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <span class="visually-hidden">Search accounts</span>
+    <input type="search" name="q" value="{{ account_q }}" placeholder="Search name or number" autocomplete="off">
+  </label>
+  <label class="visually-hidden" for="account-status-filter">Status</label>
+  <select id="account-status-filter" class="aw-select" name="status" data-auto-submit>
+    <option value="all" {% if account_status == 'all' %}selected{% endif %}>All statuses</option>
+    <option value="active" {% if account_status == 'active' %}selected{% endif %}>Active</option>
+    <option value="suspended" {% if account_status == 'suspended' %}selected{% endif %}>Suspended</option>
+  </select>
+  <button class="aw-btn aw-btn-ghost" type="submit">Filter</button>
+</form>
+
+{% if accounts %}
+<div class="aw-table-wrap">
+  <table class="aw-table">
+    <thead>
+      <tr>
+        <th scope="col">Account</th>
+        <th scope="col">Type</th>
+        <th scope="col" class="aw-num">Opening balance</th>
+        <th scope="col" class="aw-num">Current balance</th>
+        <th scope="col">Status</th>
+        <th scope="col" class="aw-actions-col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for account in accounts %}
+      <tr class="{{ 'is-suspended-row' if not account.is_active }}">
+        <td>
+          <div class="aw-name">{{ account.name }}</div>
+          <div class="aw-muted aw-mono">{{ account.account_number or 'No account number' }}</div>
+        </td>
+        <td><span class="aw-type"><i class="bi {{ account.type_icon }}" aria-hidden="true"></i>{{ account.type_label }}</span></td>
+        <td class="aw-num aw-mono">{{ '{:,.2f}'.format(account.opening_balance_minor / 100) }}</td>
+        <td class="aw-num aw-mono {{ 'aw-negative' if account.current_balance < 0 }}">{{ '{:,.2f}'.format(account.current_balance) }}</td>
+        <td><span class="aw-status {{ 'is-active' if account.is_active else 'is-suspended' }}">{{ 'Active' if account.is_active else 'Suspended' }}</span></td>
+        <td>
+          <div class="aw-actions">
+            {% if can_manage %}
+            <button type="button" class="aw-icon-btn" title="Edit account" aria-label="Edit {{ account.name }}" data-account-edit="{{ account.id }}">
+              <i class="bi bi-pencil" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="aw-icon-btn" title="{{ 'Resume' if not account.is_active else 'Suspend' }} account"
+                    aria-label="{{ 'Resume' if not account.is_active else 'Suspend' }} {{ account.name }}"
+                    data-confirm-url="{{ url_for('accounts.setup_account_status', account_id=account.id) }}"
+                    data-confirm-title="{{ 'Resume' if not account.is_active else 'Suspend' }} “{{ account.name }}”?"
+                    data-confirm-body="{{ 'This account will be available for new transactions again.' if not account.is_active else 'It will be hidden from new transactions. Existing history and its balance stay unchanged.' }}"
+                    data-confirm-label="{{ 'Resume' if not account.is_active else 'Suspend' }}"
+                    data-confirm-tone="{{ 'primary' if not account.is_active else 'warning' }}"
+                    data-revision="{{ account.revision }}" data-active="{{ '1' if not account.is_active else '0' }}">
+              <i class="bi {{ 'bi-play-circle' if not account.is_active else 'bi-pause-circle' }}" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="aw-icon-btn aw-danger" title="{{ 'Delete account' if account.can_delete else 'Cannot delete: account has history' }}"
+                    aria-label="Delete {{ account.name }}" {% if not account.can_delete %}disabled{% else %}
+                    data-confirm-url="{{ url_for('accounts.setup_delete_account', account_id=account.id) }}"
+                    data-confirm-title="Delete “{{ account.name }}”?"
+                    data-confirm-body="This permanently deletes the unused account. This cannot be undone."
+                    data-confirm-label="Delete" data-confirm-tone="danger" data-revision="{{ account.revision }}"{% endif %}>
+              <i class="bi bi-trash" aria-hidden="true"></i>
+            </button>
+            {% else %}<span class="aw-muted">View only</span>{% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="aw-empty">
+  <div class="aw-empty-icon"><i class="bi bi-wallet2" aria-hidden="true"></i></div>
+  <h2>{{ 'No matching accounts' if account_q or account_status != 'all' else 'No accounts yet' }}</h2>
+  <p>{{ 'Try a different search or status filter.' if account_q or account_status != 'all' else 'Add your first cash, bank, or mobile wallet account. Every payment, receipt, and transfer will use these accounts.' }}</p>
+  {% if can_manage and not account_q and account_status == 'all' %}
+  <button type="button" class="aw-btn aw-btn-primary" data-bs-toggle="modal" data-bs-target="#accountModal" data-account-create>
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Add your first account
+  </button>
+  {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,93 @@
+<div class="aw-toolbar">
+  <div>
+    <h1 class="aw-heading">Categories</h1>
+    <p class="aw-subheading">Your own labels for money in and money out.</p>
+  </div>
+  {% if can_manage %}
+  <button type="button" class="aw-btn aw-btn-primary" data-bs-toggle="modal" data-bs-target="#categoryModal" data-category-create>
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> New category
+  </button>
+  {% endif %}
+</div>
+
+<form class="aw-filters" method="get" action="{{ url_for('accounts.manage_categories') }}">
+  <label class="aw-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <span class="visually-hidden">Search categories</span>
+    <input type="search" name="q" value="{{ category_q }}" placeholder="Search categories" autocomplete="off">
+  </label>
+  <label class="visually-hidden" for="category-status-filter">Status</label>
+  <select id="category-status-filter" class="aw-select" name="status" data-auto-submit>
+    <option value="all" {% if category_status == 'all' %}selected{% endif %}>All statuses</option>
+    <option value="active" {% if category_status == 'active' %}selected{% endif %}>Active</option>
+    <option value="suspended" {% if category_status == 'suspended' %}selected{% endif %}>Suspended</option>
+  </select>
+  <button class="aw-btn aw-btn-ghost" type="submit">Filter</button>
+</form>
+
+{% if categories %}
+<div class="aw-table-wrap">
+  <table class="aw-table">
+    <thead>
+      <tr>
+        <th scope="col">Category</th>
+        <th scope="col">Used for</th>
+        <th scope="col">History</th>
+        <th scope="col">Status</th>
+        <th scope="col" class="aw-actions-col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for category in categories %}
+      <tr class="{{ 'is-suspended-row' if not category.is_active }}">
+        <td>
+          <div class="aw-name">{{ category.name }}</div>
+          {% if category.notes %}<div class="aw-muted">{{ category.notes }}</div>{% endif %}
+          {% if category.subcategory_count %}<div class="aw-muted">{{ category.subcategory_count }} subcategor{{ 'y' if category.subcategory_count == 1 else 'ies' }}</div>{% endif %}
+        </td>
+        <td><span class="aw-direction aw-direction-{{ category.direction }}">{{ category.direction_label }}</span></td>
+        <td class="aw-muted">{{ category.usage_count ~ ' record' ~ ('s' if category.usage_count != 1 else '') if category.usage_count else 'Not used yet' }}</td>
+        <td><span class="aw-status {{ 'is-active' if category.is_active else 'is-suspended' }}">{{ 'Active' if category.is_active else 'Suspended' }}</span></td>
+        <td>
+          <div class="aw-actions">
+            {% if can_manage %}
+            <button type="button" class="aw-icon-btn" title="Edit category" aria-label="Edit {{ category.name }}" data-category-edit="{{ category.id }}">
+              <i class="bi bi-pencil" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="aw-icon-btn" title="{{ 'Resume' if not category.is_active else 'Suspend' }} category"
+                    aria-label="{{ 'Resume' if not category.is_active else 'Suspend' }} {{ category.name }}"
+                    data-confirm-url="{{ url_for('accounts.setup_category_status', category_id=category.id) }}"
+                    data-confirm-title="{{ 'Resume' if not category.is_active else 'Suspend' }} “{{ category.name }}”?"
+                    data-confirm-body="{{ 'This category will be available for new transactions again.' if not category.is_active else 'It will be hidden from new transactions. Existing records keep this category.' }}"
+                    data-confirm-label="{{ 'Resume' if not category.is_active else 'Suspend' }}"
+                    data-confirm-tone="{{ 'primary' if not category.is_active else 'warning' }}">
+              <i class="bi {{ 'bi-play-circle' if not category.is_active else 'bi-pause-circle' }}" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="aw-icon-btn aw-danger" title="{{ 'Delete category' if category.can_delete else 'Cannot delete: category is used' }}"
+                    aria-label="Delete {{ category.name }}" {% if not category.can_delete %}disabled{% else %}
+                    data-confirm-url="{{ url_for('accounts.setup_delete_category', category_id=category.id) }}"
+                    data-confirm-title="Delete “{{ category.name }}”?"
+                    data-confirm-body="This permanently deletes the unused category{% if category.subcategory_count %} and its {{ category.subcategory_count }} unused subcategor{{ 'y' if category.subcategory_count == 1 else 'ies' }}{% endif %}. This cannot be undone."
+                    data-confirm-label="Delete" data-confirm-tone="danger"{% endif %}>
+              <i class="bi bi-trash" aria-hidden="true"></i>
+            </button>
+            {% else %}<span class="aw-muted">View only</span>{% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="aw-empty">
+  <div class="aw-empty-icon"><i class="bi bi-tags" aria-hidden="true"></i></div>
+  <h2>{{ 'No matching categories' if category_q or category_status != 'all' else 'No categories yet' }}</h2>
+  <p>{{ 'Try a different search or status filter.' if category_q or category_status != 'all' else 'Create the labels that make sense for your business, such as rent income, fuel, or repairs. Nothing is added automatically.' }}</p>
+  {% if can_manage and not category_q and category_status == 'all' %}
+  <button type="button" class="aw-btn aw-btn-primary" data-bs-toggle="modal" data-bs-target="#categoryModal" data-category-create>
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Create your first category
+  </button>
+  {% endif %}
+</div>
+{% endif %}

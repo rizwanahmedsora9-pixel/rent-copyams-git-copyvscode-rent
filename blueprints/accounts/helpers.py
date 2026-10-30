@@ -208,13 +208,11 @@ def _supplier_payable_summary():
 
 
 def _company_accounts():
-    company_accounts = Account.query.filter(
-        func.coalesce(Account.is_active, True) == True,
-        func.lower(func.trim(Account.account_type)) == 'company'
-    ).order_by(Account.name.asc()).all()
-    if company_accounts:
-        return company_accounts
-    return Account.query.filter(func.coalesce(Account.is_active, True) == True).order_by(Account.name.asc()).all()
+    """Active business money accounts only; never fall back to party ledgers."""
+    from app.services.account_setup import setup_accounts_query
+    return setup_accounts_query().filter(
+        func.coalesce(Account.is_active, True) == True
+    ).order_by(Account.name.asc(), Account.id.asc()).all()
 
 
 def _account_categories():

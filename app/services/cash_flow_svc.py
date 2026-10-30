@@ -382,22 +382,20 @@ def _cf_is_money_account(account):
 
 
 def _cf_company_accounts(active_only=True):
-    q = Account.query
+    from app.services.account_setup import setup_accounts_query
+    q = setup_accounts_query()
     if active_only:
         q = q.filter(func.coalesce(Account.is_active, True) == True)
-    rows = []
-    for acc in q.order_by(Account.name.asc(), Account.id.asc()).all():
-        if (acc.category or '').lower() in ('cash', 'bank'):
-            rows.append(acc)
-    return rows
+    return q.order_by(Account.name.asc(), Account.id.asc()).all()
 
 
 def _cf_account_label(account):
     if account is None:
         return ''
-    cat = (account.category or 'cash').upper()
+    from app.services.account_setup import account_type_key, ACCOUNT_TYPES
+    label = ACCOUNT_TYPES[account_type_key(account)]['label']
     bal = _money_round(account.balance or 0)
-    return f'{account.name} · {cat} · Rs. {bal:,.0f}'
+    return f'{account.name} · {label} · Rs. {bal:,.0f}'
 
 
 def _cf_normalize_direction(value):

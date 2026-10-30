@@ -7,6 +7,7 @@ from .payments import *  # noqa
 from .accounts_crud import *  # noqa
 from .transactions import *  # noqa
 from .kpis import *  # noqa
+from .workspace import *  # noqa
 # Classification registry + shared form logic + transaction tree are imported
 # here so they are part of the package namespace.
 from . import classification, account_form, transaction_tree  # noqa: F401

@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+{% block title %}Accounts{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='accounts_workspace.css') }}">
+<div class="aw-shell">
+  <nav class="aw-tabs" aria-label="Accounts workspace">
+    {% for key, label, endpoint, icon in tabs %}
+    <a class="aw-tab {{ 'is-active' if active_tab == key }}" href="{{ url_for(endpoint) }}" {% if active_tab == key %}aria-current="page"{% endif %}>
+      <i class="bi {{ icon }}" aria-hidden="true"></i>
+      <span>{{ label }}</span>
+      {% if key == 'accounts' and setup_account_count %}<span class="aw-count">{{ setup_account_count }}</span>{% endif %}
+      {% if key == 'categories' and setup_category_count %}<span class="aw-count">{{ setup_category_count }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </nav>
+
+  <div class="aw-panel">
+    {% if active_tab == 'accounts' %}
+      {% include 'accounts/_workspace_accounts.html' %}
+    {% elif active_tab == 'categories' %}
+      {% include 'accounts/_workspace_categories.html' %}
+    {% else %}
+      {% include 'accounts/_workspace_cash_flow.html' %}
+    {% endif %}
+  </div>
+</div>
+
+{% if can_manage and active_tab in ['accounts', 'categories'] %}
+  {% include 'accounts/_workspace_modals.html' %}
+{% endif %}
+
+<script>
+  window.AW_DATA = {{ {
+    'accounts': accounts,
+    'categories': categories,
+    'modalOpen': modal_open,
+    'editAccountId': edit_account_id,
+    'editCategoryId': edit_category_id,
+    'formValues': form_values
+  }|tojson }};
+</script>
+<script src="{{ url_for('static', filename='accounts_workspace.js') }}"></script>
+{% endblock %}
