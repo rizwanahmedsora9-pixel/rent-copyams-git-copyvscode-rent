@@ -17,6 +17,8 @@
 </div>
 {% else %}
 {% set mode = tx_values.tx_mode %}
+{% set receive_source = tx_values.get('receive_source', 'client') %}
+{% set source_icons = {'client': 'bi-person-vcard', 'party': 'bi-people', 'other': 'bi-pencil-square'} %}
 <form id="transactionForm" method="post" action="{{ url_for('accounts.add_transaction') }}" class="aw-tx-layout">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="entry_source" value="accounts_workspace">
@@ -89,12 +91,94 @@
         <p class="aw-field-error" id="tx-same-account" role="alert" hidden>Choose two different accounts.</p>
       </fieldset>
 
-      <fieldset class="aw-tx-section aw-form-grid" data-tx-panel="receive pay" {% if mode == 'transfer' %}disabled hidden{% endif %}>
-        <legend class="aw-tx-section-title">Transaction details</legend>
-        <div>
-          <label class="aw-label" for="tx-party" id="tx-party-label">{{ 'Received from' if mode == 'receive' else 'Paid to' }} <span aria-hidden="true">*</span></label>
-          <input class="aw-input" id="tx-party" name="party" required maxlength="160" autocomplete="off" placeholder="{{ 'Person or business' if mode == 'receive' else 'Person, business, or expense' }}" value="{{ tx_values.get('party', '') }}">
+      {# ---- Received from: clients, parties (loan givers), or a typed name ---- #}
+      <fieldset class="aw-tx-section" data-tx-panel="receive" {% if mode != 'receive' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Received from</legend>
+        <input type="hidden" name="receive_source" id="tx-receive-source" value="{{ receive_source }}">
+        <div class="aw-source-tabs" role="group" aria-label="Who the money was received from">
+          {% for key in ['client', 'party', 'other'] %}
+          <button type="button" class="aw-source-tab {{ 'is-active' if receive_source == key }}" data-tx-source="{{ key }}"
+                  aria-pressed="{{ 'true' if receive_source == key else 'false' }}">
+            <i class="bi {{ source_icons[key] }}" aria-hidden="true"></i><span>{{ tx_receive_sources[key].label }}</span>
+          </button>
+          {% endfor %}
         </div>
+        <p class="aw-help" id="tx-source-hint">{{ tx_receive_sources[receive_source].hint }}</p>
+
+        {# Client: searchable list, live payable, discount against dues #}
+        <fieldset class="aw-tx-source" data-tx-source-panel="client" {% if receive_source != 'client' %}disabled hidden{% endif %}>
+          <div class="aw-picker" data-picker="client" data-picker-items="clients">
+            <label class="aw-label" for="tx-client-search">Client <span aria-hidden="true">*</span></label>
+            <div class="aw-picker-control">
+              <i class="bi bi-search aw-picker-icon" aria-hidden="true"></i>
+              <input class="aw-input aw-picker-input" id="tx-client-search" type="text" data-picker-input
+                     placeholder="Search clients by name, code, or phone…" autocomplete="off"
+                     role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tx-client-list">
+              <button type="button" class="aw-picker-toggle" data-picker-toggle tabindex="-1" aria-label="Show client list">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="aw-picker-list" id="tx-client-list" role="listbox" aria-label="Clients" data-picker-list hidden></div>
+            <input type="hidden" name="client_code" id="tx-client-code" data-picker-value value="{{ tx_values.get('client_code', '') }}">
+            <p class="aw-help" data-picker-help>{{ '%d active clients. Start typing to narrow the list.'|format(tx_clients|length) if tx_clients else 'No active clients yet — add one from the Clients page, or switch to Party or Other.' }}</p>
+          </div>
+
+          <div class="aw-dues" id="tx-client-dues" hidden>
+            <div class="aw-dues-head">
+              <span class="aw-tx-eyebrow">Payable amount</span>
+              <strong class="aw-mono" id="tx-client-payable">—</strong>
+            </div>
+            <p class="aw-help" id="tx-client-dues-note"></p>
+          </div>
+        </fieldset>
+
+        {# Party: loan givers, lenders and other outside parties #}
+        <fieldset class="aw-tx-source" data-tx-source-panel="party" {% if receive_source != 'party' %}disabled hidden{% endif %}>
+          <div class="aw-picker" data-picker="party" data-picker-items="parties">
+            <label class="aw-label" for="tx-party-search">Party <span aria-hidden="true">*</span></label>
+            <div class="aw-picker-control">
+              <i class="bi bi-search aw-picker-icon" aria-hidden="true"></i>
+              <input class="aw-input aw-picker-input" id="tx-party-search" type="text" data-picker-input
+                     placeholder="Search loan givers and other parties…" autocomplete="off"
+                     role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tx-party-list">
+              <button type="button" class="aw-picker-toggle" data-picker-toggle tabindex="-1" aria-label="Show party list">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="aw-picker-list" id="tx-party-list" role="listbox" aria-label="Parties" data-picker-list hidden></div>
+            <input type="hidden" name="party_id" id="tx-party-id" data-picker-value value="{{ tx_values.get('party_id', '') }}">
+            <input type="hidden" name="party_name" id="tx-party-name" value="{{ tx_values.get('party_name', '') }}">
+            <p class="aw-help" data-picker-help>Pick a saved party, or type a new name — it is added to your party list for next time.</p>
+          </div>
+          <div>
+            <label class="aw-label" for="tx-party-type">Party type</label>
+            <select class="aw-select" id="tx-party-type" name="party_type">
+              {% for party_type in tx_party_types %}
+              <option value="{{ party_type.key }}" {% if tx_values.get('party_type', '') == party_type.key %}selected{% endif %}>{{ party_type.label }}</option>
+              {% endfor %}
+            </select>
+            <p class="aw-help">Used when you add a new party. A party picked from the list keeps its saved type.</p>
+          </div>
+        </fieldset>
+
+        {# Other: one-off counterparty, nothing saved to a master list #}
+        <fieldset class="aw-tx-source" data-tx-source-panel="other" {% if receive_source != 'other' %}disabled hidden{% endif %}>
+          <label class="aw-label" for="tx-receive-other" id="tx-receive-other-label">Received from <span aria-hidden="true">*</span></label>
+          <input class="aw-input" id="tx-receive-other" name="party" maxlength="160" autocomplete="off"
+                 placeholder="Person or business" value="{{ tx_values.get('party', '') if mode == 'receive' and receive_source == 'other' else '' }}">
+          <p class="aw-help">Recorded on this transaction only. Switch to Party to keep a reusable name.</p>
+        </fieldset>
+      </fieldset>
+
+      <fieldset class="aw-tx-section" data-tx-panel="pay" {% if mode != 'pay' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Payment details</legend>
+        <label class="aw-label" for="tx-party" id="tx-party-label">Paid to <span aria-hidden="true">*</span></label>
+        <input class="aw-input" id="tx-party" name="party" maxlength="160" autocomplete="off"
+               placeholder="Person, business, or expense" value="{{ tx_values.get('party', '') if mode == 'pay' else '' }}">
+      </fieldset>
+
+      <fieldset class="aw-tx-section aw-form-grid" id="tx-category-section" data-tx-panel="receive pay" {% if mode == 'transfer' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Transaction details</legend>
         <div>
           <label class="aw-label" for="tx-category">Category <span class="aw-optional">(optional)</span></label>
           <select class="aw-select" id="tx-category" name="category">
@@ -116,14 +200,25 @@
             {% endfor %}
           </select>
         </div>
+        <p class="aw-help" id="tx-category-client-note" hidden><i class="bi bi-info-circle" aria-hidden="true"></i> A client receipt is recorded against the client's own ledger, so it needs no category here.</p>
       </fieldset>
 
       <fieldset class="aw-tx-section">
         <legend class="aw-tx-section-title">Amount &amp; record</legend>
         <div class="aw-form-grid">
           <div>
-            <label class="aw-label" for="tx-amount">Amount (PKR) <span aria-hidden="true">*</span></label>
-            <input class="aw-input aw-mono aw-tx-amount" id="tx-amount" name="amount" type="number" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00" value="{{ tx_values.get('amount', '') }}">
+            <label class="aw-label" for="tx-amount" id="tx-amount-label">Amount (PKR) <span aria-hidden="true">*</span></label>
+            <input class="aw-input aw-mono aw-tx-amount" id="tx-amount" name="amount" type="number" min="0" max="999999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00" value="{{ tx_values.get('amount', '') }}">
+            <p class="aw-help" id="tx-amount-help"></p>
+          </div>
+          <div id="tx-discount-field" hidden>
+            <label class="aw-label" for="tx-discount">Discount (PKR) <span class="aw-optional">(optional)</span></label>
+            <input class="aw-input aw-mono" id="tx-discount" name="discount" type="number" min="0" max="999999999999.99" step="0.01" inputmode="decimal" placeholder="0.00" disabled value="{{ tx_values.get('discount', '') }}">
+            <p class="aw-help">Reduces what the client owes. A discount-only entry may leave the amount at 0.</p>
+          </div>
+          <div id="tx-discount-reason-field" hidden>
+            <label class="aw-label" for="tx-discount-reason" id="tx-discount-reason-label">Discount reason</label>
+            <input class="aw-input" id="tx-discount-reason" name="discount_reason" maxlength="200" placeholder="Why the discount was given" disabled value="{{ tx_values.get('discount_reason', '') }}">
           </div>
           <div>
             <label class="aw-label" for="tx-date">Date &amp; time <span aria-hidden="true">*</span></label>
@@ -133,6 +228,7 @@
           <div>
             <label class="aw-label" for="tx-reference">Reference <span class="aw-optional">(optional)</span></label>
             <input class="aw-input" id="tx-reference" name="reference_no" maxlength="80" placeholder="Voucher, slip, or cheque number" value="{{ tx_values.get('reference_no', '') }}">
+            <p class="aw-help" id="tx-reference-help" hidden>Saved as the client receipt's bill / voucher reference — up to 43 characters.</p>
           </div>
           <div>
             <label class="aw-label" for="tx-note">Note <span class="aw-optional">(optional)</span></label>
@@ -155,6 +251,13 @@
         <div><span id="tx-preview-from-label">{{ 'Received from' if mode == 'receive' else 'From' }}</span><strong id="tx-preview-from">—</strong></div>
         <i class="bi bi-arrow-down" aria-hidden="true"></i>
         <div><span id="tx-preview-to-label">{{ 'Received into' if mode == 'receive' else 'Paid to' }}</span><strong id="tx-preview-to">—</strong></div>
+      </div>
+      <div class="aw-tx-dues" id="tx-preview-dues" hidden>
+        <span class="aw-tx-eyebrow">Client settlement</span>
+        <div><span>Payable before</span><strong class="aw-mono" id="tx-preview-payable">—</strong></div>
+        <div><span>Received now</span><strong class="aw-mono" id="tx-preview-received">—</strong></div>
+        <div><span>Discount given</span><strong class="aw-mono" id="tx-preview-discount">—</strong></div>
+        <div class="aw-tx-dues-total"><span>Still payable</span><strong class="aw-mono" id="tx-preview-remaining">—</strong></div>
       </div>
       <div class="aw-tx-balance"><span id="tx-preview-balance-label">Balance after transaction</span><strong class="aw-mono" id="tx-preview-balance">—</strong></div>
       <p class="aw-field-error" id="tx-funds-warning" role="alert" hidden></p>

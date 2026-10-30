@@ -295,15 +295,21 @@ def save_client_payment(
     from app.services.waive import _sync_payment_waive_off
 
     key = _normalise_key(idempotency_key)
+    # Fingerprint the *submitted* payload once, before any normalisation below
+    # rewrites the arguments (a Refund flips the sign of ``amount``, the method
+    # is canonicalised, the account id is resolved).  Both the replay check and
+    # the stored hash must see the same values, otherwise a legitimate retry of
+    # a refund is rejected as "a different payment".
+    submitted_hash = _payment_payload_hash(
+        client_code=client_code, client_name=client_name, amount=amount,
+        discount=discount, method=method, payment_type=payment_type,
+        payment_account_id=payment_account_id, manual_bill_no=manual_bill_no,
+        date_posted=date_posted, note=note,
+    )
     if not payment_id and key:
         replay = Payment.query.filter_by(idempotency_key=key).first()
         if replay:
-            payload_hash = _payment_payload_hash(
-                client_code=client_code, client_name=client_name, amount=amount,
-                discount=discount, method=method, payment_type=payment_type,
-                payment_account_id=payment_account_id, manual_bill_no=manual_bill_no,
-                date_posted=date_posted, note=note,
-            )
+            payload_hash = submitted_hash
             stored = getattr(replay, "idempotency_payload_hash", None)
             if stored and stored != payload_hash:
                 raise ValueError(
@@ -470,14 +476,10 @@ def save_client_payment(
     payment.is_void = False
     payment.idempotency_key = key if created else payment.idempotency_key
     if created and key:
-        payment.idempotency_payload_hash = _payment_payload_hash(
-            client_code=payment.client_code, client_name=payment.client_name,
-            amount=payment.amount, discount=payment.discount,
-            method=payment.method, payment_type=payment.payment_type,
-            payment_account_id=payment.payment_account_id,
-            manual_bill_no=payment.manual_bill_no,
-            date_posted=payment.date_posted, note=payment.note,
-        )
+        # ``Payment`` has no ``client_code`` column and ``payment.amount`` is
+        # already sign-normalised, so the stored fingerprint is the submitted
+        # one captured above — the exact value a retry is compared against.
+        payment.idempotency_payload_hash = submitted_hash
     payment.updated_by = _actor(actor)
     payment.revision = revision + 1
     if created:
@@ -588,14 +590,18 @@ def save_supplier_payment(
     from app.services.time_money import resolve_posted_datetime
 
     key = _normalise_key(idempotency_key)
+    # Same rule as the client path: fingerprint the submitted payload before
+    # normalisation so a retry of the identical form is recognised as a replay
+    # instead of being rejected as "a different payment".
+    submitted_hash = _payment_payload_hash(
+        client_code="", client_name="", amount=amount,
+        method=method, payment_account_id=payment_account_id,
+        manual_bill_no=manual_bill_no, date_posted=date_posted, note=note,
+    )
     if not payment_id and key:
         replay = SupplierPayment.query.filter_by(idempotency_key=key).first()
         if replay:
-            payload_hash = _payment_payload_hash(
-                client_code="", client_name="", amount=amount,
-                method=method, payment_account_id=payment_account_id,
-                manual_bill_no=manual_bill_no, date_posted=date_posted, note=note,
-            )
+            payload_hash = submitted_hash
             stored = getattr(replay, "idempotency_payload_hash", None)
             if stored and stored != payload_hash:
                 raise ValueError(
@@ -699,12 +705,7 @@ def save_supplier_payment(
     payment.is_void = False
     payment.idempotency_key = key if created else payment.idempotency_key
     if created and key:
-        payment.idempotency_payload_hash = _payment_payload_hash(
-            amount=payment.amount, method=payment.method,
-            payment_account_id=payment.payment_account_id,
-            manual_bill_no=payment.manual_bill_no,
-            date_posted=payment.date_posted, note=payment.note,
-        )
+        payment.idempotency_payload_hash = submitted_hash
     payment.updated_by = _actor(actor)
     payment.revision = revision + 1
     if created:

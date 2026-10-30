@@ -7,7 +7,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
-from models import Account, CashFlowCategory, db
+from models import Account, CashFlowCategory, CashFlowParty, Client, db
 from app.services import account_setup as setup
 from app.services.cash_flow_svc import collect_cash_flow_rows, filter_cash_flow_rows, summarize_cash_flow_rows
 from app.services.payments_crud import ledger_balance
@@ -119,6 +119,58 @@ def _category_rows():
     return rows, q, status
 
 
+def _receive_client_options():
+    """Active clients for the New Transaction receive picker.
+
+    Payable amounts are deliberately *not* computed here: projecting a client
+    ledger is expensive and only the picked client is ever displayed, so the
+    amount is fetched on demand from ``accounts.transaction_client_dues``.
+    """
+    rows = []
+    clients = Client.query.filter(
+        func.coalesce(Client.is_active, True) == True,  # noqa: E712
+    ).order_by(Client.name.asc(), Client.id.asc()).all()
+    for client in clients:
+        rows.append({
+            "code": (client.code or "").strip(),
+            "name": (client.name or "").strip(),
+            "phone": (client.phone or "").strip(),
+            "category": (client.category or "").strip(),
+        })
+    return rows
+
+
+def _receive_party_options():
+    """Reusable outside parties: loan givers, lenders, and other counterparties."""
+    from app.services.account_transactions import _party_type_labels
+
+    labels = _party_type_labels()
+    rows = []
+    parties = CashFlowParty.query.filter(
+        func.coalesce(CashFlowParty.is_active, True) == True,  # noqa: E712
+    ).order_by(CashFlowParty.name.asc(), CashFlowParty.id.asc()).all()
+    for party in parties:
+        party_type = (party.party_type or "other").strip().lower() or "other"
+        rows.append({
+            "id": party.id,
+            "name": (party.name or "").strip(),
+            "party_type": party_type,
+            "type_label": labels.get(party_type, labels.get("other", "Other")),
+            "phone": (party.phone or "").strip(),
+            "note": (party.note or "").strip(),
+        })
+    return rows
+
+
+def _party_type_options():
+    from app.services.account_transactions import _party_type_labels
+
+    labels = _party_type_labels()
+    order = ("loan", "outsider", "person", "other")
+    keys = [key for key in order if key in labels] + [key for key in labels if key not in order]
+    return [{"key": key, "label": labels[key]} for key in keys]
+
+
 def _cash_flow_context(all_accounts):
     today = pk_today()
     default_from = (today - timedelta(days=29)).strftime("%Y-%m-%d")
@@ -213,11 +265,25 @@ def render_workspace(active_tab="cash-flow", *, modal_open=None, form_values=Non
             values["tx_mode"] = "receive"
         values.setdefault("date_posted", pk_now().strftime("%Y-%m-%dT%H:%M"))
         values.setdefault("idempotency_key", uuid4().hex)
+        from app.services.account_transactions import DEFAULT_RECEIVE_SOURCE, RECEIVE_SOURCES
+
+        source = (values.get("receive_source") or "").strip().lower()
+        if source not in RECEIVE_SOURCES:
+            # A fresh visit starts on the common case. A re-render of a
+            # submitted form must show the source the service will actually
+            # apply, or a counterparty typed without the field would vanish
+            # between the failed post and the page that asks for a correction.
+            source = DEFAULT_RECEIVE_SOURCE if form_values else "client"
+        values["receive_source"] = source
         context.update({
             "tx_values": values,
             "tx_now": pk_now().strftime("%Y-%m-%dT%H:%M"),
             "tx_accounts": [account for account in accounts if account["is_active"]],
             "tx_categories": build_unified_category_catalog()["all_categories"],
+            "tx_clients": _receive_client_options(),
+            "tx_parties": _receive_party_options(),
+            "tx_receive_sources": RECEIVE_SOURCES,
+            "tx_party_types": _party_type_options(),
         })
     return render_template("accounts/workspace.html", **context), status
 
