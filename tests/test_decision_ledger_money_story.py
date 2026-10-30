@@ -129,3 +129,29 @@ def test_delivery_gap_negative_when_deliveries_ahead(app, client):
     _login(client)
     body = client.get("/decision_ledger").get_data(as_text=True)
     assert "Deliveries ahead of money" in body
+
+
+def test_material_and_date_filters_scope_activity_and_preserve_financials(app, client):
+    _seed_story(app)
+    _login(client)
+    today = datetime.now().date().isoformat()
+    response = client.get('/decision_ledger', query_string={
+        'material': 'cement', 'date_from': today, 'date_to': today,
+    })
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'DL Client' in body
+    assert 'B:0' in body and 'D:120' in body and 'R:-120' in body
+    assert '80,000' in body  # money is lifetime and explicitly labelled as such
+    assert 'lifetime client-wide balances' in body
+    assert 'expected pending' not in body.lower()
+
+    body = client.get('/decision_ledger', query_string={'material': 'sand'}).get_data(as_text=True)
+    assert 'DL Client' not in body
+    assert 'No clients match the selection' in body
+
+
+def test_decision_ledger_rejects_invalid_date_ranges(app, client):
+    _login(client)
+    assert client.get('/decision_ledger?date_from=bad').status_code == 400
+    assert client.get('/decision_ledger?date_from=2026-02-02&date_to=2026-02-01').status_code == 400
