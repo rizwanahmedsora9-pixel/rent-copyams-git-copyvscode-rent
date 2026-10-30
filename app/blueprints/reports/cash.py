@@ -15,6 +15,7 @@ from app.services.cash_flow_svc import (
     cf_used_party_ids,
     cf_used_subcategory_ids,
     collect_cash_flow_rows,
+    collect_unassigned_cash_flow_rows,
     filter_cash_flow_rows,
     subcategories_for_category,
     summarize_cash_flow_rows,
@@ -24,6 +25,11 @@ from app.services.cash_flow_svc import (
     _cf_normalize_direction,
     _cf_sort_key,
     _cf_type_label,
+    _account_report_opening,
+    _automatic_report_opening_balance,
+    _cash_count_carry_adjustments,
+    _physical_cash_report_closing,
+    _report_period_openings,
 )
 
 
@@ -202,6 +208,7 @@ def cash_flow():
     )
     posted_after = fresh_start_cutoff if hide_existing_today_entries else None
 
+    filter_account_id = source.get('account_id', type=int)
     if opening_balance_input:
         try:
             opening_balance = float(opening_balance_input)
@@ -211,10 +218,11 @@ def cash_flow():
         opening_balance = today_opening_override
     elif hide_existing_today_entries:
         opening_balance = 0.0
+    elif filter_account_id:
+        opening_balance = _account_report_opening(filter_account_id, from_date_dt)
     else:
-        opening_balance = _automatic_cash_opening_balance(from_date_dt)
+        opening_balance = _automatic_report_opening_balance(from_date_dt)
 
-    filter_account_id = source.get('account_id', type=int)
     filter_status = (filter_kwargs.get('status') or 'active').strip().lower()
     all_rows = collect_cash_flow_rows(
         from_date, to_date,
@@ -234,18 +242,39 @@ def cash_flow():
         if filter_status in ('active', 'voided'):
             display_rows = [r for r in display_rows if (r.get('status') or 'active') == filter_status]
 
-    closing_balance = apply_running_balance(display_rows, opening_balance, account_id=filter_account_id)
+    # Imported source records without an account posting are useful evidence,
+    # but are not account movements. List them separately, never in totals.
+    unassigned_rows = []
+    if (not filter_account_id or export_scope == 'all') and filter_status in ('active', 'all'):
+        unassigned_rows = collect_unassigned_cash_flow_rows(from_date, to_date, assigned_rows=all_rows, posted_after=posted_after)
+        if not (export_scope == 'all' and (export_csv == '1' or export_pdf == '1')):
+            unassigned_rows = filter_cash_flow_rows(unassigned_rows, {
+                **filter_kwargs, 'account_id': None, 'filter_type': filter_type, 'status': 'all',
+            })
+        for row in unassigned_rows:
+            row['status'] = 'unassigned'
+
+    opening_additions = _report_period_openings(from_date_dt, to_date_dt, filter_account_id)
+    from utils.money import from_minor, to_minor
+    all_count_carry = _cash_count_carry_adjustments(from_date_dt, to_date_dt)
+    # A company-wide count cannot safely be allocated to one account, or to
+    # an opening balance that the user has manually overridden.
+    count_carry_adjustments = (all_count_carry if not filter_account_id
+                               and not opening_balance_input and not hide_existing_today_entries else [])
+    baselines = opening_additions + [
+        {'date': item['effective_date'], 'amount_minor': item['delta_minor']}
+        for item in count_carry_adjustments
+    ]
+    closing_balance = apply_running_balance(display_rows, opening_balance, account_id=filter_account_id, baselines=baselines)
     summary = summarize_cash_flow_rows(display_rows, account_id=filter_account_id)
     total_cash_in = summary['total_cash_in']
     total_cash_out = summary['total_cash_out']
 
-    # Reconciliation must always compare physical cash against the FULL
-    # (unfiltered, company-wide) closing for the period — never against a
-    # closing narrowed by type/category/party/account display filters.
-    active_all_rows = [r for r in all_rows if (r.get('status') or 'active') == 'active']
-    reconciliation_closing = apply_running_balance(
-        [dict(r) for r in active_all_rows], opening_balance
-    )
+    # Physical cash counts cannot be compared with the combined cash+bank
+    # closing above. Compute the unfiltered cash-account position separately,
+    # including the cash side of transfers, regardless of display filters.
+    reconciliation_closing = float(from_minor(to_minor(_physical_cash_report_closing(from_date_dt, to_date_dt))
+                                             + sum(item['delta_minor'] for item in all_count_carry)))
 
     try:
         adjustment_date_dt = datetime.strptime(adjustment_date_input, '%Y-%m-%d').date()
@@ -267,12 +296,15 @@ def cash_flow():
             'Amount', 'Received', 'Spent', 'Transfer', 'Description', 'Notes',
             'Reference', 'Source', 'Created By', 'Status',
         ])
-        for r in display_rows:
+        for r in display_rows + unassigned_rows:
+            posted = (r.get('status') or 'active') == 'active'
             writer.writerow([
                 r.get('date'), r.get('tx_type_label'), r.get('account_display'),
                 r.get('category'), r.get('subcategory'), r.get('party_name'),
-                r.get('amount'), r.get('cash_in') or '', r.get('cash_out') or '',
-                r.get('transfer_amount') or '', r.get('description'), r.get('note'),
+                f"{r.get('amount', 0):.2f}", f"{r['cash_in']:.2f}" if posted and r.get('cash_in') else '',
+                f"{r['cash_out']:.2f}" if posted and r.get('cash_out') else '',
+                f"{r['transfer_amount']:.2f}" if posted and r.get('transfer_amount') else '', r.get('description'),
+                ' | '.join(filter(None, (r.get('note'), r.get('warning')))),
                 r.get('reference'), r.get('origin_label'), r.get('created_by'),
                 r.get('status'),
             ])
@@ -284,10 +316,13 @@ def cash_flow():
     cash_accounts = _cf_company_accounts(active_only=True)
     cash_accounts_list = [a for a in cash_accounts if (a.category or 'cash').lower() == 'cash']
     bank_accounts_list = [a for a in cash_accounts if (a.category or '').lower() == 'bank']
-    cash_total = sum(_money_round(a.balance or 0) for a in cash_accounts_list)
-    bank_total = sum(_money_round(a.balance or 0) for a in bank_accounts_list)
+    from app.services.accounting import _account_minor
+    report_account_balances = {a.id: float(from_minor(_account_minor(a))) for a in cash_accounts}
+    cash_total = float(from_minor(sum(_account_minor(a) for a in cash_accounts_list)))
+    bank_total = float(from_minor(sum(_account_minor(a) for a in bank_accounts_list)))
 
-    # Per-account activity within the currently filtered rows (for cash/bank cards).
+    # Per-account activity includes the relevant side of transfers, so it
+    # agrees with each account's own ledger (company-wide totals still net them).
     account_activity = {}
     for r in display_rows:
         if (r.get('status') or 'active') != 'active':
@@ -295,17 +330,24 @@ def cash_flow():
         rtype = r.get('type')
         aid = r.get('account_id')
         if aid:
-            act = account_activity.setdefault(aid, {'in': 0.0, 'out': 0.0, 'transfer_in': 0.0, 'transfer_out': 0.0})
+            act = account_activity.setdefault(aid, {'in': 0, 'out': 0, 'transfer_in': 0, 'transfer_out': 0})
             if rtype == CF_DIR_IN:
-                act['in'] += float(r.get('cash_in') or 0)
+                act['in'] += to_minor(r.get('cash_in') or 0)
             elif rtype == CF_DIR_OUT:
-                act['out'] += float(r.get('cash_out') or 0)
+                act['out'] += to_minor(r.get('cash_out') or 0)
             elif rtype == CF_DIR_TRANSFER:
-                act['transfer_out'] += float(r.get('transfer_amount') or 0)
+                minor = to_minor(r.get('transfer_amount') or 0)
+                act['out'] += minor
+                act['transfer_out'] += minor
         aid2 = r.get('account_to_id')
         if aid2 and rtype == CF_DIR_TRANSFER:
-            act2 = account_activity.setdefault(aid2, {'in': 0.0, 'out': 0.0, 'transfer_in': 0.0, 'transfer_out': 0.0})
-            act2['transfer_in'] += float(r.get('transfer_amount') or 0)
+            act2 = account_activity.setdefault(aid2, {'in': 0, 'out': 0, 'transfer_in': 0, 'transfer_out': 0})
+            minor = to_minor(r.get('transfer_amount') or 0)
+            act2['in'] += minor
+            act2['transfer_in'] += minor
+    for act in account_activity.values():
+        for key in act:
+            act[key] = float(from_minor(act[key]))
 
     cf_categories = CashFlowCategory.query.order_by(CashFlowCategory.sort_order, CashFlowCategory.name).all()
     cf_subcategories = CashFlowSubcategory.query.order_by(CashFlowSubcategory.name).all()
@@ -338,11 +380,15 @@ def cash_flow():
 
     common = dict(
         rows=display_rows,
+        unassigned_rows=unassigned_rows,
         cash_accounts=cash_accounts,
         cash_accounts_list=cash_accounts_list,
         bank_accounts_list=bank_accounts_list,
         cash_total=cash_total,
         bank_total=bank_total,
+        report_account_balances=report_account_balances,
+        opening_additions=opening_additions,
+        count_carry_adjustments=count_carry_adjustments,
         account_activity=account_activity,
         account_options=account_options,
         cf_categories=cf_categories,
@@ -515,12 +561,13 @@ def _dr_build_context(day_value, embed=False):
 
     positions = recon.account_positions_for_date(day_str)
     day_lock = recon.get_day_lock(day_str)
-    total_expected = _money_round(sum(p['expected_closing'] for p in positions))
-    counted_values = [p['effective_counted'] for p in positions if p['effective_counted'] is not None]
-    total_counted = _money_round(sum(counted_values)) if counted_values else None
-    net_difference = (
-        _money_round(total_counted - total_expected) if total_counted is not None else 0.0
-    )
+    from utils.money import from_minor, to_minor
+    total_expected = float(from_minor(sum(to_minor(p['expected_closing']) for p in positions)))
+    counted_positions = [p for p in positions if p['effective_counted'] is not None]
+    total_counted = (float(from_minor(sum(to_minor(p['effective_counted']) for p in counted_positions)))
+                     if counted_positions else None)
+    # Uncounted accounts must not appear as a fictitious shortage.
+    net_difference = float(from_minor(sum(to_minor(p['difference']) for p in counted_positions)))
     prev_str = (datetime.strptime(day_str, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
     next_str = (datetime.strptime(day_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -739,10 +786,21 @@ def _ft_build_context(args, prefix='', embed=False, posted_after=None):
                 continue
         filtered.append(r)
 
-    summary = summarize_cash_flow_rows(filtered)
-    total_in = _money_round(summary['total_cash_in'] + summary['total_transfer_in'])
-    total_out = _money_round(summary['total_cash_out'] + summary['total_transfer_out'])
-    net = _money_round(total_in - total_out)
+    try:
+        selected_account = int(f_account) if f_account else None
+    except ValueError:
+        selected_account = -1
+    summary = summarize_cash_flow_rows(filtered, account_id=selected_account)
+    from utils.money import from_minor, to_minor
+    # Internal transfers cancel company-wide; for one selected account show
+    # its own incoming/outgoing transfer side alongside the other movements.
+    in_minor = to_minor(summary['total_cash_in'])
+    out_minor = to_minor(summary['total_cash_out'])
+    if selected_account:
+        in_minor += to_minor(summary['total_transfer_in'])
+        out_minor += to_minor(summary['total_transfer_out'])
+    total_in, total_out = float(from_minor(in_minor)), float(from_minor(out_minor))
+    net = float(from_minor(in_minor - out_minor))
 
     # Dropdown options sourced from the data.
     all_rows_active = [r for r in rows if (r.get('status') or 'active') == 'active']
@@ -787,13 +845,14 @@ def financial_tracker():
         buf = io.StringIO()
         import csv
         w = csv.writer(buf)
-        w.writerow(['Date', 'Type', 'Account', 'Category', 'Party', 'In', 'Out', 'Transfer', 'Reference', 'Description'])
+        w.writerow(['Date', 'Type', 'Account', 'Category', 'Party', 'In', 'Out', 'Transfer', 'Reference', 'Description', 'Source', 'Warning'])
         for r in filtered:
             w.writerow([
                 r.get('date'), r.get('tx_type_label'), r.get('account_display'),
-                r.get('category'), r.get('party_name'), r.get('cash_in') or '',
-                r.get('cash_out') or '', r.get('transfer_amount') or '',
-                r.get('reference'), r.get('description'),
+                r.get('category'), r.get('party_name'), f"{r['cash_in']:.2f}" if r.get('cash_in') else '',
+                f"{r['cash_out']:.2f}" if r.get('cash_out') else '',
+                f"{r['transfer_amount']:.2f}" if r.get('transfer_amount') else '',
+                r.get('reference'), r.get('description'), r.get('origin_label'), r.get('warning'),
             ])
         resp = make_response(buf.getvalue())
         resp.headers['Content-Type'] = 'text/csv; charset=utf-8'

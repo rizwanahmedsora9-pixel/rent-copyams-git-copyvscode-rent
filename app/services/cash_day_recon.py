@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from models import (
     db, Account, CashDayLock, CashDayAccountPosition,
 )
-from utils.money import from_minor
+from utils.money import from_minor, to_minor
 from app.services.time_money import _money_round, pk_now, pk_today
 from app.services.cash_flow_svc import (
     CF_DIR_IN, CF_DIR_OUT, CF_DIR_TRANSFER,
@@ -85,17 +85,20 @@ def _activity_between(from_date: str, to_date: str) -> dict:
         rtype = r.get("type")
         aid = r.get("account_id")
         if aid:
-            a = act.setdefault(aid, {"in": 0.0, "out": 0.0, "tin": 0.0, "tout": 0.0})
+            a = act.setdefault(aid, {"in": 0, "out": 0, "tin": 0, "tout": 0})
             if rtype == CF_DIR_IN:
-                a["in"] += float(r.get("cash_in") or 0)
+                a["in"] += to_minor(r.get("cash_in") or 0)
             elif rtype == CF_DIR_OUT:
-                a["out"] += float(r.get("cash_out") or 0)
+                a["out"] += to_minor(r.get("cash_out") or 0)
             elif rtype == CF_DIR_TRANSFER:
-                a["tout"] += float(r.get("transfer_amount") or 0)
+                a["tout"] += to_minor(r.get("transfer_amount") or 0)
         aid2 = r.get("account_to_id")
         if aid2 and rtype == CF_DIR_TRANSFER:
-            b = act.setdefault(aid2, {"in": 0.0, "out": 0.0, "tin": 0.0, "tout": 0.0})
-            b["tin"] += float(r.get("transfer_amount") or 0)
+            b = act.setdefault(aid2, {"in": 0, "out": 0, "tin": 0, "tout": 0})
+            b["tin"] += to_minor(r.get("transfer_amount") or 0)
+    for totals in act.values():
+        for key in totals:
+            totals[key] = float(from_minor(totals[key]))
     return act
 
 
@@ -244,12 +247,12 @@ def lock_day(day, actor=None, note=""):
     now = pk_now()
     positions = account_positions_for_date(day)
 
-    total_expected = 0.0
-    total_counted = 0.0
+    total_expected_minor = 0
+    total_counted_minor = 0
     for p in positions:
         counted = p["counted"] if p["counted"] is not None else p["expected_closing"]
-        total_expected += p["expected_closing"]
-        total_counted += counted
+        total_expected_minor += to_minor(p["expected_closing"])
+        total_counted_minor += to_minor(counted)
         pos = CashDayAccountPosition.query.filter_by(
             position_date=day, account_id=p["account_id"]
         ).first()
@@ -273,8 +276,8 @@ def lock_day(day, actor=None, note=""):
         pos.locked_at = now
         pos.updated_by = actor_name
 
-    total_expected = _money_round(total_expected)
-    total_counted = _money_round(total_counted)
+    total_expected = float(from_minor(total_expected_minor))
+    total_counted = float(from_minor(total_counted_minor))
 
     lock = get_day_lock(day)
     if lock is None:
@@ -282,7 +285,7 @@ def lock_day(day, actor=None, note=""):
         db.session.add(lock)
     lock.total_expected = total_expected
     lock.total_counted = total_counted
-    lock.difference = _money_round(total_counted - total_expected)
+    lock.difference = float(from_minor(total_counted_minor - total_expected_minor))
     lock.note = note or ""
     lock.locked_by = actor_name
     lock.locked_at = now

@@ -12,7 +12,7 @@ from app.services import account_setup as setup
 from app.services.cash_flow_svc import collect_cash_flow_rows, filter_cash_flow_rows, summarize_cash_flow_rows
 from app.services.payments_crud import ledger_balances
 from app.services.time_money import pk_today
-from utils.money import from_minor
+from utils.money import from_minor, to_minor
 from ._common import accounts_bp, logger
 
 
@@ -273,7 +273,10 @@ def _cash_flow_context(all_accounts):
         base_args["direction"] = direction
     prev_url = url_for("accounts.dashboard", **{**base_args, "page": page - 1}) if page > 1 else None
     next_url = url_for("accounts.dashboard", **{**base_args, "page": page + 1}) if page < total_pages else None
-    active_balances = ledger_balances([a["id"] for a in all_accounts if a["is_active"]])
+    if account_id:
+        active_balances = ledger_balances([account_id])
+    else:
+        active_balances = ledger_balances([a["id"] for a in all_accounts if a["is_active"]])
     # Filter options come from the unfiltered window so a chosen category never
     # removes the other choices from the dropdown.
     category_options, seen = [], set()
@@ -299,8 +302,11 @@ def _cash_flow_context(all_accounts):
     return {
         "cf_rows": page_rows,
         "cf_summary": summary,
-        "cf_net": float(from_minor(int(round((summary["total_cash_in"] - summary["total_cash_out"]) * 100)))),
-        "cf_active_balance": sum(float(value) for value in active_balances.values()),
+        "cf_net": float(from_minor(
+            to_minor(summary["total_cash_in"]) - to_minor(summary["total_cash_out"])
+            + to_minor(summary["total_transfer_in"]) - to_minor(summary["total_transfer_out"])
+        )),
+        "cf_active_balance": float(from_minor(sum(to_minor(value) for value in active_balances.values()))),
         "cf_from": from_str,
         "cf_to": to_str,
         "cf_account_id": account_id,

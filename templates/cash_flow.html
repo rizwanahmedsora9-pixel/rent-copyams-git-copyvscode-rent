@@ -32,61 +32,43 @@
 <p class="sub">Fresh start mode: entries before {{ fresh_start_cutoff.strftime('%Y-%m-%d %H:%M') }} are hidden from this report. Source data is unchanged.</p>
 {% endif %}
 <div class="meta">
-  <span>Opening Balance: <strong>Rs. {{ "{:,.0f}".format(opening_balance) }}</strong></span>
+  <span>Opening Balance: <strong>Rs. {{ "{:,.2f}".format(opening_balance) }}</strong></span>
   <span>Generated: {{ generated_at }}</span>
 </div>
 <div class="summary">
-  <div class="summary-box"><div class="label">Total Received</div><div class="value pos">Rs. {{ "{:,.0f}".format(total_cash_in) }}</div></div>
-  <div class="summary-box"><div class="label">Total Spent</div><div class="value neg">Rs. {{ "{:,.0f}".format(total_cash_out) }}</div></div>
-  <div class="summary-box"><div class="label">Closing</div><div class="value neutral">Rs. {{ "{:,.0f}".format(closing_balance) }}</div></div>
-  <div class="summary-box"><div class="label">Physical Cash</div><div class="value neutral">{% if physical_cash_available is not none %}Rs. {{ "{:,.0f}".format(physical_cash_available) }}{% else %}-{% endif %}</div></div>
+  <div class="summary-box"><div class="label">Total Received</div><div class="value pos">Rs. {{ "{:,.2f}".format(total_cash_in) }}</div></div>
+  <div class="summary-box"><div class="label">Total Spent</div><div class="value neg">Rs. {{ "{:,.2f}".format(total_cash_out) }}</div></div>
+  <div class="summary-box"><div class="label">Closing</div><div class="value neutral">Rs. {{ "{:,.2f}".format(closing_balance) }}</div></div>
+  <div class="summary-box"><div class="label">Physical Cash</div><div class="value neutral">{% if physical_cash_available is not none %}Rs. {{ "{:,.2f}".format(physical_cash_available) }}{% else %}-{% endif %}</div></div>
 </div>
+{% if opening_additions %}<p class="sub">Opening balances introduced during this period (not receipts):
+  {% for item in opening_additions %}{{ item.account_name }} {{ item.date }} Rs. {{ "{:,.2f}".format(item.amount) }}{% if not loop.last %}; {% endif %}{% endfor %}
+</p>{% endif %}
+{% if count_carry_adjustments %}<p class="sub">Count carry-forward (not account postings):
+  {% for item in count_carry_adjustments %}{{ item.kind }} on {{ item.date }}: baseline change Rs. {{ "{:,.2f}".format(item.delta) }}{% if not loop.last %}; {% endif %}{% endfor %}
+</p>{% endif %}
 <table>
-  <thead>
-    <tr>
-      <th>Date</th>
-      <th>Type</th>
-      <th>Account</th>
-      <th>Category</th>
-      <th>Subcategory</th>
-      <th>Party</th>
-      <th>Description</th>
-      <th>Notes</th>
-      <th>Reference</th>
-      <th class="text-right">Received</th>
-      <th class="text-right">Spent</th>
-      <th class="text-right">Transfer</th>
-    </tr>
-  </thead>
+  <thead><tr><th>Date / type</th><th>Source, account and details</th><th class="text-right">Amount</th></tr></thead>
   <tbody>
     {% for r in rows %}
     <tr>
-      <td>{{ r.date }}</td>
-      <td>{{ r.tx_type_label }}</td>
-      <td>{{ r.account_display }}</td>
-      <td>{{ r.category or '—' }}</td>
-      <td>{{ r.subcategory or '—' }}</td>
-      <td>{{ r.party_name or '—' }}</td>
-      <td>{{ r.description }}</td>
-      <td>{{ r.note }}</td>
-      <td>{{ r.reference }}</td>
-      <td class="text-right pos">{% if r.cash_in %}Rs. {{ "{:,.0f}".format(r.cash_in) }}{% endif %}</td>
-      <td class="text-right neg">{% if r.cash_out %}Rs. {{ "{:,.0f}".format(r.cash_out) }}{% endif %}</td>
-      <td class="text-right">{% if r.transfer_amount %}Rs. {{ "{:,.0f}".format(r.transfer_amount) }}{% endif %}</td>
+      <td>{{ r.date }} · {{ r.tx_type_label }}{% if r.status == 'voided' %} · VOIDED{% endif %}</td>
+      <td>{{ r.origin_label }} · {{ r.reference }} · {{ r.account_display }} · {{ r.description }}{% if r.party_name %} · {{ r.party_name }}{% endif %}{% if r.category %} · {{ r.category }}{% endif %}{% if r.subcategory %} / {{ r.subcategory }}{% endif %}{% if r.note %} · {{ r.note }}{% endif %}{% if r.warning %} · WARNING: {{ r.warning }}{% endif %}</td>
+      <td class="text-right">{{ '+' if r.type == 'in' else ('−' if r.type == 'out' else '') }}Rs. {{ "{:,.2f}".format(r.amount) }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="12" style="text-align:center;color:#888;">No transactions found for this period.</td></tr>
+    <tr><td colspan="3" style="text-align:center;color:#888;">No transactions found for this period.</td></tr>
     {% endfor %}
   </tbody>
-  <tfoot>
-    <tr>
-      <td colspan="9">Totals (transfers are not income or expense)</td>
-      <td class="text-right pos">Rs. {{ "{:,.0f}".format(total_cash_in) }}</td>
-      <td class="text-right neg">Rs. {{ "{:,.0f}".format(total_cash_out) }}</td>
-      <td class="text-right">Rs. {{ "{:,.0f}".format(total_transfer_in or 0) }}</td>
-    </tr>
-  </tfoot>
 </table>
+<p>Received: Rs. {{ "{:,.2f}".format(total_cash_in) }} · Spent: Rs. {{ "{:,.2f}".format(total_cash_out) }} · Transfers: Rs. {{ "{:,.2f}".format(total_transfer_in or 0) }} (not income or expense).</p>
+{% if unassigned_rows %}
+<h2>Unassigned legacy source records</h2>
+<p>These records have no confirmed company cash/bank posting and may overlap other records. They are not included in account balances or totals; verify their sources before reconciliation.</p>
+<table><thead><tr><th>Date</th><th>Source / reference</th><th>Reported amount</th></tr></thead><tbody>
+  {% for r in unassigned_rows %}<tr><td>{{ r.date }}</td><td>{{ r.origin_label }} · {{ r.reference }}{% if r.party_name %} · {{ r.party_name }}{% endif %}</td><td>{{ r.tx_type_label }} Rs. {{ "{:,.2f}".format(r.amount) }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
 <div class="footer">Generated {{ generated_at }} — AMS System</div>
 </body>
 </html>
@@ -169,6 +151,26 @@
   <!-- PANEL: FINANCIAL DETAILS -->
   <section class="cf-panel" id="cfPanel-financial" data-cf-panel="financial">
 
+  <form method="get" action="{{ url_for('cash_flow') }}" class="ui-card mb-4 p-3 d-print-none" aria-label="Filter cash flow period">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3"><label class="form-label small fw-bold" for="cf-from">From</label>
+        <input class="form-control" id="cf-from" type="date" name="from_date" value="{{ from_date }}"></div>
+      <div class="col-md-3"><label class="form-label small fw-bold" for="cf-to">To</label>
+        <input class="form-control" id="cf-to" type="date" name="to_date" value="{{ to_date }}"></div>
+      <div class="col-md-3"><label class="form-label small fw-bold" for="cf-account">Account</label>
+        <select class="form-select" id="cf-account" name="account_id"><option value="">All company accounts</option>
+          {% for option in account_options %}<option value="{{ option.id }}" {% if filter_account_id == option.id %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
+        </select></div>
+      <div class="col-md-2"><label class="form-label small fw-bold" for="cf-status">Status</label>
+        <select class="form-select" id="cf-status" name="status">
+          <option value="active" {% if filter_status == 'active' %}selected{% endif %}>Active</option>
+          <option value="voided" {% if filter_status == 'voided' %}selected{% endif %}>Voided</option>
+          <option value="all" {% if filter_status == 'all' %}selected{% endif %}>All</option>
+        </select></div>
+      <div class="col-md-1"><button class="btn btn-primary w-100" type="submit">Show</button></div>
+    </div>
+  </form>
+
   <!-- CASH / BANK AMOUNT CARDS -->
   <div class="row g-3 mb-4 d-print-none">
     <div class="col-md-6">
@@ -177,7 +179,7 @@
           <span class="cf-money-ico" style="--mc:#16a34a;"><i class="bi bi-cash-stack"></i></span>
           <span class="cf-money-text">
             <span class="cf-money-label">Cash Amount (in hand)</span>
-            <span class="cf-money-value">Rs. {{ "{:,.0f}".format(cash_total) }}</span>
+            <span class="cf-money-value">Rs. {{ "{:,.2f}".format(cash_total) }}</span>
           </span>
           <span class="cf-money-count">{{ cash_accounts_list|length }} account{% if cash_accounts_list|length != 1 %}s{% endif %}</span>
           <i class="bi bi-chevron-down cf-money-chev"></i>
@@ -191,9 +193,9 @@
                 {% set act = account_activity.get(a.id, {}) %}
                 <tr>
                   <td class="fw-semibold">{{ a.name }}{% if a.note %}<div class="small text-muted">{{ a.note }}</div>{% endif %}</td>
-                  <td class="text-end text-success font-monospace">{% if act.get('in') %}Rs. {{ "{:,.0f}".format(act['in']) }}{% else %}—{% endif %}</td>
-                  <td class="text-end text-danger font-monospace">{% if act.get('out') %}Rs. {{ "{:,.0f}".format(act['out']) }}{% else %}—{% endif %}</td>
-                  <td class="text-end fw-bold font-monospace">Rs. {{ "{:,.0f}".format(a.balance or 0) }}</td>
+                  <td class="text-end text-success font-monospace">{% if act.get('in') %}Rs. {{ "{:,.2f}".format(act['in']) }}{% else %}—{% endif %}</td>
+                  <td class="text-end text-danger font-monospace">{% if act.get('out') %}Rs. {{ "{:,.2f}".format(act['out']) }}{% else %}—{% endif %}</td>
+                  <td class="text-end fw-bold font-monospace">Rs. {{ "{:,.2f}".format(report_account_balances.get(a.id, 0)) }}</td>
                   <td class="text-end"><a class="small" href="{{ url_for('accounts.account_ledger', account_id=a.id) }}">Ledger</a></td>
                 </tr>
                 {% else %}
@@ -211,7 +213,7 @@
           <span class="cf-money-ico" style="--mc:#2563eb;"><i class="bi bi-bank2"></i></span>
           <span class="cf-money-text">
             <span class="cf-money-label">Bank Amount</span>
-            <span class="cf-money-value">Rs. {{ "{:,.0f}".format(bank_total) }}</span>
+            <span class="cf-money-value">Rs. {{ "{:,.2f}".format(bank_total) }}</span>
           </span>
           <span class="cf-money-count">{{ bank_accounts_list|length }} account{% if bank_accounts_list|length != 1 %}s{% endif %}</span>
           <i class="bi bi-chevron-down cf-money-chev"></i>
@@ -226,9 +228,9 @@
                 <tr>
                   <td class="fw-semibold">{{ a.name }}</td>
                   <td class="small text-muted">{% if a.bank_name %}{{ a.bank_name }}{% endif %}{% if a.account_number %}<code>{{ a.account_number }}</code>{% endif %}</td>
-                  <td class="text-end text-success font-monospace">{% if act.get('in') %}Rs. {{ "{:,.0f}".format(act['in']) }}{% else %}—{% endif %}</td>
-                  <td class="text-end text-danger font-monospace">{% if act.get('out') %}Rs. {{ "{:,.0f}".format(act['out']) }}{% else %}—{% endif %}</td>
-                  <td class="text-end fw-bold font-monospace">Rs. {{ "{:,.0f}".format(a.balance or 0) }}</td>
+                  <td class="text-end text-success font-monospace">{% if act.get('in') %}Rs. {{ "{:,.2f}".format(act['in']) }}{% else %}—{% endif %}</td>
+                  <td class="text-end text-danger font-monospace">{% if act.get('out') %}Rs. {{ "{:,.2f}".format(act['out']) }}{% else %}—{% endif %}</td>
+                  <td class="text-end fw-bold font-monospace">Rs. {{ "{:,.2f}".format(report_account_balances.get(a.id, 0)) }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="5" class="ui-empty">No bank accounts yet.</td></tr>
@@ -291,7 +293,7 @@
           <tr>
             <td class="fw-semibold">{{ a.name }}</td>
             <td><span class="badge bg-secondary">{{ (a.category or 'cash')|upper }}</span></td>
-            <td class="text-end fw-bold">Rs. {{ "{:,.0f}".format(a.balance or 0) }}</td>
+            <td class="text-end fw-bold">Rs. {{ "{:,.2f}".format(report_account_balances.get(a.id, 0)) }}</td>
             <td class="text-end"><a class="small" href="{{ url_for('accounts.account_ledger', account_id=a.id) }}">Ledger</a></td>
           </tr>
           {% else %}
@@ -307,44 +309,98 @@
     </div>
   </div>
 
+  <p class="small text-muted">Per-account period in/out above includes transfers to or from that account. Internal transfers do not change the company-wide total.</p>
+
   <!-- KPI SUMMARY GRID -->
   <div class="ui-kpi-grid mb-4">
     <div class="ui-tile" style="border-left:4px solid #6366f1;">
       <div class="ui-tile-label">Opening Balance</div>
-      <div class="ui-tile-value" style="color:var(--ui-text);">Rs. {{ "{:,.0f}".format(opening_balance) }}</div>
+      <div class="ui-tile-value" style="color:var(--ui-text);">Rs. {{ "{:,.2f}".format(opening_balance) }}</div>
       <div class="ui-tile-sub">Start of period</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #16a34a;">
       <div class="ui-tile-label">Total Received [ IN ]</div>
-      <div class="ui-tile-value" style="color:#16a34a;">Rs. {{ "{:,.0f}".format(total_cash_in) }}</div>
+      <div class="ui-tile-value" style="color:#16a34a;">Rs. {{ "{:,.2f}".format(total_cash_in) }}</div>
       <div class="ui-tile-sub">{{ from_date }} — {{ to_date }}</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #dc2626;">
       <div class="ui-tile-label">Total Spent [ OUT ]</div>
-      <div class="ui-tile-value" style="color:#dc2626;">Rs. {{ "{:,.0f}".format(total_cash_out) }}</div>
+      <div class="ui-tile-value" style="color:#dc2626;">Rs. {{ "{:,.2f}".format(total_cash_out) }}</div>
       <div class="ui-tile-sub">{{ from_date }} — {{ to_date }}</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #0369a1;">
       <div class="ui-tile-label">Closing Balance</div>
-      <div class="ui-tile-value" style="color:#0369a1;">Rs. {{ "{:,.0f}".format(closing_balance) }}</div>
-      <div class="ui-tile-sub">Opening + received − spent</div>
+      <div class="ui-tile-value" style="color:#0369a1;">Rs. {{ "{:,.2f}".format(closing_balance) }}</div>
+      <div class="ui-tile-sub">Opening plus account movements{% if opening_additions %}, new account openings{% endif %}{% if count_carry_adjustments %} and count carry{% endif %}</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #0ea5e9;">
       <div class="ui-tile-label">Transfers</div>
-      <div class="ui-tile-value" style="color:#0ea5e9;">Rs. {{ "{:,.0f}".format(total_transfer_in or 0) }}</div>
+      <div class="ui-tile-value" style="color:#0ea5e9;">Rs. {{ "{:,.2f}".format(total_transfer_in or 0) }}</div>
       <div class="ui-tile-sub">Not income or expense</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #f97316;">
       <div class="ui-tile-label">Physical Cash</div>
-      <div class="ui-tile-value" style="color:#f97316;">{% if physical_cash_available is not none %}Rs. {{ "{:,.0f}".format(physical_cash_available) }}{% else %}-{% endif %}</div>
+      <div class="ui-tile-value" style="color:#f97316;">{% if physical_cash_available is not none %}Rs. {{ "{:,.2f}".format(physical_cash_available) }}{% else %}-{% endif %}</div>
       <div class="ui-tile-sub">Reconciliation for {{ adjustment_date_input }}</div>
     </div>
     <div class="ui-tile" style="border-left:4px solid #0f766e;">
-      <div class="ui-tile-label">Next Day Opening</div>
-      <div class="ui-tile-value" style="color:#0f766e;">Rs. {{ "{:,.0f}".format(adjusted_closing_balance) }}</div>
-      <div class="ui-tile-sub">Carry-forward to next period</div>
+      <div class="ui-tile-label">Next Day Cash Opening</div>
+      <div class="ui-tile-value" style="color:#0f766e;">Rs. {{ "{:,.2f}".format(adjusted_closing_balance) }}</div>
+      <div class="ui-tile-sub">Physical cash carry-forward, excluding bank</div>
     </div>
   </div>
+
+  {% if opening_additions %}
+  <p class="small text-muted">Account openings introduced during this period (not receipts):
+    {% for item in opening_additions %}{{ item.account_name }} on {{ item.date }}: Rs. {{ "{:,.2f}".format(item.amount) }}{% if not loop.last %}; {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+
+  {% if count_carry_adjustments %}
+  <p class="small text-muted">Count carry-forward (a baseline change, not a posted transaction):
+    {% for item in count_carry_adjustments %}{{ item.kind }} on {{ item.date }}: baseline change Rs. {{ "{:,.2f}".format(item.delta) }}{% if not loop.last %}; {% endif %}{% endfor %}
+    Account balances remain the posted book balances.
+  </p>
+  {% endif %}
+
+  <div class="ui-card mt-3 mb-4">
+    <div class="ui-card-header">
+      <h5 class="mb-0">Movement sources · {{ from_date }} — {{ to_date }}</h5>
+      <small class="text-muted">{{ rows|length }} matching record{{ '' if rows|length == 1 else 's' }}. Running balances use the selected filters; voided entries do not affect totals.</small>
+    </div>
+    <div class="table-responsive">
+      <table class="ui-table mb-0">
+        <thead><tr><th>Date</th><th>Source / reference</th><th>Account</th><th>Type</th><th class="text-end">Amount</th><th class="text-end">Running</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr {% if r.status == 'voided' %}class="text-muted"{% endif %}>
+            <td>{{ r.sort_dt.strftime('%Y-%m-%d %H:%M') if r.sort_dt else r.date }}</td>
+            <td><strong>{{ r.origin_label }}</strong>{% if r.reference %}<div>{{ r.reference }}</div>{% endif %}{% if r.party_name %}<div class="small text-muted">{{ r.party_name }}</div>{% endif %}{% if r.warning %}<div class="small text-danger">{{ r.warning }}</div>{% endif %}</td>
+            <td>{% if r.account_id %}<a href="{{ url_for('accounts.account_ledger', account_id=r.account_id, **{'from': from_date, 'to': to_date}) }}">{{ r.account_name or 'Account' }}</a>{% else %}{{ r.account_name or '—' }}{% endif %}{% if r.account_to_id %} → <a href="{{ url_for('accounts.account_ledger', account_id=r.account_to_id, **{'from': from_date, 'to': to_date}) }}">{{ r.account_to_name or 'Account' }}</a>{% endif %}</td>
+            <td>{{ r.tx_type_label }}{% if r.status == 'voided' %} <span class="badge bg-secondary">Voided</span>{% endif %}</td>
+            <td class="text-end font-monospace">{% if r.type == 'in' %}+{% elif r.type == 'out' %}−{% elif filter_account_id and r.account_id == filter_account_id %}−{% elif filter_account_id and r.account_to_id == filter_account_id %}+{% endif %}Rs. {{ "{:,.2f}".format(r.amount) }}</td>
+            <td class="text-end font-monospace">Rs. {{ "{:,.2f}".format(r.running_balance) }}</td>
+          </tr>
+          {% else %}<tr><td colspan="6" class="ui-empty">No movements match this period and status.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if unassigned_rows %}
+  <div class="ui-card mt-3 mb-4" style="border-left:4px solid #d97706;">
+    <div class="ui-card-header"><h5 class="mb-1">Unassigned legacy sources · {{ unassigned_rows|length }}</h5>
+      <small>These records have no confirmed company cash/bank posting and may overlap other records. They are <strong>not included</strong> in the account balances or totals above; verify their sources before reconciliation.</small>
+    </div>
+    <div class="table-responsive"><table class="ui-table mb-0">
+      <thead><tr><th>Date</th><th>Source / reference</th><th>Party</th><th>Reported type</th><th class="text-end">Reported amount</th></tr></thead>
+      <tbody>{% for r in unassigned_rows %}<tr>
+        <td>{{ r.date }}</td><td>{{ r.origin_label }} · {{ r.reference }}</td><td>{{ r.party_name or '—' }}</td>
+        <td>{{ r.tx_type_label }}</td><td class="text-end font-monospace">Rs. {{ "{:,.2f}".format(r.amount) }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  {% endif %}
 
   <!-- BREAKDOWN CARDS -->
   <div class="row g-3 mt-3 d-print-none">
@@ -356,7 +412,7 @@
             <thead><tr><th>Category</th><th class="text-end">In</th><th class="text-end">Out</th></tr></thead>
             <tbody>
               {% for name, tot in (breakdown_cat or {}).items() %}
-              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.0f}".format(tot['in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.0f}".format(tot['out']) }}</td></tr>
+              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.2f}".format(tot['in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.2f}".format(tot['out']) }}</td></tr>
               {% else %}
               <tr><td colspan="3" class="ui-empty">No records</td></tr>
               {% endfor %}
@@ -373,7 +429,7 @@
             <thead><tr><th>Party</th><th class="text-end">In</th><th class="text-end">Out</th></tr></thead>
             <tbody>
               {% for name, tot in (breakdown_party or {}).items() %}
-              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.0f}".format(tot['in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.0f}".format(tot['out']) }}</td></tr>
+              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.2f}".format(tot['in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.2f}".format(tot['out']) }}</td></tr>
               {% else %}
               <tr><td colspan="3" class="ui-empty">No records</td></tr>
               {% endfor %}
@@ -390,7 +446,7 @@
             <thead><tr><th>Account</th><th class="text-end">In</th><th class="text-end">Out</th></tr></thead>
             <tbody>
               {% for name, tot in (breakdown_account or {}).items() %}
-              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.0f}".format(tot['in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.0f}".format(tot['out']) }}</td></tr>
+              <tr><td>{{ name }}</td><td class="text-end text-success font-monospace">{{ "{:,.2f}".format(tot['in'] + tot['transfer_in']) }}</td><td class="text-end text-danger font-monospace">{{ "{:,.2f}".format(tot['out'] + tot['transfer_out']) }}</td></tr>
               {% else %}
               <tr><td colspan="3" class="ui-empty">No records</td></tr>
               {% endfor %}
@@ -727,7 +783,7 @@
           <select name="cash_account_id" id="cfAccountId" class="form-select" required {% if not cash_accounts %}disabled{% endif %}>
             <option value="">Select from Accounts…</option>
             {% for a in cash_accounts or [] %}
-            <option value="{{ a.id }}">{{ a.name }} · {{ (a.category or 'cash')|upper }} · Rs. {{ "{:,.0f}".format(a.balance or 0) }}</option>
+            <option value="{{ a.id }}">{{ a.name }} · {{ (a.category or 'cash')|upper }} · Rs. {{ "{:,.2f}".format(report_account_balances.get(a.id, 0)) }}</option>
             {% endfor %}
           </select>
         </div>
@@ -738,7 +794,7 @@
           <select name="to_account_id" id="cfToAccountId" class="form-select" {% if not cash_accounts %}disabled{% endif %}>
             <option value="">Select destination account…</option>
             {% for a in cash_accounts or [] %}
-            <option value="{{ a.id }}">{{ a.name }} · {{ (a.category or 'cash')|upper }} · Rs. {{ "{:,.0f}".format(a.balance or 0) }}</option>
+            <option value="{{ a.id }}">{{ a.name }} · {{ (a.category or 'cash')|upper }} · Rs. {{ "{:,.2f}".format(report_account_balances.get(a.id, 0)) }}</option>
             {% endfor %}
           </select>
         </div>

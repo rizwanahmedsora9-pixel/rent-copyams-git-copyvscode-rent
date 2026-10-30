@@ -63,12 +63,15 @@
     </div>
 
     <div class="row g-3 mb-3">
-        <div class="col-md-3"><div class="card led-stat s-violet"><div class="card-body"><div class="lab">Current Balance</div><div class="val">Rs. {{ "%.2f"|format(account.balance or 0) }}</div></div><i class="bi bi-wallet2 ico"></i></div></div>
+        <div class="col-md-3"><div class="card led-stat s-violet"><div class="card-body"><div class="lab">Current Balance</div><div class="val">Rs. {{ "%.2f"|format(current_balance) }}</div></div><i class="bi bi-wallet2 ico"></i></div></div>
         <div class="col-md-3"><div class="card led-stat s-cyan"><div class="card-body"><div class="lab">Opening (Period)</div><div class="val">Rs. {{ "%.2f"|format(opening_balance) }}</div></div><i class="bi bi-flag ico"></i></div></div>
         <div class="col-md-3"><div class="card led-stat s-emerald"><div class="card-body"><div class="lab">Money In</div><div class="val">Rs. {{ "%.2f"|format(period_in) }}</div></div><i class="bi bi-arrow-down-circle ico"></i></div></div>
         <div class="col-md-3"><div class="card led-stat s-rose"><div class="card-body"><div class="lab">Money Out</div><div class="val">Rs. {{ "%.2f"|format(period_out) }}</div></div><i class="bi bi-arrow-up-circle ico"></i></div></div>
     </div>
 
+    {% if baseline_during_period %}
+    <p class="small text-muted">Account opening on {{ account_opening_day }}: Rs. {{ "%.2f"|format(account_opening_amount) }}. This baseline is not a receipt.</p>
+    {% endif %}
     <div class="led-card mb-3">
         <form class="filter-bar" method="get">
             <div><div class="form-label">From</div><input type="date" name="from" class="form-control form-control-sm" value="{{ date_from.strftime('%Y-%m-%d') }}"></div>
@@ -155,8 +158,8 @@
                         {% if tx.reason %}<div class="small"><i class="bi bi-chat-left-text me-1 text-muted"></i>{{ tx.reason }}</div>{% endif %}
                         {% if ctx.clean_note %}<div class="small text-muted">{{ ctx.clean_note }}</div>{% endif %}
                     </td>
-                    <td class="text-end">{% if incoming and not tx.is_void %}<span class="led-amt-in">Rs. {{ "%.2f"|format(tx.amount or 0) }}</span>{% endif %}</td>
-                    <td class="text-end">{% if outgoing and not tx.is_void %}<span class="led-amt-out">Rs. {{ "%.2f"|format(tx.amount or 0) }}</span>{% endif %}</td>
+                    <td class="text-end">{% if incoming and not tx.is_void %}<span class="led-amt-in">Rs. {{ "%.2f"|format(r.amount) }}</span>{% endif %}</td>
+                    <td class="text-end">{% if outgoing and not tx.is_void %}<span class="led-amt-out">Rs. {{ "%.2f"|format(r.amount) }}</span>{% endif %}</td>
                     <td class="text-end"><span class="led-running {% if r.running < 0 %}neg{% endif %}">Rs. {{ "%.2f"|format(r.running) }}</span></td>
                     <td class="text-end">
                         {% if not tx.is_void %}

@@ -117,6 +117,20 @@ receives, payable lookup, discounts and waive-offs), and
 balance refresh). The latter also tests the rendered form in a browser DOM
 when Node and jsdom are installed.
 
+`tests/test_accounts_cash_flow_trace.py` posts a set of distinct paisa amounts
+through the real forms, then traces sources through account balances, ledgers,
+Cash Flow, CSV/PDF, transfers and reversals. It also checks historical opening
+and count carry-forwards and runs the independent raw-SQL account verifier.
+Run it alone with `pytest -q tests/test_accounts_cash_flow_trace.py`; each test
+uses its own disposable SQLite database. It does not inspect or repair a live
+or historical business database.
+
+Cash Flow shows account-linked movements once, with their source/reference and
+paisa precision. A historical source without a confirmed company cash/bank posting is
+listed separately as **unassigned**: it is not added to account totals, since
+it may duplicate another document or represent a non-cash event. A source or
+account-posting mismatch is flagged for review; the report never repairs data.
+
 `tests/frontend/` holds offline DOM tests for the browser-side scripts. They are
 not collected by pytest; run them with node after installing jsdom:
 
@@ -666,6 +680,8 @@ receipts, the Profit & Loss report (and its PDF/Excel exports) and the
 activity / void-audit trail. It finishes by running the consistency report and
 the preflight watch on the same database. Add `--keep` to inspect the file and
 `--skip-wipe` to run only the business cycle. Exit code 0 = every check passed.
+**Never point `--db` at an existing or live database:** the audit deletes that
+file and its SQLite sidecars before it starts, even with `--skip-wipe`.
 
 Repair scripts in `tools/repair_controlled/` require `--confirm` and take a
 backup first. See `tools/README.md`.

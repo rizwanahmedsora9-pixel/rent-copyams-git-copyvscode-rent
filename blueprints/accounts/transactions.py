@@ -108,6 +108,13 @@ def delete_account_transaction(tx_id):
             payment = db.session.get(SupplierPayment, source_id)
             if not payment or not delete_supplier_payment(payment, actor=current_user):
                 raise ValueError('The linked supplier payment is already deleted or missing.')
+        elif source_type.lower() in ('booking', 'directsale', 'deliverypersonpayment') or re.search(
+            r'\[SRC:(?:Booking|DirectSale|DeliveryPersonPayment):\d+\]', note_txt, re.IGNORECASE
+        ):
+            # Reversing only the receipt would leave the booking/sale, stock,
+            # party ledger and cash-flow source active. Manage the document in
+            # its owning module rather than silently splitting the books.
+            raise ValueError('This entry belongs to a Booking, Sale or Driver payment; delete it from its source document.')
         else:
             from app.services.accounting import _void_account_tx
             from app.services.payments_crud import _assert_period_open
@@ -176,7 +183,10 @@ def restore_account_transaction(tx_id):
 def edit_account_transaction(tx_id):
     tx = AccountTransaction.query.get_or_404(tx_id)
     try:
-        if tx.reconciliation_id or tx.source_type in ('Payment', 'SupplierPayment', 'AccountReconciliation') or re.search(r'\[SRC:(?:Payment|ClientRefund|SupplierPayment):\d+\]', tx.note or '', re.IGNORECASE):
+        if (tx.reconciliation_id or (tx.source_type or '').lower() in
+                ('payment', 'supplierpayment', 'accountreconciliation', 'booking', 'directsale', 'deliverypersonpayment') or
+                re.search(r'\[SRC:(?:Payment|ClientRefund|SupplierPayment|Booking|DirectSale|DeliveryPersonPayment):\d+\]',
+                          tx.note or '', re.IGNORECASE)):
             raise ValueError('Linked financial entries must be edited from their shared source form; reconciliation entries are immutable.')
         from app.services.payments_crud import _assert_period_open
         for account_id in {tx.from_account_id, tx.to_account_id}:

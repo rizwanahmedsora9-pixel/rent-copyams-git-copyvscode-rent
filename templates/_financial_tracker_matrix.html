@@ -104,6 +104,7 @@
           <option value="cash" {% if ft.f_method=='cash' %}selected{% endif %}>Cash</option>
           <option value="bank" {% if ft.f_method=='bank' %}selected{% endif %}>Bank</option>
           <option value="check" {% if ft.f_method=='check' %}selected{% endif %}>Check</option>
+          <option value="online" {% if ft.f_method=='online' %}selected{% endif %}>Online / wallet</option>
         </select>
       </div>
       <div class="col-md-3"><div class="ft-label">Text / Ref Search</div>
@@ -117,14 +118,16 @@
   <!-- KPI TILES -->
   <div class="row g-3 mb-3">
     <div class="col-md-3"><div class="ft-kpi"><div class="lbl">Filtered Total In</div>
-      <div class="val ft-mono in-pos">+ Rs. {{ "{:,.0f}".format(ft.total_in) }}</div></div></div>
+      <div class="val ft-mono in-pos">+ Rs. {{ "{:,.2f}".format(ft.total_in) }}</div></div></div>
     <div class="col-md-3"><div class="ft-kpi"><div class="lbl">Filtered Total Out</div>
-      <div class="val ft-mono out-neg">- Rs. {{ "{:,.0f}".format(ft.total_out) }}</div></div></div>
+      <div class="val ft-mono out-neg">- Rs. {{ "{:,.2f}".format(ft.total_out) }}</div></div></div>
     <div class="col-md-3"><div class="ft-kpi"><div class="lbl">Net Movement</div>
-      <div class="val ft-mono {% if ft.net >= 0 %}in-pos{% else %}out-neg{% endif %}">{% if ft.net >= 0 %}+{% else %}-{% endif %} Rs. {{ "{:,.0f}".format(ft.net|abs) }}</div></div></div>
+      <div class="val ft-mono {% if ft.net >= 0 %}in-pos{% else %}out-neg{% endif %}">{% if ft.net >= 0 %}+{% else %}-{% endif %} Rs. {{ "{:,.2f}".format(ft.net|abs) }}</div></div></div>
     <div class="col-md-3"><div class="ft-kpi"><div class="lbl">Matching Records</div>
       <div class="val ft-mono text-dark">{{ ft.record_count }} Transactions</div></div></div>
   </div>
+
+  <p class="small text-muted">Company-wide in/out excludes internal transfers; filtering to one account includes its side of each transfer.</p>
 
   <!-- EXPORT BAR -->
   <div class="ft-card p-3 mb-3 d-flex flex-wrap align-items-center justify-content-between">
@@ -132,13 +135,11 @@
       <i class="bi bi-file-earmark-text text-primary fs-4 me-2"></i>
       <div>
         <div class="fw-bold">Export Filtered Financial Report</div>
-        <div class="small text-muted">Generate PDF report, Excel, or CSV based on exact active filters</div>
+        <div class="small text-muted">Download a CSV based on the active filters</div>
       </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-      <a class="btn fw-bold text-white" style="background:#4f46e5;" href="{{ ft_export_url }}"><i class="bi bi-printer me-1"></i> Download Report</a>
-      <a class="btn btn-success fw-bold" href="{{ ft_export_url }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i> Export Excel (.xlsx)</a>
-      <a class="btn btn-light border fw-bold" href="{{ ft_export_url }}">Export CSV</a>
+      <a class="btn btn-light border fw-bold" href="{{ ft_export_url }}"><i class="bi bi-download me-1"></i> Export CSV</a>
     </div>
   </div>
 
@@ -156,7 +157,7 @@
           <tbody>
             {% for name, v in ft.breakdown_cat.items()|sort %}
             <tr><td>{{ name }}</td><td>{% if v['in']>0 %}IN{% elif v['out']>0 %}OUT{% else %}TRANSFER{% endif %}</td>
-              <td class="text-end ft-mono fw-bold">Rs. {{ "{:,.0f}".format(v['in'] + v['out'] + v['transfer']) }}</td></tr>
+              <td class="text-end ft-mono fw-bold">Rs. {{ "{:,.2f}".format(v['in'] + v['out'] + v['transfer']) }}</td></tr>
             {% else %}<tr><td colspan="3" class="text-center text-muted">No data</td></tr>{% endfor %}
           </tbody>
         </table>
@@ -168,9 +169,9 @@
           <tbody>
             {% for name, v in ft.breakdown_account.items()|sort %}
             <tr><td>{{ name }}</td>
-              <td class="text-end ft-mono in-pos">Rs. {{ "{:,.0f}".format(v['in'] + v['transfer']) }}</td>
-              <td class="text-end ft-mono out-neg">Rs. {{ "{:,.0f}".format(v['out']) }}</td>
-              <td class="text-end ft-mono fw-bold">Rs. {{ "{:,.0f}".format(v['in'] + v['transfer'] - v['out']) }}</td></tr>
+              <td class="text-end ft-mono in-pos">Rs. {{ "{:,.2f}".format(v['in'] + v['transfer_in']) }}</td>
+              <td class="text-end ft-mono out-neg">Rs. {{ "{:,.2f}".format(v['out'] + v['transfer_out']) }}</td>
+              <td class="text-end ft-mono fw-bold">Rs. {{ "{:,.2f}".format(v['in'] + v['transfer_in'] - v['out'] - v['transfer_out']) }}</td></tr>
             {% else %}<tr><td colspan="4" class="text-center text-muted">No data</td></tr>{% endfor %}
           </tbody>
         </table>
@@ -204,11 +205,11 @@
             <td>{{ r.account_display }}</td>
             <td>{{ r.category or '—' }}</td>
             <td>{{ r.party_name or '—' }}</td>
-            <td class="text-end ft-mono in-pos">{% if r.cash_in %}+ Rs. {{ "{:,.0f}".format(r.cash_in) }}{% else %}—{% endif %}</td>
-            <td class="text-end ft-mono out-neg">{% if r.cash_out %}- Rs. {{ "{:,.0f}".format(r.cash_out) }}{% else %}—{% endif %}</td>
-            <td class="text-end ft-mono text-primary">{% if r.transfer_amount %}Rs. {{ "{:,.0f}".format(r.transfer_amount) }}{% else %}—{% endif %}</td>
+            <td class="text-end ft-mono in-pos">{% if r.cash_in %}+ Rs. {{ "{:,.2f}".format(r.cash_in) }}{% else %}—{% endif %}</td>
+            <td class="text-end ft-mono out-neg">{% if r.cash_out %}- Rs. {{ "{:,.2f}".format(r.cash_out) }}{% else %}—{% endif %}</td>
+            <td class="text-end ft-mono text-primary">{% if r.transfer_amount %}Rs. {{ "{:,.2f}".format(r.transfer_amount) }}{% else %}—{% endif %}</td>
             <td class="ft-mono small">{{ r.reference or '—' }}</td>
-            <td class="small">{{ r.description or '' }}</td>
+            <td class="small">{{ r.description or '' }}{% if r.warning %}<div class="text-danger">{{ r.warning }}</div>{% endif %}</td>
             {% if ft.embed and not ft.read_only %}
             <td class="text-end text-nowrap">
               {% if r.entry_id %}

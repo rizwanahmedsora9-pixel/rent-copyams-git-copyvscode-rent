@@ -85,22 +85,22 @@
           {% for rec in reconciliations %}
           <tr>
             <td><strong>{{ rec.adjustment_date }}</strong></td>
-            <td class="text-end">Rs. {{ "{:,.0f}".format(rec.display_opening_balance or 0) }}</td>
-            <td class="text-end">Rs. {{ "{:,.0f}".format(rec.display_cash_in or 0) }}</td>
-            <td class="text-end">Rs. {{ "{:,.0f}".format(rec.display_cash_out or 0) }}</td>
-            <td class="text-end">Rs. {{ "{:,.0f}".format(rec.display_calculated_closing or 0) }}</td>
+            <td class="text-end">Rs. {{ "{:,.2f}".format(rec.display_opening_balance or 0) }}</td>
+            <td class="text-end">Rs. {{ "{:,.2f}".format(rec.display_cash_in or 0) }}</td>
+            <td class="text-end">Rs. {{ "{:,.2f}".format(rec.display_cash_out or 0) }}</td>
+            <td class="text-end">Rs. {{ "{:,.2f}".format(rec.display_calculated_closing or 0) }}</td>
             <td class="text-end" style="font-weight:bold;">
               {% if rec.physical_cash_available is not none %}
-              Rs. {{ "{:,.0f}".format(rec.physical_cash_available) }}
+              Rs. {{ "{:,.2f}".format(rec.physical_cash_available) }}
               {% else %}
               —
               {% endif %}
             </td>
             <td class="text-end" style="font-weight:bold;color:{{ '#dc2626' if (rec.difference or 0) < 0 else '#16a34a' if (rec.difference or 0) > 0 else '#6b7280' }};">
               {% if rec.difference is not none %}
-              Rs. {{ "{:,.0f}".format(rec.difference) }}
+              Rs. {{ "{:,.2f}".format(rec.difference) }}
               {% elif rec.amount is not none %}
-              Rs. {{ "{:,.0f}".format(rec.amount) }} (legacy)
+              Rs. {{ "{:,.2f}".format(rec.amount) }} (legacy)
               {% else %}
               —
               {% endif %}

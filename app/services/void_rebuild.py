@@ -389,6 +389,34 @@ def _set_booking_void_state(booking, is_void):
     target = bool(is_void)
     if booking.is_void == target:
         return False
+    # A paid booking owns its account receipt.  Reverse the *actual* linked
+    # postings rather than recreating money from potentially unreliable legacy
+    # source amounts/accounts.  The marker identifies exactly the rows this
+    # booking reversal changed, leaving older already-voided receipts alone.
+    marker = f'[SRC:Booking:{booking.id}]'
+    reversal_marker = f'[VOID_BY_BOOKING:{booking.id}]'
+    receipts = AccountTransaction.query.filter(
+        AccountTransaction.transaction_type == 'Receipt',
+        or_(AccountTransaction.note.ilike(f'%{marker}%'),
+            and_(func.lower(AccountTransaction.source_type) == 'booking', AccountTransaction.source_id == booking.id)),
+    ).order_by(AccountTransaction.id.desc()).all()
+    affected = [row for row in receipts if
+                (not row.is_void if target else row.is_void and reversal_marker in (row.note or ''))]
+    from app.services.payments_crud import _assert_period_open
+    operation = 'deleted' if target else 'restored'
+    _assert_period_open(booking.receive_in_account_id, booking.date_posted, operation=operation)
+    # Legacy source and receipt dates/accounts can disagree. Every receipt
+    # whose balance is about to change must independently be unlocked.
+    for row in affected:
+        _assert_period_open(row.to_account_id, row.date_posted, operation=operation)
+    from app.services.accounting import _void_account_tx, _unvoid_account_tx
+    for row in affected:
+        if target:
+            _void_account_tx(row)
+            row.note = ' '.join(x for x in [(row.note or '').strip(), reversal_marker] if x)
+        else:
+            _unvoid_account_tx(row)
+            row.note = (row.note or '').replace(reversal_marker, '').strip()
     refs = _booking_bill_refs(booking)
     booking.is_void = target
     _sync_booking_pending_bill(booking, extra_void_refs=refs)
@@ -547,7 +575,10 @@ def hard_delete_transaction(kind, obj_id):
             return False
         _set_booking_void_state(booking, True)
         marker = f'[SRC:Booking:{booking.id}]'
-        for tx in AccountTransaction.query.filter(AccountTransaction.note.ilike(f'%{marker}%')).all():
+        for tx in AccountTransaction.query.filter(or_(
+                AccountTransaction.note.ilike(f'%{marker}%'),
+                and_(func.lower(AccountTransaction.source_type) == 'booking',
+                     AccountTransaction.source_id == booking.id))).all():
             if not tx.is_void:
                 _reverse_account_tx_effect(tx)
             db.session.delete(tx)
