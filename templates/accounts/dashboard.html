@@ -565,7 +565,7 @@
                                         <div class="col-md-6" id="receiveCategoryWrap">
                                             <label class="form-label">Category <span class="badge badge-soft-info ms-1">Tree</span></label>
                                             <select class="form-select" name="receive_category" id="receive_category">
-                                                <option value="">— Auto / Select Category —</option>
+                                                <option value="">— Select category —</option>
                                                 <optgroup label="Income &amp; Inflow Categories">
                                                     {% for cat in category_catalog.in_categories %}
                                                     <option value="{{ cat.name }}">{{ cat.name }} ({{ cat.master_category }})</option>
@@ -718,27 +718,12 @@
                                                     <div class="row g-3">
                                                         <div class="col-md-6">
                                                             <label class="form-label">Expense Category</label>
+                                                            <a class="small float-end" href="{{ url_for('accounts.transaction_categories') }}">Manage categories &amp; subcategories</a>
                                                             <select class="form-select" name="expense_category" id="expense_category">
                                                                 <option value="">— Select category —</option>
-                                                                {% if expense_categories %}
-                                                                <optgroup label="Configured Spending Categories">
-                                                                    {% for cat in expense_categories %}
-                                                                    <option value="{{ cat.name }}">{{ cat.name }}</option>
-                                                                    {% endfor %}
-                                                                </optgroup>
-                                                                {% endif %}
-                                                                <optgroup label="Standard Expense &amp; Operational Categories">
-                                                                    {% for cat in category_catalog.out_categories %}
-                                                                    <option value="{{ cat.name }}">{{ cat.name }} ({{ cat.master_category }} ➔ {{ cat.master_subcategory }})</option>
-                                                                    {% endfor %}
-                                                                </optgroup>
-                                                                <optgroup label="All Master Accounting Categories &amp; Subcategories">
-                                                                    {% for grp in category_catalog.classification_groups %}
-                                                                        {% for sub in grp.subcategories %}
-                                                                        <option value="{{ sub.name }}">{{ grp.name }} ➔ {{ sub.name }}</option>
-                                                                        {% endfor %}
-                                                                    {% endfor %}
-                                                                </optgroup>
+                                                                {% for cat in category_catalog.out_categories %}
+                                                                <option value="{{ cat.name }}">{{ cat.name }}</option>
+                                                                {% endfor %}
                                                             </select>
                                                             <div class="small text-muted mt-1">Select any category to filter its subcategories.</div>
                                                         </div>
@@ -805,19 +790,16 @@
                                         <div class="col-md-6">
                                             <label class="form-label">Transfer Category</label>
                                             <select class="form-select" name="tx_category" id="tx_category">
-                                                <option value="Internal Transfer">Internal Transfer (Contra)</option>
-                                                <option value="Cash">Assets ➔ Cash</option>
-                                                <option value="Bank">Assets ➔ Bank</option>
-                                                <option value="Digital Wallet">Assets ➔ Digital Wallet</option>
+                                                <option value="">— Select category —</option>
+                                                {% for cat in category_catalog.all_categories %}
+                                                <option value="{{ cat.name }}">{{ cat.name }}</option>
+                                                {% endfor %}
                                             </select>
                                         </div>
                                         <div class="col-md-6">
                                             <label class="form-label">Transfer Subcategory</label>
                                             <select class="form-select" name="tx_subcategory" id="tx_subcategory">
-                                                <option value="Cash Deposit to Bank">Cash Deposit to Bank</option>
-                                                <option value="Bank Withdrawal to Cash">Bank Withdrawal to Cash</option>
-                                                <option value="Digital Wallet Transfer">Digital Wallet Transfer</option>
-                                                <option value="Inter-Account Transfer">Inter-Account Transfer</option>
+                                                <option value="">— Select subcategory —</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1043,6 +1025,12 @@ function populateAccountsForMethod() {
         }
     }
 }
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('tx_category').addEventListener('change', function () {
+        cascadeSubcategories('tx_category', 'tx_subcategory');
+    });
+});
 
 // Cascading Category -> Subcategory helper using TX_TREE_REGISTRY
 function cascadeSubcategories(catSelectId, subSelectId, directionFilter) {

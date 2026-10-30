@@ -930,3 +930,60 @@ def api_add_account_category():
     db.session.commit()
     audit_log(current_user, 'account.category.create', f'name={name}')
     return jsonify({'ok': True, 'category': {'id': new_cat.id, 'name': new_cat.name}})
+
+
+@accounts_bp.route('/transaction-categories', methods=['GET', 'POST'])
+@login_required
+def transaction_categories():
+    """Manage transaction labels independently of the chart of accounts."""
+    from models import CashFlowCategory, CashFlowSubcategory
+    _deny_account_master_mutation()
+    if request.method == 'POST':
+        try:
+            kind = request.form.get('kind', 'category')
+            if kind not in ('category', 'subcategory'):
+                raise ValueError('Invalid category type.')
+            model = CashFlowCategory if kind == 'category' else CashFlowSubcategory
+            row_id = request.form.get('id', type=int)
+            row = db.session.get(model, row_id) if row_id else None
+            if row_id and not row:
+                raise ValueError('Category not found.')
+            if request.form.get('action') == 'toggle':
+                if not row:
+                    raise ValueError('Category not found.')
+                row.is_active = not row.is_active
+            else:
+                name = (request.form.get('name') or '').strip()
+                if not name or len(name) > 120:
+                    raise ValueError('Enter a name between 1 and 120 characters.')
+                query = model.query.filter(func.lower(func.trim(model.name)) == name.lower())
+                if row:
+                    query = query.filter(model.id != row.id)
+                if kind == 'subcategory':
+                    parent_id = request.form.get('category_id', type=int)
+                    if not parent_id or not db.session.get(CashFlowCategory, parent_id):
+                        raise ValueError('Select a parent category.')
+                    query = query.filter(model.category_id == parent_id)
+                if query.first():
+                    raise ValueError('That name already exists. Edit or enable the existing entry.')
+                if not row:
+                    row = model()
+                    db.session.add(row)
+                    row.is_active = True
+                row.name = name
+                if kind == 'category':
+                    direction = request.form.get('direction', 'both')
+                    if direction not in ('in', 'out', 'both'):
+                        raise ValueError('Select a valid direction.')
+                    row.direction = direction
+                else:
+                    row.category_id = parent_id
+            db.session.commit()
+            audit_log(current_user, 'account.transaction_category.update', f'{kind} id={row.id}')
+            flash('Transaction categories updated.', 'success')
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        return redirect(url_for('accounts.transaction_categories'))
+    return render_template('accounts/transaction_categories.html',
+                           categories=CashFlowCategory.query.order_by(CashFlowCategory.name).all())
