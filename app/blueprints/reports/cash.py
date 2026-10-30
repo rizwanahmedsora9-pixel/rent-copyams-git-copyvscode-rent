@@ -577,6 +577,14 @@ def daily_reconciliation():
         day_str = today_str
 
     if request.method == 'POST':
+        from app.services.permissions import _user_can
+        if not (current_user.role in ('admin', 'root') or _user_can('can_close_cash_day')):
+            message = 'You need the "Day Close / Daily Reconciliation" permission to record counts or lock days.'
+            if _dr_wants_json():
+                return jsonify({'ok': False, 'error': message, 'message': message, 'status': 'danger'}), 403
+            flash(message, 'danger')
+            return redirect(url_for('daily_reconciliation', day=day_str))
+
         action = (request.form.get('action') or '').strip()
         counted_raw = (request.form.get('counted') or '').strip()
         # fetch(FormData) omits the submit button. Treat a counted amount +
@@ -589,12 +597,10 @@ def daily_reconciliation():
         status = 'success'
         try:
             if action == 'save_count':
-                if counted_raw == '':
-                    raise ValueError('empty counted amount')
                 recon.save_count(
                     day_str,
                     int(request.form.get('account_id')),
-                    float(counted_raw),
+                    counted_raw,
                     actor=current_user,
                 )
                 message = 'Counted balance saved.'
@@ -613,10 +619,14 @@ def daily_reconciliation():
                 status = 'warning'
             else:
                 raise ValueError('Unsupported reconciliation action.')
-        except (TypeError, ValueError):
+            audit_log(current_user, 'cash_day_reconciliation',
+                      f'action={action}, day={day_str}'
+                      + (f", account_id={request.form.get('account_id')}" if request.form.get('account_id') else '')
+                      + (f", counted={counted_raw}" if action == 'save_count' else ''))
+        except ValueError as exc:
             db.session.rollback()
             ok = False
-            message = 'Enter a valid counted amount.' if action == 'save_count' else 'Unable to update reconciliation.'
+            message = str(exc)
             status = 'danger'
         except Exception:
             db.session.rollback()

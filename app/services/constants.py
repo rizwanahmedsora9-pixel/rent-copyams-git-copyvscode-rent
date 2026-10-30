@@ -146,6 +146,14 @@ USER_PERMISSION_DEFAULTS = {
     'can_access_settings': False,
     'can_manage_accounts': False,
     'can_view_cash_flow': False,
+    # Atomic money controls — finer switches on top of the module grants.
+    # Void stays True to preserve the historical behaviour where a module
+    # manager could also void within their module; the other three default
+    # OFF because they are sensitive settlement/close powers.
+    'can_void_transactions': True,
+    'can_close_cash_day': False,
+    'can_reconcile_accounts': False,
+    'can_manage_account_masters': False,
 }
 
 PERMISSION_LEGACY_FALLBACKS = {
@@ -439,6 +447,11 @@ EDITABLE_USER_PERMISSION_FIELDS = [
     'can_manage_accounts',
     'can_view_cash_flow',
     'can_access_settings',
+    # Atomic money controls
+    'can_void_transactions',
+    'can_close_cash_day',
+    'can_reconcile_accounts',
+    'can_manage_account_masters',
 ]
 
 # Single source of truth for the Settings user-role UI: which features exist,
@@ -478,7 +491,46 @@ PERMISSION_GROUPS = [
         ('can_import_export', 'Import / Export Center'),
         ('can_access_settings', 'Settings Access (page + activity log)'),
     ]),
+    ('Money Controls (atomic)', [
+        ('can_void_transactions', 'Void / Delete / Restore Transactions'),
+        ('can_close_cash_day', 'Day Close & Daily Reconciliation'),
+        ('can_reconcile_accounts', 'Account Reconciliation Settlement'),
+        ('can_manage_account_masters', 'Manage Account Masters (add/edit/archive)'),
+    ]),
 ]
+
+
+# Preset role templates for the Settings permission chooser.  Each preset is
+# the list of atomic permission keys a fresh user of that role should start
+# with; the admin ticks a preset then fine-tunes individual switches.
+ROLE_PRESETS = {
+    'Cashier': [
+        'can_view_dashboard', 'can_manage_payments', 'can_view_client_ledger',
+        'can_view_history', 'can_close_cash_day',
+    ],
+    'Salesman': [
+        'can_view_dashboard', 'can_manage_bookings', 'can_manage_sales',
+        'can_view_client_ledger', 'can_view_history', 'can_view_stock',
+    ],
+    'Accountant': [
+        'can_view_dashboard', 'can_manage_accounts', 'can_view_cash_flow',
+        'can_close_cash_day', 'can_reconcile_accounts',
+        'can_manage_account_masters', 'can_view_client_ledger',
+        'can_view_supplier_ledger', 'can_view_reports', 'can_manage_payments',
+    ],
+    'Store Keeper': [
+        'can_view_dashboard', 'can_manage_grn', 'can_view_stock',
+        'can_view_daily', 'can_view_history',
+    ],
+    'Manager': [
+        key for key, value in USER_PERMISSION_DEFAULTS.items() if value
+    ],
+    'Viewer (read only)': [
+        'can_view_dashboard', 'can_view_stock', 'can_view_daily',
+        'can_view_history', 'can_view_client_ledger',
+        'can_view_supplier_ledger', 'can_view_reports',
+    ],
+}
 
 
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))

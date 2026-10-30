@@ -2,6 +2,18 @@
 from ._common import *  # noqa
 
 
+def _void_permission_ok():
+    """Atomic gate for removing/restoring account-ledger rows."""
+    if current_user.role in ('admin', 'root'):
+        return True
+    from app.services.permissions import _user_can
+    if not _user_can('can_void_transactions'):
+        return False
+    # Must also legitimately work in the module the row lives in.
+    return (getattr(current_user, 'can_manage_accounts', False)
+            or getattr(current_user, 'can_manage_payments', False))
+
+
 def _audit_pending_account_transactions():
     """Append atomic structured audit events for newly posted ledger rows."""
     pending = [obj for obj in list(db.session.new) if isinstance(obj, AccountTransaction)]
@@ -61,6 +73,9 @@ def void_transaction(tx_id):
 @login_required
 def delete_account_transaction(tx_id):
     """Soft-void an entry or delegate to its canonical source record."""
+    if not _void_permission_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to delete account entries.', 'danger')
+        return redirect(request.referrer or url_for('accounts.dashboard'))
     tx = AccountTransaction.query.get_or_404(tx_id)
     try:
         if tx.reconciliation_id or (tx.source_type or '') == 'AccountReconciliation':
@@ -131,6 +146,9 @@ def delete_account_transaction(tx_id):
 @login_required
 def restore_account_transaction(tx_id):
     """Restore a legacy Cash Flow entry from the Accounts transaction ledger."""
+    if not _void_permission_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to restore account entries.', 'danger')
+        return redirect(request.referrer or url_for('accounts.dashboard'))
     tx = AccountTransaction.query.get_or_404(tx_id)
     try:
         if (tx.source_type or '') != 'CashFlowEntry' or not tx.source_id:

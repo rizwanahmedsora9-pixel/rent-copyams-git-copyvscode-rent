@@ -231,8 +231,8 @@ def supplier_payments():
 @accounts_bp.route('/payments/clients/void/<int:id>', methods=['POST'])
 @login_required
 def client_payment_void(id):
-    if not (current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)):
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to delete payments.', 'danger')
         return redirect(request.referrer or url_for('accounts.client_payments'))
 
     payment = Payment.query.get_or_404(id)
@@ -257,8 +257,8 @@ def client_payment_void(id):
 @accounts_bp.route('/payments/clients/restore/<int:id>', methods=['POST'])
 @login_required
 def client_payment_restore(id):
-    if not (current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)):
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to restore payments.', 'danger')
         return redirect(request.referrer or url_for('accounts.client_payments'))
 
     payment = Payment.query.get_or_404(id)
@@ -551,6 +551,18 @@ def _payments_permission_ok():
     return current_user.role in ('admin', 'root') or getattr(current_user, 'can_manage_payments', False)
 
 
+def _payments_void_ok():
+    """Void / delete / restore is its own atomic switch on top of the module
+    grant: a payment clerk can record payments, but removing money history
+    additionally requires "Void / Delete / Restore Transactions"."""
+    if current_user.role in ('admin', 'root'):
+        return True
+    if not _payments_permission_ok():
+        return False
+    from app.services.permissions import _user_can
+    return _user_can('can_void_transactions')
+
+
 @accounts_bp.route('/payments/clients/save', methods=['POST'])
 @login_required
 def client_payment_save():
@@ -719,8 +731,8 @@ def supplier_payment_data(id):
 @login_required
 def supplier_payment_delete(id):
     """Soft-delete a supplier payment and reverse its accounting effects."""
-    if not _payments_permission_ok():
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to delete supplier payments.', 'danger')
         return redirect(url_for('accounts.supplier_payments'))
     payment = SupplierPayment.query.get_or_404(id)
     try:
@@ -744,8 +756,8 @@ def supplier_payment_delete(id):
 @login_required
 def supplier_payment_restore(id):
     """Restore a deleted supplier payment and re-apply its accounting effects."""
-    if not _payments_permission_ok():
-        flash('Permission denied', 'danger')
+    if not _payments_void_ok():
+        flash('You need the "Void / Delete / Restore Transactions" permission to restore supplier payments.', 'danger')
         return redirect(url_for('accounts.supplier_payments'))
     payment = SupplierPayment.query.get_or_404(id)
     try:

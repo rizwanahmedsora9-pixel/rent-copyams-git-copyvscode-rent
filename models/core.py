@@ -81,6 +81,18 @@ class User(UserMixin, db.Model):
     can_access_settings = db.Column(db.Boolean, default=False)
     can_manage_accounts = db.Column(db.Boolean, default=False)
     can_view_cash_flow = db.Column(db.Boolean, default=False)
+    # --- Atomic money controls (additive; NULL on existing rows resolves to
+    # USER_PERMISSION_DEFAULTS so current behaviour is preserved) -----------
+    # Void / delete / restore financial transactions (payments, ledger rows).
+    can_void_transactions = db.Column(db.Boolean, default=True)
+    # Record counted balances and verify & lock days on the Daily Cash & Bank
+    # Reconciliation board.
+    can_close_cash_day = db.Column(db.Boolean, default=False)
+    # Settle one account: per-account reconciliation that posts the difference
+    # as an immutable Adjustment ledger entry.
+    can_reconcile_accounts = db.Column(db.Boolean, default=False)
+    # Create / edit / delete / archive the account (khata) master records.
+    can_manage_account_masters = db.Column(db.Boolean, default=False)
     restrict_backdated_edit = db.Column(db.Boolean, default=False)
     # Account-level access mode: 'read_write' (default) or 'read_only'.
     # Read-only users keep every view permission but every mutating request

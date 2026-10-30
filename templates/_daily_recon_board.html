@@ -158,7 +158,7 @@
             <td class="text-end dr-mono out-neg" data-dr-field="out">- Rs. {{ "{:,.0f}".format(p.out) }}</td>
             <td class="text-end dr-mono tin-pos" data-dr-field="transfer_in">+ Rs. {{ "{:,.0f}".format(p.transfer_in) }}</td>
             <td class="text-end dr-mono tout-neg" data-dr-field="transfer_out">- Rs. {{ "{:,.0f}".format(p.transfer_out) }}</td>
-            <td class="text-end dr-mono fw-bold text-dark" data-dr-field="expected_closing">Rs. {{ "{:,.0f}".format(p.expected_closing) }}</td>
+            <td class="text-end dr-mono fw-bold text-dark" data-dr-field="expected_closing">Rs. {{ "{:,.0f}".format(p.expected_closing) }}{% if p.is_locked and p.drift_after_lock %} <span class="badge bg-warning text-dark" title="Ledger moved after the day was locked (a back-dated entry changed this day). Expected at lock: Rs. {{ "{:,.0f}".format(p.expected_at_lock or 0) }}">drift {{ "+" if p.drift_after_lock > 0 else "" }}{{ "{:,.0f}".format(p.drift_after_lock) }}</span>{% endif %}</td>
             <td class="text-end dr-mono dr-counted">
               <form method="POST" action="{{ dr_post_action }}" class="dr-count-form d-inline-flex align-items-center justify-content-end gap-1" data-dr-count-form>
                 <input type="hidden" name="action" value="save_count">
@@ -168,8 +168,9 @@
                 {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
                 <input type="number" step="0.01" name="counted" class="form-control form-control-sm dr-mono dr-count-input"
                        value="{{ p.counted if p.counted is not none else '' }}"
-                       placeholder="{{ "{:,.0f}".format(p.expected_closing) }}" aria-label="Actual counted balance for {{ p.account_name }}" required>
-                <button type="submit" class="btn btn-sm btn-success fw-bold" name="action" value="save_count" title="Save counted balance"><i class="bi bi-save"></i></button>
+                       placeholder="{{ "{:,.0f}".format(p.expected_closing) }}" aria-label="Actual counted balance for {{ p.account_name }}" required
+                       {% if p.is_locked %}disabled{% endif %}>
+                <button type="submit" class="btn btn-sm btn-success fw-bold" name="action" value="save_count" title="Save counted balance" {% if p.is_locked %}disabled{% endif %}><i class="bi bi-save"></i></button>
               </form>
             </td>
             <td class="text-end dr-mono" data-dr-field="difference">
@@ -192,6 +193,10 @@
                 </form>
                 {% endif %}
                 {% if p.is_locked %}<span class="badge bg-primary"><i class="bi bi-lock-fill me-1"></i>Locked</span>{% endif %}
+                {% if p.effective_counted is not none and p.difference and not p.is_locked %}
+                <a class="btn btn-sm btn-outline-warning" title="Record a settlement: post this difference to the account ledger as an immutable Adjustment entry"
+                   href="{{ url_for('accounts.reconcile_account', account_id=p.account_id) }}"><i class="bi bi-clipboard-check me-1"></i>Settle</a>
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -301,7 +306,8 @@
         window.setTimeout(function(){ if (state && state.textContent === 'Saved') state.textContent = ''; }, 1200);
       } else {
         const csrfExpired = /csrf|token|session expired|log in/i.test(errMsg);
-        showSaveState(state, csrfExpired ? 'Reload page & retry' : 'Error', 'text-danger', errMsg);
+        const shortMsg = errMsg.length > 42 ? errMsg.slice(0, 42) + '…' : errMsg;
+        showSaveState(state, csrfExpired ? 'Reload page & retry' : shortMsg, 'text-danger', errMsg);
         throw new Error(errMsg);
       }
     } catch (err) {

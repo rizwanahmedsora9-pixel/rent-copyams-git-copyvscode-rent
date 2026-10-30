@@ -34,6 +34,33 @@ def _to_date(value) -> date:
     return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
 
 
+def _parse_counted(raw) -> float:
+    """Parse a counted balance the way the rest of the app parses money.
+
+    Accepts plain numbers and thousands-separated text ('1,500', '50 000').
+    Anything unreadable (or infinite) raises ValueError with a readable
+    message — the old code used bare ``float()`` in the route, so pasting a
+    comma-formatted figure failed with a generic 'Enter a valid counted
+    amount' even though the value was fine.
+    """
+    text_value = str(raw if raw is not None else "").strip()
+    if not text_value:
+        raise ValueError("Enter the counted amount.")
+    cleaned = text_value.replace(",", "").replace(" ", "")
+    try:
+        value = float(cleaned)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{text_value}' is not a valid amount. Use digits only, e.g. 1500.")
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError("Enter a valid finite amount.")
+    return _money_round(value)
+
+
+def _day_is_locked(day) -> bool:
+    """A verified & locked day is frozen: counts may not change silently."""
+    return get_day_lock(day) is not None
+
+
 def _account_baseline(account, as_of: date) -> float:
     """Opening balance of an account if its opening date is on/before as_of."""
     ob_date = getattr(account, "opening_balance_date", None)
@@ -134,6 +161,15 @@ def account_positions_for_date(day) -> list:
         difference = (
             _money_round(eff_counted - expected) if eff_counted is not None else 0.0
         )
+        # After a day is locked, any transaction back-dated into that day moves
+        # the recomputed expected closing away from the frozen snapshot.  The
+        # locked count still carries to the next opening (that is the lock's
+        # purpose), but the board must show the drift instead of hiding it.
+        expected_at_lock = float(s.expected_closing) if (is_locked and s is not None and s.expected_closing is not None) else None
+        drift_after_lock = (
+            _money_round(expected - expected_at_lock)
+            if expected_at_lock is not None else 0.0
+        )
         account_category = (acc.category or "").lower()
         # Daily reconciliation already has dedicated balance columns.  Keep the
         # account title clean here; showing the live current balance in the
@@ -150,6 +186,8 @@ def account_positions_for_date(day) -> list:
             "transfer_in": transfer_in,
             "transfer_out": transfer_out,
             "expected_closing": expected,
+            "expected_at_lock": expected_at_lock,
+            "drift_after_lock": drift_after_lock,
             "counted": counted,
             "effective_counted": eff_counted,
             "difference": difference,
@@ -163,8 +201,18 @@ def get_day_lock(day):
 
 
 def save_count(day, account_id, counted, actor=None):
-    """Store the user-entered physical count for one account on a day."""
+    """Store the user-entered physical count for one account on a day.
+
+    A verified & locked day is frozen — the count feeding the next day's
+    opening must not change silently behind the lock.  Unlock the day first
+    (the counted values survive as drafts), correct, then lock again.
+    """
     day = _to_date(day)
+    if _day_is_locked(day):
+        raise ValueError(
+            f"Day {day.strftime('%Y-%m-%d')} is locked. Unlock it first if you need to correct a count."
+        )
+    counted_value = _parse_counted(counted)
     actor_name = getattr(actor, "username", None) or actor
     pos = CashDayAccountPosition.query.filter_by(
         position_date=day, account_id=account_id
@@ -177,7 +225,7 @@ def save_count(day, account_id, counted, actor=None):
             account_name=(acc.name if acc else ""),
         )
         db.session.add(pos)
-    pos.counted = float(counted)
+    pos.counted = counted_value
     pos.difference = None  # recomputed on read
     pos.updated_by = actor_name
     db.session.commit()
@@ -253,6 +301,10 @@ def unlock_day(day):
 
 def delete_count(day, account_id):
     day = _to_date(day)
+    if _day_is_locked(day):
+        raise ValueError(
+            f"Day {day.strftime('%Y-%m-%d')} is locked. Unlock it before clearing a counted value."
+        )
     pos = CashDayAccountPosition.query.filter_by(
         position_date=day, account_id=account_id
     ).first()
