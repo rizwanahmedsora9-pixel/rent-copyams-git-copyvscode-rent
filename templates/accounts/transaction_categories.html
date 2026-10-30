@@ -1,0 +1,38 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="container py-4">
+    <h2>Transaction categories &amp; subcategories</h2>
+    <p>Create your own labels for New Transaction. No categories are added automatically. Disabling a label removes it from new selections without changing historical transactions.</p>
+    <a href="{{ url_for('accounts.manage_categories') }}">Account groups</a>
+    <form method="post" class="card card-body my-3">
+        <h5>Add category</h5>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="category">
+        <label>Name <input class="form-control" name="name" maxlength="120" required></label>
+        <label>Use for <select class="form-select" name="direction"><option value="both">Receive, Pay &amp; Transfer</option><option value="in">Receive</option><option value="out">Pay</option></select></label>
+        <button class="btn btn-primary mt-2">Create category</button>
+    </form>
+    {% for cat in categories %}
+    <section class="card card-body my-3">
+        <form method="post" class="d-flex gap-2 align-items-center flex-wrap">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="category"><input type="hidden" name="id" value="{{ cat.id }}">
+            <input aria-label="Category name" class="form-control w-auto" name="name" value="{{ cat.name }}" maxlength="120" required>
+            <select aria-label="Direction" class="form-select w-auto" name="direction">{% for value, label in [('both','Receive, Pay & Transfer'),('in','Receive'),('out','Pay')] %}<option value="{{ value }}" {% if cat.direction == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+            <span>{{ 'Active' if cat.is_active else 'Disabled' }}</span>
+            <button class="btn btn-outline-primary">Save</button><button class="btn btn-outline-secondary" name="action" value="toggle">{{ 'Disable' if cat.is_active else 'Enable' }}</button>
+        </form>
+        {% for sub in cat.subcategories|sort(attribute='name') %}
+        <form method="post" class="d-flex gap-2 ms-4 mt-2 align-items-center flex-wrap">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="subcategory"><input type="hidden" name="id" value="{{ sub.id }}"><input type="hidden" name="category_id" value="{{ cat.id }}">
+            <input aria-label="Subcategory name" class="form-control w-auto" name="name" value="{{ sub.name }}" maxlength="120" required>
+            <span>{{ 'Active' if sub.is_active else 'Disabled' }}</span>
+            <button class="btn btn-outline-primary">Save</button><button class="btn btn-outline-secondary" name="action" value="toggle">{{ 'Disable' if sub.is_active else 'Enable' }}</button>
+        </form>
+        {% endfor %}
+        <form method="post" class="d-flex gap-2 mt-3 ms-4">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="subcategory"><input type="hidden" name="category_id" value="{{ cat.id }}">
+            <input aria-label="New subcategory name" class="form-control" name="name" maxlength="120" placeholder="New subcategory" required><button class="btn btn-success">Add subcategory</button>
+        </form>
+    </section>
+    {% else %}<p>No categories yet. Create your first category above.</p>{% endfor %}
+</div>
+{% endblock %}

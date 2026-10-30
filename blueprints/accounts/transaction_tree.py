@@ -462,132 +462,22 @@ TRANSACTION_TREE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
 # ---------------------------------------------------------------------------
 
 def build_unified_category_catalog() -> Dict[str, Any]:
-    """Return the complete hierarchy of Categories & Subcategories for transactions.
-
-    Merges:
-      1. Master ``CLASSIFICATION`` (`Assets`, `Liabilities`, `Equity`, `Income`,
-         `Expenses`, `External` -> Subcategories -> Account Types)
-      2. Default Expense & Income operational trees (`Utilities`, `Fuel & Transport`,
-         `Rent`, `Salaries & Wages`, `Maintenance & Repairs`, `Office & Admin`,
-         `Cost of Goods`, `Financial`, `Personal`, `Miscellaneous`, `Sales`,
-         `Service Income`, `Other Income`, etc.)
-      3. Dynamic ``CashFlowCategory`` and ``CashFlowSubcategory`` rows from DB.
-      4. Dynamic ``AccountCategory`` groups from DB.
-    """
+    """Return only user-managed, active transaction categories and children."""
     from models import AccountCategory, CashFlowCategory
 
-    # 1. Start with the 6-root CLASSIFICATION tree so every master category,
-    #    subcategory, and leaf account type is represented.
-    classification_groups: List[Dict[str, Any]] = []
-    for cat_name, cat_meta in cls.CLASSIFICATION.items():
-        sub_list = []
-        for sub_name, sub_meta in cat_meta["subcategories"].items():
-            leaf_types = list(sub_meta["account_types"].keys())
-            sub_list.append({
-                "name": sub_name,
-                "category": cat_name,
-                "types": leaf_types,
-            })
-        classification_groups.append({
-            "name": cat_name,
-            "description": cat_meta.get("description", ""),
-            "subcategories": sub_list,
-        })
+    # Transaction labels are user configuration, never accounting-rule defaults.
+    classification_groups = []
+    categories_map = OrderedDict()
 
-    # 2. Build merged Category -> Subcategories map for Outflows (Pay/Expense)
-    #    and Inflows (Receive/Income) and All.
-    categories_map: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+    def _ensure_cat(name, direction="both", master_category="", master_subcategory="", icon="bi-tag"):
+        entry = dict(name=name, direction=direction, master_category=master_category,
+                     master_subcategory=master_subcategory, icon=icon, subcategories=[])
+        categories_map[name] = entry
+        return entry
 
-    def _ensure_cat(
-        name: str,
-        direction: str = "both",
-        master_category: str = "",
-        master_subcategory: str = "",
-        icon: str = "bi-tag",
-    ) -> Dict[str, Any]:
-        key = name.strip()
-        if key not in categories_map:
-            categories_map[key] = {
-                "name": key,
-                "direction": direction,
-                "master_category": master_category or "General",
-                "master_subcategory": master_subcategory or key,
-                "icon": icon,
-                "subcategories": [],
-            }
-        else:
-            existing_dir = categories_map[key]["direction"]
-            if existing_dir != direction and existing_dir != "both":
-                categories_map[key]["direction"] = "both"
-        return categories_map[key]
-
-    def _add_sub(cat_entry: Dict[str, Any], sub_name: str) -> None:
-        s = (sub_name or "").strip()
-        if s and s not in cat_entry["subcategories"]:
-            cat_entry["subcategories"].append(s)
-
-    # Seed from DEFAULT_EXPENSE_CATEGORY_TREE
-    for cat_name, meta in DEFAULT_EXPENSE_CATEGORY_TREE.items():
-        entry = _ensure_cat(
-            cat_name,
-            direction=meta.get("direction", "out"),
-            master_category=meta.get("master_category", "Expenses"),
-            master_subcategory=meta.get("master_subcategory", "Operating"),
-            icon=meta.get("icon", "bi-tag"),
-        )
-        for sub in meta.get("subcategories", []):
-            _add_sub(entry, sub)
-
-    # Seed from DEFAULT_INCOME_CATEGORY_TREE
-    for cat_name, meta in DEFAULT_INCOME_CATEGORY_TREE.items():
-        entry = _ensure_cat(
-            cat_name,
-            direction=meta.get("direction", "in"),
-            master_category=meta.get("master_category", "Income"),
-            master_subcategory=meta.get("master_subcategory", cat_name),
-            icon=meta.get("icon", "bi-cash-coin"),
-        )
-        for sub in meta.get("subcategories", []):
-            _add_sub(entry, sub)
-
-    # Seed every Master Category & Subcategory from CLASSIFICATION so 100% of
-    # the accounting hierarchy is selectable as a transaction category/subcategory.
-    master_dir_map = {
-        "Assets": "both",
-        "Liabilities": "both",
-        "Equity": "both",
-        "Income": "in",
-        "Expenses": "out",
-        "External": "both",
-    }
-    for cat_name, cat_meta in cls.CLASSIFICATION.items():
-        m_dir = master_dir_map.get(cat_name, "both")
-        # Also expose each CLASSIFICATION Subcategory (e.g. Operating, Cost of Goods,
-        # Financial, Cash, Bank, Digital Wallet, Receivables, Loans, Payables, Capital,
-        # Drawings, Sales, Service Income, Other Income, External Party) with its leaf types.
-        for sub_name, sub_meta in cat_meta["subcategories"].items():
-            entry = _ensure_cat(
-                sub_name,
-                direction=m_dir,
-                master_category=cat_name,
-                master_subcategory=sub_name,
-                icon="bi-folder2-open",
-            )
-            for leaf_type in sub_meta["account_types"].keys():
-                _add_sub(entry, leaf_type)
-                # If a leaf type under Expenses/Operating (like Rent, Utilities,
-                # Salaries & Wages, Transport & Fuel, Maintenance, Office Supplies,
-                # Miscellaneous Expense) is also used as a top-level category name,
-                # ensure it exists as a top-level category too.
-                if cat_name in ("Expenses", "Income"):
-                    leaf_entry = _ensure_cat(
-                        leaf_type,
-                        direction=m_dir,
-                        master_category=cat_name,
-                        master_subcategory=sub_name,
-                        icon="bi-tag",
-                    )
-                    _add_sub(leaf_entry, f"{sub_name} — {leaf_type}")
+    def _add_sub(entry, name):
+        if name not in entry["subcategories"]:
+            entry["subcategories"].append(name)
 
     # Merge dynamic DB CashFlowCategory & CashFlowSubcategory rows
     try:
@@ -608,8 +498,6 @@ def build_unified_category_catalog() -> Dict[str, Any]:
             for sub in getattr(cf_cat, "subcategories", []) or []:
                 if getattr(sub, "is_active", True):
                     _add_sub(entry, sub.name)
-            if not entry["subcategories"]:
-                _add_sub(entry, f"General {cf_cat.name}")
     except Exception:
         pass
 
@@ -641,41 +529,28 @@ def build_unified_category_catalog() -> Dict[str, Any]:
 
 
 def is_valid_transaction_category(category_name: Optional[str], direction: Optional[str] = None) -> bool:
-    """Validate whether ``category_name`` is a known category or subcategory.
-
-    Accepts:
-      - Any category in ``build_unified_category_catalog()``
-      - Any master category, subcategory, or account_type in ``CLASSIFICATION``
-      - Any active ``CashFlowCategory`` or ``CashFlowSubcategory`` in the DB
-    """
-    name = (category_name or "").strip()
+    """Check an active user-managed category and its allowed direction."""
+    name = (category_name or "").strip().casefold()
     if not name:
         return True
-    low = name.lower()
+    return any(c["name"].casefold() == name and
+               (direction not in ("in", "out") or c["direction"] in (direction, "both"))
+               for c in build_unified_category_catalog()["all_categories"])
 
-    catalog = build_unified_category_catalog()
-    for cat in catalog["all_categories"]:
-        if cat["name"].lower() == low:
-            if direction in ("in", "out") and cat["direction"] not in ("both", direction):
-                # Still allow if it exists in CLASSIFICATION
-                pass
-            return True
-        for sub in cat.get("subcategories", []):
-            if sub.lower() == low:
-                return True
 
-    # Check CLASSIFICATION directly
-    for cat_name, cat_meta in cls.CLASSIFICATION.items():
-        if cat_name.lower() == low:
-            return True
-        for sub_name, sub_meta in cat_meta["subcategories"].items():
-            if sub_name.lower() == low:
-                return True
-            for atype in sub_meta["account_types"].keys():
-                if atype.lower() == low:
-                    return True
+def validate_transaction_labels(category, subcategory, direction=None):
+    """Reject disabled labels, wrong directions and mismatched children."""
+    category, subcategory = (category or '').strip(), (subcategory or '').strip()
+    if not category:
+        if subcategory:
+            raise ValueError('Select a parent category before a subcategory.')
+        return
+    cat = build_unified_category_catalog()['by_name'].get(category)
+    if not cat or (direction in ('in', 'out') and cat['direction'] not in (direction, 'both')):
+        raise ValueError('Select an active category for this transaction direction.')
+    if subcategory and subcategory not in cat['subcategories']:
+        raise ValueError('Select an active subcategory belonging to the selected category.')
 
-    return False
 
 
 def transaction_tree_registry_json() -> Dict[str, Any]:

@@ -315,6 +315,8 @@ def add_transaction():
             receive_source_label = (request.form.get('receive_source_label') or '').strip()
             receive_category = (request.form.get('receive_category') or request.form.get('tx_category') or '').strip()
             receive_subcategory = (request.form.get('receive_subcategory') or request.form.get('tx_subcategory') or '').strip()
+            from .transaction_tree import validate_transaction_labels
+            validate_transaction_labels(receive_category, receive_subcategory, 'in')
             receive_reference = (request.form.get('receive_reference') or request.form.get('expense_reference') or '').strip()
             amount = float(request.form.get('amount', 0) or 0)
             discount = float(request.form.get('discount', 0) or 0)
@@ -458,6 +460,8 @@ def add_transaction():
             # number and an optional proof attachment — captured once, shown everywhere after.
             expense_category = (request.form.get('expense_category') or request.form.get('tx_category') or '').strip()
             expense_subcategory = (request.form.get('expense_subcategory') or request.form.get('tx_subcategory') or '').strip()
+            from .transaction_tree import validate_transaction_labels
+            validate_transaction_labels(expense_category, expense_subcategory, 'out')
             expense_payee = (request.form.get('payee') or '').strip()
             expense_reference = (request.form.get('expense_reference') or '').strip()
             expense_proof = None
@@ -682,8 +686,10 @@ def add_transaction():
             if float(from_account.balance or 0) < amount:
                 raise ValueError('Insufficient balance in selected source account.')
 
-            transfer_cat = (request.form.get('tx_category') or request.form.get('expense_category') or 'Internal Transfer').strip()
+            transfer_cat = (request.form.get('tx_category') or request.form.get('expense_category') or '').strip()
             transfer_subcat = (request.form.get('tx_subcategory') or request.form.get('expense_subcategory') or '').strip()
+            from .transaction_tree import validate_transaction_labels
+            validate_transaction_labels(transfer_cat, transfer_subcat)
             transfer_ref = (request.form.get('expense_reference') or request.form.get('reference_no') or '').strip()
             transfer_desc = (request.form.get('target_label') or request.form.get('description') or 'Intra-company transfer').strip()
 
