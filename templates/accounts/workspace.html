@@ -6,7 +6,7 @@
 <div class="aw-shell">
   <nav class="aw-tabs" aria-label="Accounts workspace">
     {% for key, label, endpoint, icon in tabs %}
-    <a class="aw-tab {{ 'is-active' if active_tab == key }}" href="{{ url_for(endpoint) }}" {% if active_tab == key %}aria-current="page"{% endif %}>
+    <a class="aw-tab {{ 'aw-tab-new' if key == 'new-transaction' }} {{ 'is-active' if active_tab == key }}" href="{{ url_for(endpoint) }}" {% if active_tab == key %}aria-current="page"{% endif %}>
       <i class="bi {{ icon }}" aria-hidden="true"></i>
       <span>{{ label }}</span>
       {% if key == 'accounts' and setup_account_count %}<span class="aw-count">{{ setup_account_count }}</span>{% endif %}
@@ -16,7 +16,9 @@
   </nav>
 
   <div class="aw-panel">
-    {% if active_tab == 'accounts' %}
+    {% if active_tab == 'new-transaction' %}
+      {% include 'accounts/_workspace_transaction.html' %}
+    {% elif active_tab == 'accounts' %}
       {% include 'accounts/_workspace_accounts.html' %}
     {% elif active_tab == 'categories' %}
       {% include 'accounts/_workspace_categories.html' %}
@@ -37,7 +39,8 @@
     'modalOpen': modal_open,
     'editAccountId': edit_account_id,
     'editCategoryId': edit_category_id,
-    'formValues': form_values
+    'formValues': form_values,
+    'transactionCategories': tx_categories|default([])
   }|tojson }};
 </script>
 <script src="{{ url_for('static', filename='accounts_workspace.js') }}"></script>

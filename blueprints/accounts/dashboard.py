@@ -1,4 +1,4 @@
-"""Accounts landing page — the rebuilt three-tab workspace."""
+"""Accounts landing page — the rebuilt four-tab workspace."""
 from ._common import *  # noqa
 
 

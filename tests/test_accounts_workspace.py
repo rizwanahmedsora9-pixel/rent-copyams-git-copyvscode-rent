@@ -31,7 +31,7 @@ def create_category(client, **overrides):
     return client.post("/accounts/setup/categories", data=data)
 
 
-def test_fresh_workspace_has_only_three_tabs_and_no_seeded_setup(app, client):
+def test_fresh_workspace_has_four_tabs_and_no_seeded_setup(app, client):
     login(client)
     page = client.get("/accounts/")
     assert page.status_code == 200
