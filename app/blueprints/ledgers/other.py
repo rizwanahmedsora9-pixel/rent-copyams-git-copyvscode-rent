@@ -4,6 +4,32 @@ from ._common import *  # noqa
 @bp.route('/decision_ledger')
 @login_required
 def decision_ledger():
+    material_filter = _material_norm_key(request.args.get('material', '').strip())
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+    try:
+        for value in (date_from, date_to):
+            if value and date.fromisoformat(value).isoformat() != value:
+                raise ValueError()
+        if date_from and date_to and date_from > date_to:
+            raise ValueError()
+    except ValueError:
+        abort(400, 'Enter a valid date range (start must not be after end).')
+
+    def booking_period(query):
+        if date_from:
+            query = query.filter(func.date(Booking.date_posted) >= date_from)
+        if date_to:
+            query = query.filter(func.date(Booking.date_posted) <= date_to)
+        return query
+
+    def entry_period(query):
+        if date_from:
+            query = query.filter(Entry.date >= date_from)
+        if date_to:
+            query = query.filter(Entry.date <= date_to)
+        return query
+
     # --- Part 0: Grouped money-in maps (one query each, not per client) -----
     # What each client actually GAVE, in real money terms, across the three
     # channels the app records:
@@ -53,6 +79,16 @@ def decision_ledger():
     ).join(Booking, BookingItem.booking_id == Booking.id).filter(
         Booking.is_void == False
     ).all()
+    material_options = {}
+    for r in price_rows:
+        key = _material_norm_key(r.material_name)
+        if key:
+            material_options.setdefault(key, r.material_name.strip())
+    for name, booked_name in db.session.query(Entry.material, Entry.booked_material).filter(Entry.type == 'OUT', Entry.is_void == False).all():
+        label = booked_name or name
+        key = _material_norm_key(label)
+        if key:
+            material_options.setdefault(key, label.strip())
     global_price_dt = {}
     for r in price_rows:
         key = _material_norm_key(r.material_name)
@@ -118,8 +154,8 @@ def decision_ledger():
         money_given_total = given_cash + given_booking_advance + given_sale_paid
 
         # --- Per-Client Material Summary ---
-        booked_res = db.session.query(BookingItem.material_name, func.sum(BookingItem.qty))\
-            .join(Booking).filter(Booking.client_name == client.name, Booking.is_void == False)\
+        booked_res = booking_period(db.session.query(BookingItem.material_name, func.sum(BookingItem.qty))\
+            .join(Booking).filter(Booking.client_name == client.name, Booking.is_void == False))\
             .group_by(BookingItem.material_name).all()
         booked_map = {}
         material_labels = {}
@@ -153,7 +189,7 @@ def decision_ledger():
             elif mat_key not in latest_price:
                 latest_price[mat_key] = float(item.price_at_time or 0)
 
-        entries = Entry.query.filter(
+        entries = entry_period(Entry.query.filter(
             (Entry.client_code == client.code) | (Entry.client == client.name),
             Entry.type == 'OUT',
             Entry.is_void == False
@@ -162,7 +198,7 @@ def decision_ledger():
                 func.coalesce(Entry.nimbus_no, '') != 'Direct Sale',
                 Entry.client_category == 'Booking Delivery'
             )
-        ).all()
+        )).all()
 
         dispatched_map = {}
         for e in entries:
@@ -178,6 +214,8 @@ def decision_ledger():
         total_dispatched_cost = 0
         all_mats = set(booked_map.keys()) | set(dispatched_map.keys())
 
+        if material_filter:
+            all_mats = {m for m in all_mats if m == material_filter}
         for m in sorted(all_mats, key=lambda x: str(material_labels.get(x, x)).lower()):
             b = booked_map.get(m, 0)
             d = dispatched_map.get(m, 0)
@@ -242,6 +280,8 @@ def decision_ledger():
     per_page = min(max(per_page, 5), 100)
 
     def _match(row):
+        if (material_filter or date_from or date_to) and not row['materials']:
+            return False
         if q:
             ql = q.lower()
             if ql not in (row['client'].name or '').lower() and ql not in (row['client'].code or '').lower():
@@ -278,10 +318,10 @@ def decision_ledger():
     paged = filtered[start:end]
 
     # --- Part 2: Overall Material Summary ---
-    total_booked_q = db.session.query(
+    total_booked_q = booking_period(db.session.query(
         BookingItem.material_name,
         func.sum(BookingItem.qty).label('total_booked')
-    ).join(Booking).filter(Booking.is_void == False).group_by(BookingItem.material_name).all()
+    ).join(Booking).filter(Booking.is_void == False)).group_by(BookingItem.material_name).all()
     total_booked_map = {}
     total_material_labels = {}
     for r in total_booked_q:
@@ -291,7 +331,7 @@ def decision_ledger():
         total_booked_map[mat_key] = float(total_booked_map.get(mat_key, 0) or 0) + float(r.total_booked or 0)
         total_material_labels.setdefault(mat_key, (r.material_name or '').strip())
 
-    all_dispatches = db.session.query(
+    all_dispatches = entry_period(db.session.query(
         func.coalesce(Entry.booked_material, Entry.material).label('booked_mat'),
         func.sum(Entry.qty).label('total_dispatched')
     ).filter(
@@ -301,7 +341,7 @@ def decision_ledger():
             func.coalesce(Entry.nimbus_no, '') != 'Direct Sale',
             Entry.client_category == 'Booking Delivery'
         )
-    ).group_by(func.coalesce(Entry.booked_material, Entry.material)).all()
+    )).group_by(func.coalesce(Entry.booked_material, Entry.material)).all()
     total_dispatched_map = {}
     for r in all_dispatches:
         mat_key = _material_norm_key(r.booked_mat)
@@ -311,6 +351,8 @@ def decision_ledger():
         total_material_labels.setdefault(mat_key, (r.booked_mat or '').strip())
 
     all_materials = {m for m in (set(total_booked_map.keys()) | set(total_dispatched_map.keys())) if m}
+    if material_filter:
+        all_materials = {m for m in all_materials if m == material_filter}
     overall_material_summary = []
     for m in sorted(list(all_materials), key=lambda x: str(total_material_labels.get(x, x)).lower()):
         booked = total_booked_map.get(m, 0)
@@ -353,6 +395,10 @@ def decision_ledger():
                            collective=collective,
                            data=paged,
                            q=q,
+                           material_filter=material_filter,
+                           material_options=sorted(material_options.items(), key=lambda item: item[1].lower()),
+                           date_from=date_from, date_to=date_to,
+                           material_scope_active=bool(material_filter or date_from or date_to),
                            category_filter=category_filter,
                            balance_filter=balance_filter,
                            page=page,
