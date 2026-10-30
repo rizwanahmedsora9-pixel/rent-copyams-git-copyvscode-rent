@@ -855,9 +855,10 @@ def _ensure_account_classification_columns():
             for column, sqltype in (
                 ("reason", "VARCHAR(300)",),
                 ("idempotency_key", "VARCHAR(64)",),
-                # Structured transaction detail (category / counterparty /
-                # voucher / method / proof) for every money movement.
+                # Structured transaction detail (category / subcategory /
+                # counterparty / voucher / method / proof) for every money movement.
                 ("category", "VARCHAR(120)",),
+                ("subcategory", "VARCHAR(120)",),
                 ("payee", "VARCHAR(160)",),
                 ("reference_no", "VARCHAR(80)",),
                 ("payment_method", "VARCHAR(50)",),

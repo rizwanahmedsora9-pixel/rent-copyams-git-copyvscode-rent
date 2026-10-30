@@ -1,0 +1,397 @@
+{# Interactive Data-Driven Transaction Tree Explorer + Master Category/Subcategory Tree #}
+<style>
+.tx-tree-card {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--surface-1);
+    overflow: hidden;
+}
+.tx-tree-header {
+    background: linear-gradient(135deg, rgba(99,102,241,0.10), rgba(16,185,129,0.08));
+    border-bottom: 1px solid var(--border-color);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.tx-tree-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-color);
+}
+.tx-tree-stat {
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+.tx-tree-stat .st-lbl {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 700;
+}
+.tx-tree-stat .st-val {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin-top: 2px;
+}
+.tx-dir-block {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    background: var(--surface-1);
+}
+.tx-dir-block > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-weight: 700;
+    user-select: none;
+}
+.tx-dir-block > summary::-webkit-details-marker { display: none; }
+.tx-dir-in > summary { background: rgba(16,185,129,0.08); border-left: 4px solid #10b981; }
+.tx-dir-out > summary { background: rgba(239,68,68,0.08); border-left: 4px solid #ef4444; }
+.tx-dir-transfer > summary { background: rgba(6,182,212,0.08); border-left: 4px solid #06b6d4; }
+
+.tx-cat-block {
+    border-top: 1px solid var(--border-color);
+    background: var(--surface-1);
+}
+.tx-cat-block > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 10px 16px 10px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-weight: 600;
+    background: rgba(148,163,184,0.04);
+}
+.tx-cat-block > summary::-webkit-details-marker { display: none; }
+.tx-cat-block > summary:hover { background: rgba(99,102,241,0.06); }
+
+.tx-subcat-block {
+    border-top: 1px dashed var(--border-color);
+}
+.tx-subcat-block > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 16px 8px 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+.tx-subcat-block > summary::-webkit-details-marker { display: none; }
+.tx-subcat-block > summary:hover { background: rgba(99,102,241,0.04); }
+
+.tx-flow-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    padding: 3px 9px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-color);
+}
+.tx-flow-chip .flow-arrow {
+    color: #6366f1;
+    font-weight: 800;
+}
+.cat-master-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    gap: 14px;
+}
+.cat-master-card {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--surface-1);
+}
+.cat-sub-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    background: var(--surface-2);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.cat-sub-pill:hover {
+    border-color: #6366f1;
+    background: rgba(99,102,241,0.12);
+    color: #6366f1;
+}
+</style>
+
+<div class="tx-tree-card mb-4" id="transactionTreeExplorer">
+    <div class="tx-tree-header">
+        <div>
+            <h5 class="mb-0 fw-bold d-flex align-items-center gap-2">
+                <i class="bi bi-diagram-3-fill text-primary"></i>
+                Data-Driven Transaction Tree &amp; Category Hierarchy
+                <span class="badge badge-soft-info">{{ tree_range_label }}</span>
+            </h5>
+            <div class="small text-muted mt-1">
+                Visual breakdown: <strong>Direction ➔ Category ➔ Subcategory ➔ Concrete Flow (From ──► To)</strong>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Period Filter Pills -->
+            <div class="btn-group btn-group-sm" role="group" aria-label="Transaction tree period">
+                <a href="{{ url_for('accounts.dashboard', tree_range='today', tree_account_id=tree_account_id) }}#transactionTreeExplorer"
+                   class="btn {% if tree_range == 'today' %}btn-primary{% else %}btn-outline-secondary{% endif %}">Today</a>
+                <a href="{{ url_for('accounts.dashboard', tree_range='week', tree_account_id=tree_account_id) }}#transactionTreeExplorer"
+                   class="btn {% if tree_range == 'week' %}btn-primary{% else %}btn-outline-secondary{% endif %}">7 Days</a>
+                <a href="{{ url_for('accounts.dashboard', tree_range='month', tree_account_id=tree_account_id) }}#transactionTreeExplorer"
+                   class="btn {% if tree_range == 'month' %}btn-primary{% else %}btn-outline-secondary{% endif %}">This Month</a>
+                <a href="{{ url_for('accounts.dashboard', tree_range='all', tree_account_id=tree_account_id) }}#transactionTreeExplorer"
+                   class="btn {% if tree_range == 'all' %}btn-primary{% else %}btn-outline-secondary{% endif %}">All Time</a>
+            </div>
+
+            <!-- View Switcher: Live Movements vs Master Category/Subcategory Tree -->
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-dark active" id="btnShowLiveTree" onclick="switchTxTreeTab('live')">
+                    <i class="bi bi-list-nested me-1"></i>Live Movements ({{ live_tx_tree.total_count }})
+                </button>
+                <button type="button" class="btn btn-outline-dark" id="btnShowCatalogTree" onclick="switchTxTreeTab('catalog')">
+                    <i class="bi bi-tags-fill me-1"></i>All Categories &amp; Subcategories
+                </button>
+            </div>
+
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAllTxTreeDetails(true)" title="Expand all branches">
+                <i class="bi bi-arrows-expand"></i> Expand All
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAllTxTreeDetails(false)" title="Collapse all branches">
+                <i class="bi bi-arrows-collapse"></i> Collapse
+            </button>
+        </div>
+    </div>
+
+    <!-- Summary Strip -->
+    <div class="tx-tree-summary-strip">
+        <div class="tx-tree-stat">
+            <div class="st-lbl"><i class="bi bi-arrow-down-left-circle text-success me-1"></i>Total Money In ({{ tree_range_label }})</div>
+            <div class="st-val amount-in">+ Rs. {{ "{:,.2f}".format(live_tx_tree.total_in) }}</div>
+        </div>
+        <div class="tx-tree-stat">
+            <div class="st-lbl"><i class="bi bi-arrow-up-right-circle text-danger me-1"></i>Total Money Out ({{ tree_range_label }})</div>
+            <div class="st-val amount-out">- Rs. {{ "{:,.2f}".format(live_tx_tree.total_out) }}</div>
+        </div>
+        <div class="tx-tree-stat">
+            <div class="st-lbl"><i class="bi bi-arrow-left-right text-info me-1"></i>Internal Transfers ({{ tree_range_label }})</div>
+            <div class="st-val text-info">⇄ Rs. {{ "{:,.2f}".format(live_tx_tree.total_transfer) }}</div>
+        </div>
+        <div class="tx-tree-stat">
+            <div class="st-lbl"><i class="bi bi-calculator me-1"></i>Net Movement ({{ live_tx_tree.total_count }} Txns)</div>
+            <div class="st-val {% if live_tx_tree.net_movement >= 0 %}amount-in{% else %}amount-out{% endif %}">
+                {% if live_tx_tree.net_movement >= 0 %}+{% else %}-{% endif %} Rs. {{ "{:,.2f}".format(live_tx_tree.net_movement|abs) }}
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 1: LIVE DATA-DRIVEN TRANSACTION TREE -->
+    <div class="p-3" id="txTreeLivePane">
+        {% for dir_node in live_tx_tree.directions %}
+        <details class="tx-dir-block tx-dir-{{ dir_node.key }}" {% if dir_node.count > 0 %}open{% endif %}>
+            <summary>
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi {{ dir_node.icon }} {% if dir_node.key == 'in' %}text-success{% elif dir_node.key == 'out' %}text-danger{% else %}text-info{% endif %} fs-5"></i>
+                    <span>{{ dir_node.label }}</span>
+                    <span class="badge badge-soft-slate">{{ dir_node.count }} transaction{{ 's' if dir_node.count != 1 else '' }}</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="fw-bold {% if dir_node.key == 'in' %}amount-in{% elif dir_node.key == 'out' %}amount-out{% else %}text-info{% endif %}">
+                        {{ dir_node.sign }} Rs. {{ "{:,.2f}".format(dir_node.total) }}
+                    </span>
+                    <i class="bi bi-chevron-down small text-muted"></i>
+                </div>
+            </summary>
+
+            {% if dir_node.categories %}
+                {% for cat_node in dir_node.categories %}
+                <details class="tx-cat-block" {% if loop.index <= 2 %}open{% endif %}>
+                    <summary>
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <i class="bi bi-folder2-open text-primary"></i>
+                            <span>{{ cat_node.name }}</span>
+                            <span class="badge badge-soft-violet">{{ cat_node.branch }}</span>
+                            <span class="badge badge-soft-slate">{{ cat_node.count }}</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="small text-muted">{{ cat_node.pct }}%</span>
+                            <span class="fw-bold {% if dir_node.key == 'in' %}amount-in{% elif dir_node.key == 'out' %}amount-out{% else %}text-info{% endif %}">
+                                {{ dir_node.sign }} Rs. {{ "{:,.2f}".format(cat_node.total) }}
+                            </span>
+                        </div>
+                    </summary>
+
+                    {% for sub_node in cat_node.subcategories %}
+                    <details class="tx-subcat-block" open>
+                        <summary>
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="bi bi-diagram-2 text-secondary"></i>
+                                <span>{{ sub_node.name }}</span>
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ sub_node.count }} item{{ 's' if sub_node.count != 1 else '' }}</span>
+                            </div>
+                            <div class="fw-semibold">
+                                {{ dir_node.sign }} Rs. {{ "{:,.2f}".format(sub_node.total) }}
+                            </div>
+                        </summary>
+
+                        <div class="table-responsive px-3 pb-2">
+                            <table class="table table-sm align-middle mb-0 acc-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:130px;">Date</th>
+                                        <th>Concrete Visual Flow (From ──► To)</th>
+                                        <th>Category / Subcategory</th>
+                                        <th>Reference / Source</th>
+                                        <th>Method</th>
+                                        <th class="text-end">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in sub_node.transactions %}
+                                    <tr>
+                                        <td class="small text-muted">
+                                            {{ item.date_posted.strftime('%Y-%m-%d %H:%M') if item.date_posted else '—' }}
+                                        </td>
+                                        <td>
+                                            <div class="tx-flow-chip">
+                                                <span class="fw-semibold">{{ item.from_label }}</span>
+                                                <span class="flow-arrow"><i class="bi bi-arrow-right"></i></span>
+                                                <span class="fw-semibold">{{ item.to_label }}</span>
+                                            </div>
+                                            {% if item.clean_note %}
+                                                <div class="small text-muted mt-1">{{ item.clean_note }}</div>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-soft-info">{{ item.category }}</span>
+                                            {% if item.subcategory %}
+                                                <span class="badge badge-soft-slate">{{ item.subcategory }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="small">
+                                            {% if item.source_badge %}
+                                                <span class="badge badge-soft-violet">{{ item.source_badge }}</span>
+                                            {% endif %}
+                                            {% if item.reference_no %}
+                                                <span class="text-muted ms-1">#{{ item.reference_no }}</span>
+                                            {% endif %}
+                                            {% if not item.source_badge and not item.reference_no %}
+                                                <span class="text-muted">TX-{{ item.tx_id }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-soft-slate">{{ item.payment_method or 'Cash' }}</span>
+                                        </td>
+                                        <td class="text-end fw-bold {% if item.direction == 'in' %}amount-in{% elif item.direction == 'out' %}amount-out{% else %}text-info{% endif %}">
+                                            {{ dir_node.sign }} Rs. {{ "{:,.2f}".format(item.amount) }}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {% endfor %}
+                </details>
+                {% endfor %}
+            {% else %}
+                <div class="p-3 text-muted small text-center">
+                    No {{ dir_node.label|lower }} recorded in {{ tree_range_label|lower }}.
+                </div>
+            {% endif %}
+        </details>
+        {% endfor %}
+    </div>
+
+    <!-- TAB 2: COMPLETE MASTER CATEGORY & SUBCATEGORY DIRECTORY -->
+    <div class="p-3 d-none" id="txTreeCatalogPane">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <div>
+                <h6 class="fw-bold mb-0"><i class="bi bi-tags-fill text-primary me-1"></i>All Categories &amp; Subcategories Available in Transactions</h6>
+                <div class="small text-muted">Click any Category or Subcategory pill below to immediately launch a new transaction pre-filled with that classification.</div>
+            </div>
+        </div>
+
+        <!-- Master Classification Hierarchy (Assets, Liabilities, Equity, Income, Expenses, External) -->
+        <h6 class="text-uppercase small fw-bold text-muted mb-2">1. Master Accounting Classification Tree (6 Categories · 19 Subcategories · 42 Account Types)</h6>
+        <div class="cat-master-grid mb-4">
+            {% for grp in category_catalog.classification_groups %}
+            <div class="cat-master-card">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="fw-bold text-primary"><i class="bi bi-Layers-fill me-1"></i>{{ grp.name }}</span>
+                    <span class="badge badge-soft-slate">{{ grp.subcategories|length }} Subcategories</span>
+                </div>
+                <div class="small text-muted mb-2">{{ grp.description }}</div>
+                {% for sub in grp.subcategories %}
+                <div class="mb-2">
+                    <div class="small fw-semibold mb-1">{{ sub.name }}:</div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for leaf in sub.types %}
+                        <button type="button"
+                                class="cat-sub-pill"
+                                onclick="openTransactionWithCategory('{{ 'receive' if grp.name in ['Income', 'Equity'] else ('transfer' if sub.name in ['Cash', 'Bank', 'Digital Wallet'] else 'pay') }}', '{{ sub.name }}', '{{ leaf }}')">
+                            <i class="bi bi-plus-circle text-primary"></i>{{ leaf }}
+                        </button>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Operational Expense & Income Category -> Subcategory Tree -->
+        <h6 class="text-uppercase small fw-bold text-muted mb-2">2. Transaction Operational Categories &amp; Subcategories ({{ category_catalog.all_categories|length }} Categories)</h6>
+        <div class="cat-master-grid">
+            {% for cat in category_catalog.all_categories %}
+            <div class="cat-master-card">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="fw-bold">
+                        <i class="bi {{ cat.icon or 'bi-tag' }} me-1 text-info"></i>{{ cat.name }}
+                    </span>
+                    <span class="badge {% if cat.direction == 'in' %}badge-soft-emerald{% elif cat.direction == 'out' %}badge-soft-rose{% else %}badge-soft-cyan{% endif %}">
+                        {{ 'Money In' if cat.direction == 'in' else ('Money Out' if cat.direction == 'out' else 'In / Out') }}
+                    </span>
+                </div>
+                <div class="small text-muted mb-2">{{ cat.master_category }} ➔ {{ cat.master_subcategory }}</div>
+                <div class="d-flex flex-wrap gap-1">
+                    {% for sub in cat.subcategories %}
+                    <button type="button"
+                            class="cat-sub-pill"
+                            onclick="openTransactionWithCategory('{{ 'receive' if cat.direction == 'in' else 'pay' }}', '{{ cat.name }}', '{{ sub }}')">
+                        <i class="bi bi-plus-circle"></i>{{ sub }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>

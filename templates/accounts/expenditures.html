@@ -53,14 +53,19 @@
                 {% for e in expenditures.items %}
                 <tr>
                     <td class="small">{{ e.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
-                    <td><span class="badge bg-warning text-dark">{{ e.category or '—' }}</span></td>
+                    <td>
+                        <span class="badge bg-warning text-dark">{{ e.category or '—' }}</span>
+                        {% if e.subcategory %}
+                            <span class="badge badge-soft-slate ms-1">{{ e.subcategory }}</span>
+                        {% endif %}
+                    </td>
                     <td class="small">{{ e.type or '' }}</td>
                     <td class="text-end fw-bold text-warning">Rs. {{ "%.2f"|format(e.amount) }}</td>
                     <td><span class="badge bg-secondary">{{ e.method or 'Cash' }}</span></td>
                     <td class="small">{{ e.payee or '—' }}</td>
                     <td class="small">{{ e.reference_no or '—' }}</td>
                     <td class="small text-muted">
-                        {{ e.note or '' }}
+                        {{ (e.note or '')|clean_tx_note }}
                         {% if e.photo_path %}
                             <a href="{{ url_for('static', filename='uploads/' ~ e.photo_path) }}" target="_blank" class="ms-1" title="View attached proof"><i class="bi bi-paperclip"></i> proof</a>
                         {% endif %}

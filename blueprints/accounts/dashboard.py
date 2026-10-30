@@ -26,10 +26,51 @@ def dashboard():
     # Account balances + due clients + company liquidity KPI
     accounts = _active_accounts().order_by(Account.name.asc()).all()
     from app.services.payments_crud import ledger_balance
+    from .transaction_tree import (
+        build_live_transaction_tree,
+        enrich_accounts_with_period_flows,
+        transaction_tree_registry_json,
+    )
     today_date = pk_today()
-    opening_cutoff = datetime.combine(today_date, datetime.min.time()) - timedelta(microseconds=1)
+    today_start = datetime.combine(today_date, datetime.min.time())
+    today_end_excl = today_start + timedelta(days=1)
+    opening_cutoff = today_start - timedelta(microseconds=1)
     for account in accounts:
         account.today_opening_balance = ledger_balance(account.id, as_of=opening_cutoff)
+    enrich_accounts_with_period_flows(accounts, today_start, today_end_excl)
+
+    # Period selector for the live data-driven Transaction Tree explorer
+    tree_range = (request.args.get('tree_range') or 'month').strip().lower()
+    tree_account_id = request.args.get('tree_account_id', type=int)
+    if tree_range == 'today':
+        tree_from, tree_to_excl = today_start, today_end_excl
+        tree_range_label = 'Today'
+    elif tree_range == 'week':
+        tree_from = today_start - timedelta(days=6)
+        tree_to_excl = today_end_excl
+        tree_range_label = 'Last 7 Days'
+    elif tree_range == 'all':
+        tree_from, tree_to_excl = None, None
+        tree_range_label = 'All Time'
+    else:
+        tree_range = 'month'
+        tree_from = datetime(today_date.year, today_date.month, 1)
+        tree_to_excl = today_end_excl
+        tree_range_label = 'This Month'
+
+    live_tx_tree = build_live_transaction_tree(
+        date_from=tree_from,
+        date_to_excl=tree_to_excl,
+        account_id=tree_account_id,
+    )
+    tx_tree_registry = transaction_tree_registry_json()
+    category_catalog = tx_tree_registry['catalog']
+    loan_accounts = [
+        a for a in accounts
+        if (a.source_category or '').strip().lower() == 'loan'
+        or (a.class_subcategory or '').strip().lower() == 'loans'
+        or (a.type or '').strip().lower() == 'loan'
+    ]
     
     due_clients = _client_due_summary()
     supplier_payables = _supplier_payable_summary()
@@ -80,6 +121,13 @@ def dashboard():
                           delivery_persons=delivery_persons,
                           driver_outstanding=driver_outstanding_map,
                           expense_categories=expense_categories,
+                          tx_tree_registry=tx_tree_registry,
+                          category_catalog=category_catalog,
+                          live_tx_tree=live_tx_tree,
+                          tree_range=tree_range,
+                          tree_range_label=tree_range_label,
+                          tree_account_id=tree_account_id,
+                          loan_accounts=loan_accounts,
                           submission_token=uuid4().hex,
                           default_tx_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'),
                           book=book,

@@ -228,25 +228,43 @@
                             <thead>
                                 <tr>
                                     <th>Account Name</th>
-                                    <th>Type</th>
+                                    <th>Classification (Category ➔ Subcategory)</th>
                                     <th>Channel</th>
                                     <th class="text-end">Today's Opening Balance</th>
+                                    <th class="text-end">Today's In (+)</th>
+                                    <th class="text-end">Today's Out (−)</th>
+                                    <th class="text-end">Net Transfers (⇄)</th>
                                     <th class="text-end">Total Balance</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for account in accounts %}
+                                {% set net_xfer = (account.period_transfer_in or 0) - (account.period_transfer_out or 0) %}
                                 <tr>
                                     <td>
                                         <div class="fw-semibold">{{ account.name }}</div>
                                         {% if account.source_category %}
-                                        <div class="small text-muted">{{ account.source_category }}</div>
+                                        <div class="small text-muted">Group: {{ account.source_category }}</div>
                                         {% endif %}
                                     </td>
-                                    <td><span class="badge badge-soft-violet">{{ account.account_type }}</span></td>
                                     <td>
-                                        {% if account.category == 'bank' %}
+                                        {% if account.class_category %}
+                                            <span class="badge badge-soft-info">{{ account.class_category }}</span>
+                                            {% if account.class_subcategory %}
+                                                <span class="badge badge-soft-violet">{{ account.class_subcategory }}</span>
+                                            {% endif %}
+                                            {% if account.class_account_type %}
+                                                <div class="small text-muted mt-1">{{ account.class_account_type }}</div>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="badge badge-soft-violet">{{ account.account_type }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if account.channel == 'digital_wallet' %}
+                                        <span class="badge badge-soft-emerald"><i class="bi bi-phone me-1"></i>Wallet</span>
+                                        {% elif account.category == 'bank' %}
                                         <span class="badge badge-soft-info"><i class="bi bi-bank me-1"></i>Bank</span>
                                         {% else %}
                                         <span class="badge badge-soft-amber"><i class="bi bi-cash-coin me-1"></i>Cash</span>
@@ -258,24 +276,58 @@
                                         </span>
                                     </td>
                                     <td class="text-end">
+                                        {% if (account.period_in or 0) > 0 %}
+                                            <span class="amount-in">+ Rs. {{ "%.2f"|format(account.period_in or 0) }}</span>
+                                        {% else %}
+                                            <span class="amount-mute">Rs. 0.00</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if (account.period_out or 0) > 0 %}
+                                            <span class="amount-out">- Rs. {{ "%.2f"|format(account.period_out or 0) }}</span>
+                                        {% else %}
+                                            <span class="amount-mute">Rs. 0.00</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if net_xfer > 0 %}
+                                            <span class="text-info fw-bold">+ Rs. {{ "%.2f"|format(net_xfer) }}</span>
+                                        {% elif net_xfer < 0 %}
+                                            <span class="text-warning fw-bold">- Rs. {{ "%.2f"|format(net_xfer|abs) }}</span>
+                                        {% else %}
+                                            <span class="amount-mute">Rs. 0.00</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
                                         <span class="acc-balance {% if (account.balance or 0) < 0 %}neg{% endif %}">
                                             Rs. {{ "%.2f"|format(account.balance or 0) }}
                                         </span>
                                     </td>
                                     <td class="text-end">
-                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('accounts.account_ledger', account_id=account.id) }}">
-                                            <i class="bi bi-journal-text me-1"></i>Ledger
-                                        </a>
+                                        <div class="d-inline-flex gap-1">
+                                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('accounts.account_ledger', account_id=account.id) }}">
+                                                <i class="bi bi-journal-text me-1"></i>Ledger
+                                            </a>
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('accounts.reconcile_account', account_id=account.id) }}" title="Reconcile Account">
+                                                <i class="bi bi-check2-circle"></i>
+                                            </a>
+                                        </div>
                                     </td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="6" class="text-center text-muted py-4">No accounts yet. <a href="{{ url_for('accounts.add_account') }}">Add your first account</a>.</td></tr>
+                                <tr><td colspan="9" class="text-center text-muted py-4">No accounts yet. <a href="{{ url_for('accounts.add_account') }}">Add your first account</a>.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            {% include "accounts/_transaction_tree.html" %}
         </div>
     </div>
 
@@ -355,285 +407,516 @@
 </div>
 
 <div class="modal fade" id="newTransactionModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <form method="POST" action="{{ url_for('accounts.add_transaction') }}" enctype="multipart/form-data" class="modal-content" onsubmit="var b=this.querySelector('button[type=submit]'); if(b){setTimeout(function(){b.disabled=true;},0);}">
             <input type="hidden" name="idempotency_key" value="acctx-{{ submission_token }}">
             <div class="modal-header">
-                <h5 class="modal-title">Make New Transaction</h5>
+                <div>
+                    <h5 class="modal-title fw-bold mb-0"><i class="bi bi-diagram-3-fill text-primary me-2"></i>Make New Transaction</h5>
+                    <div class="small text-muted">Data-driven visual transaction builder with full Category &amp; Subcategory hierarchy</div>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div class="alert alert-info py-2 small mb-3">
                     <i class="bi bi-info-circle me-1"></i> Record receipts, expenses and transfers here. Cash Flow is a read-only report and updates from these account entries automatically.
                 </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold d-block mb-2">Transaction Type</label>
-                    <div class="row g-2">
-                        <div class="col-md-6">
-                            <label class="card h-100 border-primary shadow-sm mode-choice" for="tx_mode_receive">
-                                <div class="card-body">
-                                    <div class="form-check m-0">
-                                        <input class="form-check-input" type="radio" name="tx_mode" id="tx_mode_receive" value="receive" checked>
-                                        <span class="form-check-label fw-bold">Receive Money</span>
-                                    </div>
-                                    <div class="small text-muted mt-2">Record money coming from a client into a company account.</div>
-                                </div>
-                            </label>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="card h-100 border-secondary shadow-sm mode-choice" for="tx_mode_pay">
-                                <div class="card-body">
-                                    <div class="form-check m-0">
-                                        <input class="form-check-input" type="radio" name="tx_mode" id="tx_mode_pay" value="pay">
-                                        <span class="form-check-label fw-bold">Pay Money</span>
-                                    </div>
-                                    <div class="small text-muted mt-2">Record company transfers, supplier payments, and expenses.</div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-                    <div id="txModeHelp" class="small text-muted mt-2">Receive mode: choose the transaction group first, then the source entry, and finally the destination account.</div>
-                </div>
 
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Posted Date</label>
-                        <input type="datetime-local" class="form-control" name="date_posted" value="{{ default_tx_datetime }}">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Amount</label>
-                        <input type="number" step="0.01" min="0" class="form-control" name="amount" id="tx_amount" required>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Method</label>
-                        <select class="form-select" name="method">
-                            <option value="Cash">Cash</option>
-                            <option value="Bank Transfer">Bank Transfer</option>
-                            <option value="Check">Check</option>
-                            <option value="Online">Online</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div id="receiveSection" class="transaction-panel d-none mt-4">
-                    <div class="card border-success-subtle shadow-sm">
-                        <div class="card-header bg-success-subtle">
-                            <h6 class="mb-0">Receive Money Details</h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">Receive From Transaction Group</label>
-                                    <select class="form-select" name="receive_from_category" id="receive_from_category">
-                                        <option value="client_ledger">Client Ledger</option>
-                                        {% for category in account_categories %}
-                                        <option value="{{ category.name }}">{{ category.name }}</option>
-                                        {% endfor %}
-                                        <option value="other_source">Other Source</option>
-                                    </select>
-                                    <div class="small text-muted mt-1">First choose the transaction group. Then the next field will show the correct source entry.</div>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Receive To Account</label>
-                                    <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="receive_account_id" id="receive_account_id">
-                                        <option value="">Select company account receiving this payment</option>
-                                        {% for account in company_accounts %}
-                                        <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
-                                        {% endfor %}
-                                    </select>
-                                    <div class="small text-muted mt-1">This is the account where the received amount will be posted.</div>
-                                </div>
-
-                                <div class="col-md-12" id="receiveFromClientWrap">
-                                    <label class="form-label">Receive From Client</label>
-                                    <div class="position-relative">
-                                        <div class="input-group">
-                                            <input type="text" name="client_input" id="receiveClientInput" data-combo-list="receiveClientCombobox" role="combobox" aria-controls="receiveClientCombobox" aria-expanded="false" class="form-control" placeholder="Search by client name or code" autocomplete="off" onfocus="showCombobox('receiveClientInput', 'receiveClientCombobox')" oninput="filterCombobox('receiveClientInput', 'receiveClientCombobox', 'receiveClientNameInfo'); updateDueDisplay()">
-                                            <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('receiveClientInput', 'receiveClientCombobox')"><i class="bi bi-chevron-down"></i></button>
-                                        </div>
-                                        <div id="receiveClientCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
-                                            {% for c in clients %}
-                                            <div class="combobox-item" data-code="{{ c.code }}" data-name="{{ c.name }}" onclick='selectDueClient("receiveClientInput", "receiveClientCombobox", {{ (c.code or c.name)|tojson }}, {{ c.name|tojson }}, 0, "receiveClientNameInfo", "receiveClientDueInfo")'>
-                                                <div class="fw-bold">{{ c.code }} - {{ c.name }}</div>
-                                                <small class="text-muted">Select client</small>
+                <div class="row g-4">
+                    <!-- LEFT COLUMN: Guided Transaction Builder -->
+                    <div class="col-lg-8">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold d-block mb-2">1. Select Transaction Direction</label>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="card h-100 border-primary shadow-sm mode-choice" for="tx_mode_receive" style="cursor:pointer;">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="form-check m-0">
+                                                <input class="form-check-input" type="radio" name="tx_mode" id="tx_mode_receive" value="receive" checked>
+                                                <span class="form-check-label fw-bold text-success"><i class="bi bi-arrow-down-left-circle me-1"></i>Receive Money</span>
                                             </div>
-                                            {% endfor %}
+                                            <div class="small text-muted mt-1">Client payments, income, loan drawdown, or capital in.</div>
                                         </div>
-                                    </div>
-                                    <div id="receiveClientNameInfo" class="small mt-2 text-info fw-bold"></div>
-                                    <div id="receiveClientDueInfo" class="small mt-1 text-info"></div>
+                                    </label>
                                 </div>
-
-                                <div class="col-md-12 d-none" id="receiveFromAccountWrap">
-                                    <label class="form-label">Receive From Account</label>
-                                    <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="receive_from_account_id" id="receive_from_account_id">
-                                        <option value="">Select source account</option>
-                                        {% for account in accounts %}
-                                        <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
-                                        {% endfor %}
-                                    </select>
-                                    <div class="small text-muted mt-1">Only accounts assigned to the selected transaction group will appear here.</div>
+                                <div class="col-md-4">
+                                    <label class="card h-100 border-secondary shadow-sm mode-choice" for="tx_mode_pay" style="cursor:pointer;">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="form-check m-0">
+                                                <input class="form-check-input" type="radio" name="tx_mode" id="tx_mode_pay" value="pay">
+                                                <span class="form-check-label fw-bold text-danger"><i class="bi bi-arrow-up-right-circle me-1"></i>Pay Money</span>
+                                            </div>
+                                            <div class="small text-muted mt-1">Suppliers, drivers, operating/personal expenses, or loans.</div>
+                                        </div>
+                                    </label>
                                 </div>
-
-                                <div class="col-md-12 d-none" id="receiveFromOtherWrap">
-                                    <label class="form-label">Receive From</label>
-                                    <input type="text" class="form-control" name="receive_source_label" id="receive_source_label" placeholder="e.g. Owner deposit, Loan received, Supplier refund">
-                                    <div class="small text-muted mt-1">Write the source name when the money is not coming from a client or another account.</div>
-                                </div>
-
-                                <div class="col-md-6" id="receiveDiscountWrap">
-                                    <label class="form-label">Discount / Waive-Off</label>
-                                    <input type="number" step="0.01" min="0" class="form-control" name="discount" id="receive_discount" value="0">
-                                    <div class="small text-muted mt-1">Optional company loss to reduce the client's remaining due.</div>
-                                    <div class="small text-info fw-bold mt-1 d-none" id="receiveDiscountOnlyInfo">Discount-only settlement: no company account balance will change.</div>
+                                <div class="col-md-4">
+                                    <label class="card h-100 border-secondary shadow-sm mode-choice" for="tx_mode_transfer" style="cursor:pointer;">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="form-check m-0">
+                                                <input class="form-check-input" type="radio" name="tx_mode" id="tx_mode_transfer" value="transfer">
+                                                <span class="form-check-label fw-bold text-info"><i class="bi bi-arrow-left-right me-1"></i>Transfer Funds</span>
+                                            </div>
+                                            <div class="small text-muted mt-1">Move money directly between Cash, Bank &amp; Wallet accounts.</div>
+                                        </div>
+                                    </label>
                                 </div>
                             </div>
+                            <div id="txModeHelp" class="small text-muted mt-2">Receive mode: choose the transaction group first, then the source entry, and finally the destination account.</div>
                         </div>
-                    </div>
-                </div>
 
-                <div id="paySection" class="transaction-panel d-none mt-4">
-                    <div class="card border-warning-subtle shadow-sm">
-                        <div class="card-header bg-warning-subtle">
-                            <h6 class="mb-0">Pay Money Details</h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">Pay From Account</label>
-                                    <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="pay_from_account_id" id="pay_from_account_id">
-                                        <option value="">Select source account</option>
-                                        {% for account in accounts %}
-                                        <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Pay Target</label>
-                                    <select class="form-select" name="pay_target" id="pay_target">
-                                        <option value="company_transfer">Company Account Transfer</option>
-                                        <option value="supplier">Supplier Payment</option>
-                                        <option value="driver">Driver Service Payment</option>
-                                        <option value="client_refund">Client Refund</option>
-                                        <option value="loan">Loan Payment</option>
-                                        <option value="personal_expense">Personal Expense</option>
-                                        <option value="other_expense">Other Expense</option>
-                                    </select>
-                                </div>
-
-                                <div class="col-md-6" id="payToAccountWrap">
-                                    <label class="form-label">Pay To Account</label>
-                                    <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="pay_to_account_id" id="pay_to_account_id">
-                                        <option value="">Select destination account</option>
-                                        {% for account in accounts %}
-                                        <option value="{{ account.id }}">{{ account.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-
-                                <div class="col-md-6 d-none" id="supplierWrap">
-                                    <label class="form-label">Supplier</label>
-                                    <input type="hidden" name="supplier_id" id="supplier_id" value="">
-                                    <div class="position-relative">
-                                        <div class="input-group">
-                                            <input type="text" name="supplier_input" id="paySupplierInput" data-combo-list="paySupplierCombobox" role="combobox" aria-controls="paySupplierCombobox" aria-expanded="false" class="form-control" placeholder="Search supplier" autocomplete="off" onfocus="showCombobox('paySupplierInput', 'paySupplierCombobox')" oninput="document.getElementById('supplier_id').value=''; filterCombobox('paySupplierInput', 'paySupplierCombobox'); clearSupplierDisplay()">
-                                            <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('paySupplierInput', 'paySupplierCombobox')"><i class="bi bi-chevron-down"></i></button>
-                                        </div>
-                                        <div id="paySupplierCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
-                                            {% for supplier in suppliers %}
-                                            <div class="combobox-item" onclick='selectSupplier({{ supplier.id }}, {{ supplier.name|tojson }})'>
-                                                <div class="fw-bold">{{ supplier.name }}</div>
-                                            </div>
-                                            {% endfor %}
-                                        </div>
-                                    </div>
-                                    <div id="paySupplierNameInfo" class="small mt-2 text-info fw-bold"></div>
-                                    <div id="paySupplierPayableInfo" class="small mt-1 text-danger fw-bold"></div>
-                                </div>
-
-                                <div class="col-md-6 d-none" id="targetLabelWrap">
-                                    <label class="form-label">Purpose / Target Label</label>
-                                    <input type="text" class="form-control" name="target_label" id="target_label" placeholder="e.g. Office rent, Loan installment">
-                                </div>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Posted Date</label>
+                                <input type="datetime-local" class="form-control" name="date_posted" value="{{ default_tx_datetime }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Amount (Rs.)</label>
+                                <input type="number" step="0.01" min="0" class="form-control fw-bold" name="amount" id="tx_amount" placeholder="0.00" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Method</label>
+                                <select class="form-select" name="method" id="tx_method">
+                                    <option value="Cash">Cash</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="Check">Check</option>
+                                    <option value="Online">Online</option>
+                                </select>
                             </div>
                         </div>
 
-                                <div class="col-md-6 d-none" id="clientRefundWrap">
-                                    <label class="form-label">Client</label>
-                                    <input type="hidden" name="client_id_refund" id="client_id_refund" value="">
-                                    <div class="position-relative">
-                                        <div class="input-group">
-                                            <input type="text" name="client_input_refund" id="payClientInput" data-combo-list="payClientCombobox" role="combobox" aria-controls="payClientCombobox" aria-expanded="false" class="form-control" placeholder="Search client" autocomplete="off" onfocus="showCombobox('payClientInput', 'payClientCombobox')" oninput="document.getElementById('client_id_refund').value=''; filterCombobox('payClientInput', 'payClientCombobox'); clearClientDisplayForPay()">
-                                            <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('payClientInput', 'payClientCombobox')"><i class="bi bi-chevron-down"></i></button>
+                        <!-- RECEIVE MONEY SECTION -->
+                        <div id="receiveSection" class="transaction-panel d-none mt-4">
+                            <div class="card border-success-subtle shadow-sm">
+                                <div class="card-header bg-success-subtle d-flex align-items-center justify-content-between">
+                                    <h6 class="mb-0 fw-bold"><i class="bi bi-arrow-down-left-circle-fill text-success me-1"></i>2. Receive Money Details</h6>
+                                    <span class="badge bg-success">Money In (+)</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Receive From Transaction Group</label>
+                                            <select class="form-select" name="receive_from_category" id="receive_from_category">
+                                                <option value="client_ledger">Client Ledger (Receivables)</option>
+                                                {% for category in account_categories %}
+                                                <option value="{{ category.name }}">{{ category.name }} (Account Group)</option>
+                                                {% endfor %}
+                                                <option value="other_source">Other Source / Income Category</option>
+                                            </select>
+                                            <div class="small text-muted mt-1">First choose the transaction group. Then the next field will show the correct source entry.</div>
                                         </div>
-                                        <div id="payClientCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
-                                            {% for c in clients %}
-                                            <div class="combobox-item" data-code="{{ c.code }}" data-name="{{ c.name }}" onclick='selectPayClient({{ (c.code or c.name)|tojson }}, {{ c.name|tojson }}, "client_id_refund", "payClientInput")'>
-                                                <div class="fw-bold">{{ c.code }} - {{ c.name }}</div>
-                                                <small class="text-muted">Select client</small>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Receive To Account</label>
+                                            <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="receive_account_id" id="receive_account_id">
+                                                <option value="">Select company account receiving this payment</option>
+                                                {% for account in company_accounts %}
+                                                <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="small text-muted mt-1">This is the account where the received amount will be posted.</div>
+                                        </div>
+
+                                        <div class="col-md-12" id="receiveFromClientWrap">
+                                            <label class="form-label">Receive From Client</label>
+                                            <div class="position-relative">
+                                                <div class="input-group">
+                                                    <input type="text" name="client_input" id="receiveClientInput" data-combo-list="receiveClientCombobox" role="combobox" aria-controls="receiveClientCombobox" aria-expanded="false" class="form-control" placeholder="Search by client name or code" autocomplete="off" onfocus="showCombobox('receiveClientInput', 'receiveClientCombobox')" oninput="filterCombobox('receiveClientInput', 'receiveClientCombobox', 'receiveClientNameInfo'); updateDueDisplay(); updateTxPreview()">
+                                                    <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('receiveClientInput', 'receiveClientCombobox')"><i class="bi bi-chevron-down"></i></button>
+                                                </div>
+                                                <div id="receiveClientCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
+                                                    {% for c in clients %}
+                                                    <div class="combobox-item" data-code="{{ c.code }}" data-name="{{ c.name }}" onclick='selectDueClient("receiveClientInput", "receiveClientCombobox", {{ (c.code or c.name)|tojson }}, {{ c.name|tojson }}, 0, "receiveClientNameInfo", "receiveClientDueInfo")'>
+                                                        <div class="fw-bold">{{ c.code }} - {{ c.name }}</div>
+                                                        <small class="text-muted">Select client</small>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
                                             </div>
-                                            {% endfor %}
+                                            <div id="receiveClientNameInfo" class="small mt-2 text-info fw-bold"></div>
+                                            <div id="receiveClientDueInfo" class="small mt-1 text-info"></div>
                                         </div>
-                                    </div>
-                                    <div id="payClientNameInfo" class="small mt-2 text-info fw-bold"></div>
-                                </div>
 
-                                <div class="col-md-6 d-none" id="driverWrap">
-                                    <label class="form-label">Driver / Delivery Person</label>
-                                    <input type="hidden" name="delivery_person_id" id="delivery_person_id" value="">
-                                    <input type="text" name="driver_input" id="payDriverInput" class="form-control" list="payDriverOptions" placeholder="Search driver" autocomplete="off" oninput="syncDriverSelection()">
-                                    <datalist id="payDriverOptions">
-                                        {% for d in delivery_persons %}
-                                        <option value="{{ d.name }}" data-id="{{ d.id }}">Outstanding: Rs. {{ "{:,.2f}".format(driver_outstanding.get(d.id, 0)) }}</option>
-                                        {% endfor %}
-                                    </datalist>
-                                    <div id="payDriverInfo" class="small mt-2 text-info fw-bold"></div>
-                                    <div class="small text-white-50 mt-1">The payment is allocated FIFO across the driver's open delivery rents and reduces the selected account.</div>
-                                </div>
+                                        <div class="col-md-12 d-none" id="receiveFromAccountWrap">
+                                            <label class="form-label">Receive From Account</label>
+                                            <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="receive_from_account_id" id="receive_from_account_id">
+                                                <option value="">Select source account</option>
+                                                {% for account in accounts %}
+                                                <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="small text-muted mt-1">Only accounts assigned to the selected transaction group will appear here.</div>
+                                        </div>
 
-                                <div class="col-md-6 d-none" id="payReferenceWrap">
-                                    <label class="form-label">Reference</label>
-                                    <input type="text" class="form-control" name="reference" id="pay_reference" placeholder="Voucher / slip no.">
-                                </div>
-
-                                <div class="col-md-12 d-none" id="expenseDetailWrap">
-                                    <div class="card border-secondary-subtle h-100">
-                                        <div class="card-header bg-light py-2"><span class="fw-bold small"><i class="bi bi-tags me-1"></i>Expense Details</span></div>
-                                        <div class="card-body py-3">
+                                        <div class="col-md-12 d-none" id="receiveFromOtherWrap">
                                             <div class="row g-3">
                                                 <div class="col-md-6">
-                                                    <label class="form-label">Expense Category</label>
-                                                    <select class="form-select" name="expense_category" id="expense_category">
-                                                        <option value="">— Select category —</option>
-                                                        {% for cat in expense_categories %}
-                                                        <option value="{{ cat.name }}">{{ cat.name }}</option>
+                                                    <label class="form-label">Receive From (Payer / Source Name)</label>
+                                                    <input type="text" class="form-control" name="receive_source_label" id="receive_source_label" placeholder="e.g. Owner deposit, Loan received, Supplier refund">
+                                                    <div class="small text-muted mt-1">Who or what this money was received from.</div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Receipt / Voucher Reference #</label>
+                                                    <input type="text" class="form-control" name="receive_reference" id="receive_reference" placeholder="e.g. REC-101, Slip #">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Receive Category & Subcategory Classification (All Categories & Subcategories) -->
+                                        <div class="col-md-6" id="receiveCategoryWrap">
+                                            <label class="form-label">Category <span class="badge badge-soft-info ms-1">Tree</span></label>
+                                            <select class="form-select" name="receive_category" id="receive_category">
+                                                <option value="">— Auto / Select Category —</option>
+                                                <optgroup label="Income &amp; Inflow Categories">
+                                                    {% for cat in category_catalog.in_categories %}
+                                                    <option value="{{ cat.name }}">{{ cat.name }} ({{ cat.master_category }})</option>
+                                                    {% endfor %}
+                                                </optgroup>
+                                                <optgroup label="All Master Accounting Categories &amp; Subcategories">
+                                                    {% for grp in category_catalog.classification_groups %}
+                                                        {% for sub in grp.subcategories %}
+                                                        <option value="{{ sub.name }}">{{ grp.name }} ➔ {{ sub.name }}</option>
                                                         {% endfor %}
-                                                    </select>
-                                                    <div class="small text-muted mt-1">Managed in Cash Flow settings (spending categories).</div>
+                                                    {% endfor %}
+                                                </optgroup>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6" id="receiveSubcategoryWrap">
+                                            <label class="form-label">Subcategory <span class="badge badge-soft-slate ms-1">Cascading</span></label>
+                                            <select class="form-select" name="receive_subcategory" id="receive_subcategory">
+                                                <option value="">— All / Select Subcategory —</option>
+                                                {% for cat in category_catalog.in_categories %}
+                                                    {% for sub in cat.subcategories %}
+                                                    <option value="{{ sub }}" data-parent-cat="{{ cat.name }}">{{ cat.name }} ➔ {{ sub }}</option>
+                                                    {% endfor %}
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+
+                                        <div class="col-md-6" id="receiveDiscountWrap">
+                                            <label class="form-label">Discount / Waive-Off</label>
+                                            <input type="number" step="0.01" min="0" class="form-control" name="discount" id="receive_discount" value="0">
+                                            <div class="small text-muted mt-1">Optional company loss to reduce the client's remaining due.</div>
+                                            <div class="small text-info fw-bold mt-1 d-none" id="receiveDiscountOnlyInfo">Discount-only settlement: no company account balance will change.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PAY MONEY SECTION (Fixed HTML structure + Loan Account Selector + Full Category/Subcategory) -->
+                        <div id="paySection" class="transaction-panel d-none mt-4">
+                            <div class="card border-warning-subtle shadow-sm">
+                                <div class="card-header bg-warning-subtle d-flex align-items-center justify-content-between">
+                                    <h6 class="mb-0 fw-bold"><i class="bi bi-arrow-up-right-circle-fill text-danger me-1"></i>2. Pay Money Details</h6>
+                                    <span class="badge bg-danger">Money Out (−)</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Pay From Account</label>
+                                            <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="pay_from_account_id" id="pay_from_account_id">
+                                                <option value="">Select source account</option>
+                                                {% for account in accounts %}
+                                                <option value="{{ account.id }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Pay Target (Transaction Tree Branch)</label>
+                                            <select class="form-select" name="pay_target" id="pay_target">
+                                                <option value="other_expense">Operating / Business Expense</option>
+                                                <option value="personal_expense">Personal / Owner Drawing Expense</option>
+                                                <option value="supplier">Supplier Payment (Payables)</option>
+                                                <option value="driver">Driver Service Payment (FIFO)</option>
+                                                <option value="loan">Loan Payment (Repay Loan Account)</option>
+                                                <option value="client_refund">Client Refund</option>
+                                                <option value="company_transfer">Company Account Transfer</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="col-md-6" id="payToAccountWrap">
+                                            <label class="form-label" id="payToAccountLabel">Pay To Account</label>
+                                            <select class="form-select acc-searchable-select" data-search-placeholder="Search accounts…" name="pay_to_account_id" id="pay_to_account_id">
+                                                <option value="">Select destination account</option>
+                                                {% for account in accounts %}
+                                                <option value="{{ account.id }}" data-source-cat="{{ (account.source_category or '')|lower }}" data-class-sub="{{ (account.class_subcategory or '')|lower }}">{{ account.name }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="small text-muted mt-1" id="payToAccountHint">Select the destination account receiving these funds.</div>
+                                        </div>
+
+                                        <div class="col-md-6 d-none" id="supplierWrap">
+                                            <label class="form-label">Supplier</label>
+                                            <input type="hidden" name="supplier_id" id="supplier_id" value="">
+                                            <div class="position-relative">
+                                                <div class="input-group">
+                                                    <input type="text" name="supplier_input" id="paySupplierInput" data-combo-list="paySupplierCombobox" role="combobox" aria-controls="paySupplierCombobox" aria-expanded="false" class="form-control" placeholder="Search supplier" autocomplete="off" onfocus="showCombobox('paySupplierInput', 'paySupplierCombobox')" oninput="document.getElementById('supplier_id').value=''; filterCombobox('paySupplierInput', 'paySupplierCombobox'); clearSupplierDisplay(); updateTxPreview()">
+                                                    <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('paySupplierInput', 'paySupplierCombobox')"><i class="bi bi-chevron-down"></i></button>
                                                 </div>
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Paid To</label>
-                                                    <input type="text" class="form-control" name="payee" id="payee" placeholder="Shop / person / vendor name">
+                                                <div id="paySupplierCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
+                                                    {% for supplier in suppliers %}
+                                                    <div class="combobox-item" onclick='selectSupplier({{ supplier.id }}, {{ supplier.name|tojson }})'>
+                                                        <div class="fw-bold">{{ supplier.name }}</div>
+                                                    </div>
+                                                    {% endfor %}
                                                 </div>
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Voucher / Bill No.</label>
-                                                    <input type="text" class="form-control" name="expense_reference" id="expense_reference" placeholder="e.g. V-1024">
+                                            </div>
+                                            <div id="paySupplierNameInfo" class="small mt-2 text-info fw-bold"></div>
+                                            <div id="paySupplierPayableInfo" class="small mt-1 text-danger fw-bold"></div>
+                                        </div>
+
+                                        <div class="col-md-6 d-none" id="clientRefundWrap">
+                                            <label class="form-label">Client (For Refund)</label>
+                                            <input type="hidden" name="client_id_refund" id="client_id_refund" value="">
+                                            <div class="position-relative">
+                                                <div class="input-group">
+                                                    <input type="text" name="client_input_refund" id="payClientInput" data-combo-list="payClientCombobox" role="combobox" aria-controls="payClientCombobox" aria-expanded="false" class="form-control" placeholder="Search client" autocomplete="off" onfocus="showCombobox('payClientInput', 'payClientCombobox')" oninput="document.getElementById('client_id_refund').value=''; filterCombobox('payClientInput', 'payClientCombobox'); clearClientDisplayForPay(); updateTxPreview()">
+                                                    <button class="btn btn-outline-secondary" type="button" onclick="toggleCombobox('payClientInput', 'payClientCombobox')"><i class="bi bi-chevron-down"></i></button>
                                                 </div>
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Proof (photo)</label>
-                                                    <input type="file" class="form-control" name="expense_proof" accept="image/*">
-                                                    <div class="small text-muted mt-1">Optional bill/receipt photo, kept with the ledger entry.</div>
+                                                <div id="payClientCombobox" role="listbox" class="combobox-list shadow-lg" style="display:none;">
+                                                    {% for c in clients %}
+                                                    <div class="combobox-item" data-code="{{ c.code }}" data-name="{{ c.name }}" onclick='selectPayClient({{ (c.code or c.name)|tojson }}, {{ c.name|tojson }}, "client_id_refund", "payClientInput")'>
+                                                        <div class="fw-bold">{{ c.code }} - {{ c.name }}</div>
+                                                        <small class="text-muted">Select client</small>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                            <div id="payClientNameInfo" class="small mt-2 text-info fw-bold"></div>
+                                        </div>
+
+                                        <div class="col-md-6 d-none" id="driverWrap">
+                                            <label class="form-label">Driver / Delivery Person</label>
+                                            <input type="hidden" name="delivery_person_id" id="delivery_person_id" value="">
+                                            <input type="text" name="driver_input" id="payDriverInput" class="form-control" list="payDriverOptions" placeholder="Search driver" autocomplete="off" oninput="syncDriverSelection(); updateTxPreview()">
+                                            <datalist id="payDriverOptions">
+                                                {% for d in delivery_persons %}
+                                                <option value="{{ d.name }}" data-id="{{ d.id }}" data-due="{{ driver_outstanding.get(d.id, 0) }}">Outstanding: Rs. {{ "{:,.2f}".format(driver_outstanding.get(d.id, 0)) }}</option>
+                                                {% endfor %}
+                                            </datalist>
+                                            <div id="payDriverInfo" class="small mt-2 text-info fw-bold"></div>
+                                            <div class="small text-muted mt-1">Allocated FIFO across the driver's open delivery rents and reduces the selected account.</div>
+                                        </div>
+
+                                        <div class="col-md-6 d-none" id="payReferenceWrap">
+                                            <label class="form-label">Reference</label>
+                                            <input type="text" class="form-control" name="reference" id="pay_reference" placeholder="Voucher / slip no.">
+                                        </div>
+
+                                        <div class="col-md-6 d-none" id="targetLabelWrap">
+                                            <label class="form-label">Purpose / Target Label</label>
+                                            <input type="text" class="form-control" name="target_label" id="target_label" placeholder="e.g. Office rent, Loan installment">
+                                        </div>
+
+                                        <div class="col-md-12 d-none" id="expenseDetailWrap">
+                                            <div class="card border-secondary-subtle h-100">
+                                                <div class="card-header bg-light py-2 d-flex align-items-center justify-content-between">
+                                                    <span class="fw-bold small"><i class="bi bi-tags-fill text-primary me-1"></i>Category, Subcategory &amp; Voucher Details</span>
+                                                    <span class="badge badge-soft-info">All Categories &amp; Subcategories</span>
+                                                </div>
+                                                <div class="card-body py-3">
+                                                    <div class="row g-3">
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Expense Category</label>
+                                                            <select class="form-select" name="expense_category" id="expense_category">
+                                                                <option value="">— Select category —</option>
+                                                                {% if expense_categories %}
+                                                                <optgroup label="Configured Spending Categories">
+                                                                    {% for cat in expense_categories %}
+                                                                    <option value="{{ cat.name }}">{{ cat.name }}</option>
+                                                                    {% endfor %}
+                                                                </optgroup>
+                                                                {% endif %}
+                                                                <optgroup label="Standard Expense &amp; Operational Categories">
+                                                                    {% for cat in category_catalog.out_categories %}
+                                                                    <option value="{{ cat.name }}">{{ cat.name }} ({{ cat.master_category }} ➔ {{ cat.master_subcategory }})</option>
+                                                                    {% endfor %}
+                                                                </optgroup>
+                                                                <optgroup label="All Master Accounting Categories &amp; Subcategories">
+                                                                    {% for grp in category_catalog.classification_groups %}
+                                                                        {% for sub in grp.subcategories %}
+                                                                        <option value="{{ sub.name }}">{{ grp.name }} ➔ {{ sub.name }}</option>
+                                                                        {% endfor %}
+                                                                    {% endfor %}
+                                                                </optgroup>
+                                                            </select>
+                                                            <div class="small text-muted mt-1">Select any category to filter its subcategories.</div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Subcategory / Specific Head</label>
+                                                            <select class="form-select" name="expense_subcategory" id="expense_subcategory">
+                                                                <option value="">— Select subcategory —</option>
+                                                                {% for cat in category_catalog.out_categories %}
+                                                                    {% for sub in cat.subcategories %}
+                                                                    <option value="{{ sub }}" data-parent-cat="{{ cat.name }}">{{ cat.name }} ➔ {{ sub }}</option>
+                                                                    {% endfor %}
+                                                                {% endfor %}
+                                                            </select>
+                                                            <div class="small text-muted mt-1">Specific subcategory recorded on the ledger row.</div>
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Paid To (Payee)</label>
+                                                            <input type="text" class="form-control" name="payee" id="payee" placeholder="Shop / person / vendor name">
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Voucher / Bill No.</label>
+                                                            <input type="text" class="form-control" name="expense_reference" id="expense_reference" placeholder="e.g. V-1024">
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Proof (photo)</label>
+                                                            <input type="file" class="form-control" name="expense_proof" accept="image/*">
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                    </div>
-                </div>
+                            </div>
+                        </div>
 
-                <div class="mt-3">
-                    <label class="form-label">Note</label>
-                    <textarea class="form-control" name="note" rows="2" placeholder="Optional note"></textarea>
+                        <!-- TRANSFER FUNDS SECTION (Dedicated Top-Level Mode) -->
+                        <div id="transferSection" class="transaction-panel d-none mt-4">
+                            <div class="card border-info-subtle shadow-sm">
+                                <div class="card-header bg-info-subtle d-flex align-items-center justify-content-between">
+                                    <h6 class="mb-0 fw-bold"><i class="bi bi-arrow-left-right text-info me-1"></i>2. Internal Account Transfer Details</h6>
+                                    <span class="badge bg-info text-dark">Account ⇄ Account</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">From Source Account</label>
+                                            <select class="form-select acc-searchable-select" name="transfer_from_account_id" id="transfer_from_account_id">
+                                                <option value="">Select source account</option>
+                                                {% for account in accounts %}
+                                                <option value="{{ account.id }}">{{ account.name }} · {{ (account.class_subcategory or account.category or 'Cash') }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">To Destination Account</label>
+                                            <select class="form-select acc-searchable-select" name="transfer_to_account_id" id="transfer_to_account_id">
+                                                <option value="">Select destination account</option>
+                                                {% for account in accounts %}
+                                                <option value="{{ account.id }}">{{ account.name }} · {{ (account.class_subcategory or account.category or 'Bank') }} (Rs. {{ "%.2f"|format(account.balance) }})</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Transfer Category</label>
+                                            <select class="form-select" name="tx_category" id="tx_category">
+                                                <option value="Internal Transfer">Internal Transfer (Contra)</option>
+                                                <option value="Cash">Assets ➔ Cash</option>
+                                                <option value="Bank">Assets ➔ Bank</option>
+                                                <option value="Digital Wallet">Assets ➔ Digital Wallet</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Transfer Subcategory</label>
+                                            <select class="form-select" name="tx_subcategory" id="tx_subcategory">
+                                                <option value="Cash Deposit to Bank">Cash Deposit to Bank</option>
+                                                <option value="Bank Withdrawal to Cash">Bank Withdrawal to Cash</option>
+                                                <option value="Digital Wallet Transfer">Digital Wallet Transfer</option>
+                                                <option value="Inter-Account Transfer">Inter-Account Transfer</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            <label class="form-label">Note</label>
+                            <textarea class="form-control" name="note" id="tx_note" rows="2" placeholder="Optional note"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: Sticky Live Visual Flow & Balance Impact Preview -->
+                    <div class="col-lg-4">
+                        <div class="card border-primary-subtle shadow-sm sticky-top" style="top: 12px;" id="txLivePreviewCard">
+                            <div class="card-header bg-primary bg-opacity-10 d-flex align-items-center justify-content-between">
+                                <span class="fw-bold small"><i class="bi bi-eye-fill text-primary me-1"></i>Live Visual Flow Preview</span>
+                                <span class="badge bg-primary" id="pvBadgeMode">Money In</span>
+                            </div>
+                            <div class="card-body">
+                                <!-- Visual Flow Diagram: [From] ──► [To] -->
+                                <div class="p-3 rounded-3 border mb-3" style="background: var(--surface-2);">
+                                    <div class="small text-uppercase text-muted fw-bold mb-1">From (Source)</div>
+                                    <div class="fw-bold text-break" id="pvFromNode">Client Ledger</div>
+
+                                    <div class="my-2 py-1 px-2 rounded bg-primary bg-opacity-10 border border-primary-subtle d-flex align-items-center justify-content-between">
+                                        <span class="fw-bold text-primary" id="pvFlowAmount">Rs. 0.00</span>
+                                        <span class="small badge bg-secondary" id="pvFlowMethod">Cash</span>
+                                    </div>
+
+                                    <div class="small text-uppercase text-muted fw-bold mb-1">To (Destination)</div>
+                                    <div class="fw-bold text-break" id="pvToNode">Select Company Account</div>
+                                </div>
+
+                                <!-- Classification Badge -->
+                                <div class="d-flex justify-content-between align-items-center py-1 border-bottom small">
+                                    <span class="text-muted">Category</span>
+                                    <span class="fw-semibold" id="pvCategory">Receivables</span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center py-1 border-bottom small mb-3">
+                                    <span class="text-muted">Subcategory</span>
+                                    <span class="fw-semibold" id="pvSubcategory">Client Receivable</span>
+                                </div>
+
+                                <!-- Primary Account Balance Impact -->
+                                <div class="p-2 rounded border mb-2">
+                                    <div class="small fw-bold text-muted text-uppercase mb-1" id="pvAccImpactTitle">Account Balance Impact</div>
+                                    <div class="d-flex justify-content-between small">
+                                        <span class="text-muted">Current Balance:</span>
+                                        <span class="fw-semibold" id="pvAccBefore">—</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between small">
+                                        <span class="text-muted">This Movement:</span>
+                                        <span class="fw-bold" id="pvAccDelta">Rs. 0.00</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between small border-top pt-1 mt-1">
+                                        <span class="fw-bold">Balance After:</span>
+                                        <span class="fw-bold" id="pvAccAfter">—</span>
+                                    </div>
+                                    <div class="small text-danger fw-bold mt-1 d-none" id="pvInsufficientWarn">
+                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>Insufficient balance in source account!
+                                    </div>
+                                </div>
+
+                                <!-- Secondary / Counterparty Balance Impact -->
+                                <div class="p-2 rounded border mb-2 d-none" id="pvPartyImpactBox">
+                                    <div class="small fw-bold text-muted text-uppercase mb-1" id="pvPartyImpactTitle">Counterparty Ledger Impact</div>
+                                    <div class="d-flex justify-content-between small">
+                                        <span class="text-muted">Current Position:</span>
+                                        <span class="fw-semibold" id="pvPartyBefore">—</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between small">
+                                        <span class="text-muted">This Settlement:</span>
+                                        <span class="fw-bold" id="pvPartyDelta">—</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between small border-top pt-1 mt-1">
+                                        <span class="fw-bold">Position After:</span>
+                                        <span class="fw-bold" id="pvPartyAfter">—</span>
+                                    </div>
+                                </div>
+
+                                <!-- Double-Entry GL Book Preview -->
+                                <div class="p-2 rounded border bg-light bg-opacity-50 small">
+                                    <div class="fw-bold text-muted text-uppercase mb-1" style="font-size:0.7rem;">
+                                        <i class="bi bi-journal-check me-1"></i>Double-Entry GL Book Impact
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="text-success fw-semibold">Debit (Dr):</span>
+                                        <span class="text-end" id="pvGlDebit">1010/1020 Cash or Bank</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between mt-1">
+                                        <span class="text-danger fw-semibold">Credit (Cr):</span>
+                                        <span class="text-end" id="pvGlCredit">1100 Accounts Receivable</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -658,27 +941,59 @@
 </div>
 
 <script>
+window.TX_TREE_REGISTRY = {{ tx_tree_registry|tojson }};
 const dueClientMap = {{ due_clients|tojson }};
 const supplierPayableMap = {{ supplier_payables|tojson }};
 const receiveSourceAccounts = {{ receive_source_accounts|tojson }};
 
-// Build account arrays usable by JS for method-based filtering
+// Build account arrays usable by JS for method sync, loan filtering & live balance preview
 const accountItems = [
     {% for account in accounts %}
-    { id: {{ account.id }}, name: {{ account.name|tojson }}, balance: {{ (account.balance or 0)|float }}, category: {{ (account.category or '').strip().lower()|tojson }} },
+    {
+        id: {{ account.id }},
+        name: {{ account.name|tojson }},
+        balance: {{ (account.balance or 0)|float }},
+        category: {{ (account.category or '').strip().lower()|tojson }},
+        source_category: {{ (account.source_category or '').strip()|tojson }},
+        class_category: {{ (account.class_category or '')|tojson }},
+        class_subcategory: {{ (account.class_subcategory or '')|tojson }},
+        class_account_type: {{ (account.class_account_type or '')|tojson }}
+    },
     {% endfor %}
 ];
 const companyAccountItems = [
     {% for account in company_accounts %}
-    { id: {{ account.id }}, name: {{ account.name|tojson }}, balance: {{ (account.balance or 0)|float }}, category: {{ (account.category or '').strip().lower()|tojson }} },
+    {
+        id: {{ account.id }},
+        name: {{ account.name|tojson }},
+        balance: {{ (account.balance or 0)|float }},
+        category: {{ (account.category or '').strip().lower()|tojson }},
+        source_category: {{ (account.source_category or '').strip()|tojson }},
+        class_category: {{ (account.class_category or '')|tojson }},
+        class_subcategory: {{ (account.class_subcategory or '')|tojson }},
+        class_account_type: {{ (account.class_account_type or '')|tojson }}
+    },
     {% endfor %}
 ];
+const accountById = {};
+accountItems.forEach(acc => { accountById[String(acc.id)] = acc; });
 
 function expectedAccountCategory(method) {
     const m = (method || '').trim().toLowerCase();
     if (['cash', 'cash sale'].includes(m)) return 'cash';
     if (['bank', 'bank transfer', 'check', 'cheque', 'card', 'online'].includes(m)) return 'bank';
     return null;
+}
+
+function syncMethodFromAccount(accountSelect) {
+    if (!accountSelect || !accountSelect.value) return;
+    const acc = accountById[String(accountSelect.value)];
+    const methodSelect = document.querySelector('select[name="method"]');
+    if (!acc || !methodSelect) return;
+    const currentExpected = expectedAccountCategory(methodSelect.value);
+    if (currentExpected && currentExpected !== acc.category) {
+        methodSelect.value = acc.category === 'bank' ? 'Bank Transfer' : 'Cash';
+    }
 }
 
 function populateAccountsForMethod() {
@@ -688,8 +1003,16 @@ function populateAccountsForMethod() {
     if (!methodSelect) return;
 
     const expectedCategory = expectedAccountCategory(methodSelect.value);
-    const receiveCandidates = expectedCategory ? companyAccountItems.filter(acc => acc.category === expectedCategory) : companyAccountItems;
-    const payFromCandidates = expectedCategory ? accountItems.filter(acc => acc.category === expectedCategory) : accountItems;
+    // Put accounts matching the selected method first, followed by other active accounts
+    // so an account is never hidden if the user picks the account before changing Method.
+    const sortByMethod = (list) => {
+        if (!expectedCategory) return list.slice();
+        const matching = list.filter(acc => acc.category === expectedCategory);
+        const others = list.filter(acc => acc.category !== expectedCategory);
+        return matching.concat(others);
+    };
+    const receiveCandidates = sortByMethod(companyAccountItems);
+    const payFromCandidates = sortByMethod(accountItems);
 
     if (receiveAccount) {
         const selected = receiveAccount.value;
@@ -697,7 +1020,8 @@ function populateAccountsForMethod() {
         receiveCandidates.forEach(acc => {
             const opt = document.createElement('option');
             opt.value = acc.id;
-            opt.textContent = `${acc.name} (Rs. ${Number(acc.balance || 0).toFixed(2)})`;
+            const chTag = (acc.category || 'cash').toUpperCase();
+            opt.textContent = `${acc.name} [${chTag}] (Rs. ${Number(acc.balance || 0).toFixed(2)})`;
             receiveAccount.appendChild(opt);
         });
         if (selected && receiveCandidates.some(acc => String(acc.id) === String(selected))) {
@@ -710,12 +1034,71 @@ function populateAccountsForMethod() {
         payFromCandidates.forEach(acc => {
             const opt = document.createElement('option');
             opt.value = acc.id;
-            opt.textContent = `${acc.name} (Rs. ${Number(acc.balance || 0).toFixed(2)})`;
+            const chTag = (acc.category || 'cash').toUpperCase();
+            opt.textContent = `${acc.name} [${chTag}] (Rs. ${Number(acc.balance || 0).toFixed(2)})`;
             payFromAccount.appendChild(opt);
         });
         if (selected && payFromCandidates.some(acc => String(acc.id) === String(selected))) {
             payFromAccount.value = selected;
         }
+    }
+}
+
+// Cascading Category -> Subcategory helper using TX_TREE_REGISTRY
+function cascadeSubcategories(catSelectId, subSelectId, directionFilter) {
+    const catSelect = document.getElementById(catSelectId);
+    const subSelect = document.getElementById(subSelectId);
+    if (!catSelect || !subSelect || !window.TX_TREE_REGISTRY) return;
+
+    const selectedCat = (catSelect.value || '').trim();
+    const prevSub = subSelect.value;
+    const catalog = window.TX_TREE_REGISTRY.catalog || {};
+    const allCats = catalog.all_categories || [];
+    const classGroups = catalog.classification_groups || [];
+
+    subSelect.innerHTML = '<option value="">— Select subcategory —</option>';
+    const added = new Set();
+
+    function addOption(val, label) {
+        if (!val || added.has(val)) return;
+        added.add(val);
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = label || val;
+        subSelect.appendChild(opt);
+    }
+
+    if (selectedCat) {
+        const matchCat = allCats.find(c => c.name.toLowerCase() === selectedCat.toLowerCase());
+        if (matchCat && Array.isArray(matchCat.subcategories)) {
+            matchCat.subcategories.forEach(s => addOption(s, s));
+        }
+        classGroups.forEach(grp => {
+            if (grp.name.toLowerCase() === selectedCat.toLowerCase()) {
+                (grp.subcategories || []).forEach(sub => {
+                    addOption(sub.name, sub.name);
+                    (sub.types || []).forEach(t => addOption(t, `${sub.name} ➔ ${t}`));
+                });
+            }
+            (grp.subcategories || []).forEach(sub => {
+                if (sub.name.toLowerCase() === selectedCat.toLowerCase()) {
+                    (sub.types || []).forEach(t => addOption(t, t));
+                }
+            });
+        });
+    } else {
+        const list = directionFilter === 'in'
+            ? (catalog.in_categories || allCats)
+            : (catalog.out_categories || allCats);
+        list.forEach(cat => {
+            (cat.subcategories || []).forEach(s => addOption(s, `${cat.name} ➔ ${s}`));
+        });
+    }
+
+    if (prevSub && added.has(prevSub)) {
+        subSelect.value = prevSub;
+    } else if (selectedCat && subSelect.options.length > 1) {
+        subSelect.selectedIndex = 1;
     }
 }
 
@@ -781,9 +1164,12 @@ function setTransactionMode() {
     const txMode = document.querySelector('input[name="tx_mode"]:checked');
     const receiveSection = document.getElementById('receiveSection');
     const paySection = document.getElementById('paySection');
+    const transferSection = document.getElementById('transferSection');
     const receiveAccount = document.getElementById('receive_account_id');
     const receiveClientInput = document.getElementById('receiveClientInput');
     const payFrom = document.getElementById('pay_from_account_id');
+    const transferFrom = document.getElementById('transfer_from_account_id');
+    const transferTo = document.getElementById('transfer_to_account_id');
     const txModeHelp = document.getElementById('txModeHelp');
     if (!receiveSection || !paySection || !receiveAccount || !receiveClientInput || !payFrom || !txModeHelp) {
         return;
@@ -794,22 +1180,35 @@ function setTransactionMode() {
 
     receiveSection.classList.toggle('d-none', mode !== 'receive');
     paySection.classList.toggle('d-none', mode !== 'pay');
+    if (transferSection) transferSection.classList.toggle('d-none', mode !== 'transfer');
 
     receiveAccount.required = mode === 'receive';
     receiveClientInput.required = mode === 'receive';
     payFrom.required = mode === 'pay';
+    if (transferFrom) transferFrom.required = mode === 'transfer';
+    if (transferTo) transferTo.required = mode === 'transfer';
     if (amountInput) {
         amountInput.min = mode === 'receive' ? '0' : '0.01';
     }
     txModeHelp.textContent = mode === 'receive'
         ? 'Receive mode: choose the transaction group first, then the source entry, and finally the destination account.'
         : mode === 'pay'
-            ? 'Pay mode: choose the source account first, then select where the money is going.'
-            : 'Choose a transaction mode to continue.';
+            ? 'Pay mode: choose the source account first, then select the target branch and category/subcategory.'
+            : mode === 'transfer'
+                ? 'Transfer mode: move funds between two active accounts with full category & subcategory classification.'
+                : 'Choose a transaction mode to continue.';
+
+    // Highlight active mode card border
+    document.querySelectorAll('.mode-choice').forEach(lbl => {
+        const radio = lbl.querySelector('input[type="radio"]');
+        lbl.classList.toggle('border-primary', Boolean(radio && radio.checked));
+        lbl.classList.toggle('border-secondary', !(radio && radio.checked));
+    });
 
     setReceiveSourceMode();
     updateReceiveSettlementState();
     setPayTargetMode();
+    updateTxPreview();
 }
 
 function updateReceiveSettlementState() {
@@ -831,6 +1230,7 @@ function updateReceiveSettlementState() {
     if (discountOnlyInfo) {
         discountOnlyInfo.classList.toggle('d-none', !isDiscountOnly);
     }
+    updateTxPreview();
 }
 
 function setReceiveSourceMode() {
@@ -872,6 +1272,7 @@ function setReceiveSourceMode() {
     updateReceiveSettlementState();
 
     if (receiveFromAccount && isAccountCategory) {
+        const prevVal = receiveFromAccount.value;
         receiveFromAccount.innerHTML = '<option value="">Select source account</option>';
         selectedCategoryAccounts.forEach(item => {
             const opt = document.createElement('option');
@@ -879,17 +1280,23 @@ function setReceiveSourceMode() {
             opt.textContent = item.name;
             receiveFromAccount.appendChild(opt);
         });
+        if (prevVal && selectedCategoryAccounts.some(i => String(i.id) === String(prevVal))) {
+            receiveFromAccount.value = prevVal;
+        }
     }
 
     if (!isClient) {
         document.getElementById('receiveClientNameInfo').textContent = '';
         document.getElementById('receiveClientDueInfo').textContent = '';
     }
+    updateTxPreview();
 }
 
 function setPayTargetMode() {
     const payTarget = document.getElementById('pay_target');
     const payToWrap = document.getElementById('payToAccountWrap');
+    const payToLabel = document.getElementById('payToAccountLabel');
+    const payToHint = document.getElementById('payToAccountHint');
     const supplierWrap = document.getElementById('supplierWrap');
     const targetLabelWrap = document.getElementById('targetLabelWrap');
     const payTo = document.getElementById('pay_to_account_id');
@@ -906,7 +1313,38 @@ function setPayTargetMode() {
     const isPayMode = txMode && (txMode.value || '').toLowerCase() === 'pay';
     const target = (payTarget.value || '').toLowerCase();
 
-    payToWrap.classList.toggle('d-none', target !== 'company_transfer');
+    // Show destination account selector for BOTH company_transfer AND loan repayment!
+    const needsToAccount = (target === 'company_transfer' || target === 'loan');
+    payToWrap.classList.toggle('d-none', !needsToAccount);
+    if (needsToAccount && payTo) {
+        const prevTo = payTo.value;
+        payTo.innerHTML = target === 'loan'
+            ? '<option value="">Select destination loan account</option>'
+            : '<option value="">Select destination account</option>';
+        const candidates = target === 'loan'
+            ? accountItems.filter(a => (a.source_category || '').toLowerCase() === 'loan' || (a.class_subcategory || '').toLowerCase() === 'loans')
+            : accountItems;
+        const listToUse = candidates.length > 0 ? candidates : accountItems;
+        listToUse.forEach(acc => {
+            const opt = document.createElement('option');
+            opt.value = acc.id;
+            const grp = acc.source_category ? ` · ${acc.source_category}` : '';
+            opt.textContent = `${acc.name}${grp} (Rs. ${Number(acc.balance || 0).toFixed(2)})`;
+            payTo.appendChild(opt);
+        });
+        if (prevTo && listToUse.some(a => String(a.id) === String(prevTo))) {
+            payTo.value = prevTo;
+        }
+    }
+    if (payToLabel) {
+        payToLabel.textContent = target === 'loan' ? 'Pay To Loan Account' : 'Pay To Account';
+    }
+    if (payToHint) {
+        payToHint.textContent = target === 'loan'
+            ? 'Select the Loan account being repaid (reduces loan liability toward zero).'
+            : 'Select the destination account receiving these funds.';
+    }
+
     supplierWrap.classList.toggle('d-none', target !== 'supplier');
     if (clientRefundWrap) clientRefundWrap.classList.toggle('d-none', target !== 'client_refund');
     const driverWrap = document.getElementById('driverWrap');
@@ -917,16 +1355,17 @@ function setPayTargetMode() {
     if (driverInput) driverInput.required = isPayMode && target === 'driver';
     targetLabelWrap.classList.toggle('d-none', !['loan', 'personal_expense', 'other_expense'].includes(target));
 
-    // Structured expense details (category / paid-to / voucher / proof) are
-    // only relevant when money is going out as an expense.
+    // Structured expense & category/subcategory details
     const expenseDetailWrap = document.getElementById('expenseDetailWrap');
-    if (expenseDetailWrap) expenseDetailWrap.classList.toggle('d-none', !['personal_expense', 'other_expense'].includes(target));
+    if (expenseDetailWrap) expenseDetailWrap.classList.toggle('d-none', !['personal_expense', 'other_expense', 'loan'].includes(target));
 
-    payTo.required = isPayMode && target === 'company_transfer';
+    payTo.required = isPayMode && needsToAccount;
     supplierHidden.required = false;
     if (supplierInput) supplierInput.required = isPayMode && target === 'supplier';
     if (payClientInput) payClientInput.required = isPayMode && target === 'client_refund';
-    targetLabel.required = isPayMode && ['loan', 'personal_expense', 'other_expense'].includes(target);
+    // Optional if category/subcategory is selected (backend auto-fills target_label from subcategory/category)
+    targetLabel.required = false;
+    updateTxPreview();
 }
 
 function syncDriverSelection() {
@@ -1111,35 +1550,418 @@ function drillDown(type) {
     modal.show();
 }
 
+function fmtRs(val) {
+    const n = Number(val || 0);
+    return 'Rs. ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function updateTxPreview() {
+    const txModeEl = document.querySelector('input[name="tx_mode"]:checked');
+    const mode = txModeEl ? (txModeEl.value || 'receive').toLowerCase() : 'receive';
+    const amount = Number((document.getElementById('tx_amount') && document.getElementById('tx_amount').value) || 0);
+    const method = (document.querySelector('select[name="method"]') && document.querySelector('select[name="method"]').value) || 'Cash';
+
+    const pvBadgeMode = document.getElementById('pvBadgeMode');
+    const pvFromNode = document.getElementById('pvFromNode');
+    const pvToNode = document.getElementById('pvToNode');
+    const pvFlowAmount = document.getElementById('pvFlowAmount');
+    const pvFlowMethod = document.getElementById('pvFlowMethod');
+    const pvCategory = document.getElementById('pvCategory');
+    const pvSubcategory = document.getElementById('pvSubcategory');
+    const pvAccBefore = document.getElementById('pvAccBefore');
+    const pvAccDelta = document.getElementById('pvAccDelta');
+    const pvAccAfter = document.getElementById('pvAccAfter');
+    const pvInsufficientWarn = document.getElementById('pvInsufficientWarn');
+    const pvPartyImpactBox = document.getElementById('pvPartyImpactBox');
+    const pvPartyImpactTitle = document.getElementById('pvPartyImpactTitle');
+    const pvPartyBefore = document.getElementById('pvPartyBefore');
+    const pvPartyDelta = document.getElementById('pvPartyDelta');
+    const pvPartyAfter = document.getElementById('pvPartyAfter');
+    const pvGlDebit = document.getElementById('pvGlDebit');
+    const pvGlCredit = document.getElementById('pvGlCredit');
+    if (!pvFromNode || !pvToNode) return;
+
+    pvFlowAmount.textContent = fmtRs(amount);
+    pvFlowMethod.textContent = method;
+    if (pvInsufficientWarn) pvInsufficientWarn.classList.add('d-none');
+    if (pvPartyImpactBox) pvPartyImpactBox.classList.add('d-none');
+
+    if (mode === 'receive') {
+        pvBadgeMode.textContent = 'Money In (+)';
+        pvBadgeMode.className = 'badge bg-success';
+        const srcGroup = (document.getElementById('receive_from_category') && document.getElementById('receive_from_category').value) || 'client_ledger';
+        const toAccId = document.getElementById('receive_account_id') ? document.getElementById('receive_account_id').value : '';
+        const toAcc = accountById[String(toAccId)];
+        const recCat = (document.getElementById('receive_category') && document.getElementById('receive_category').value) || '';
+        const recSub = (document.getElementById('receive_subcategory') && document.getElementById('receive_subcategory').value) || '';
+        const discount = Number((document.getElementById('receive_discount') && document.getElementById('receive_discount').value) || 0);
+
+        pvToNode.textContent = toAcc ? `${toAcc.name} (${toAcc.category.toUpperCase()})` : 'Select Destination Account';
+
+        if (srcGroup === 'client_ledger') {
+            const cVal = (document.getElementById('receiveClientInput') && document.getElementById('receiveClientInput').value || '').trim();
+            pvFromNode.textContent = cVal ? `Client: ${cVal}` : 'Client (Receivable Ledger)';
+            pvCategory.textContent = recCat || 'Receivables';
+            pvSubcategory.textContent = recSub || 'Client Receivable';
+            pvGlDebit.textContent = discount > 0 ? '1010/1020 Cash/Bank + 8010 Waive-Off' : '1010 / 1020 Cash or Bank';
+            pvGlCredit.textContent = '1100 Accounts Receivable (Client)';
+            const row = dueClientMap.find(item => {
+                const code = (item.client_code || '').toLowerCase();
+                const name = (item.client_name || '').toLowerCase();
+                const q = cVal.toLowerCase();
+                return q && (code === q || name === q || (`${code} ${name}`).includes(q));
+            });
+            if (row && pvPartyImpactBox) {
+                pvPartyImpactBox.classList.remove('d-none');
+                pvPartyImpactTitle.textContent = `Client Ledger (${row.client_name})`;
+                const dueBefore = Number(row.due_amount || 0);
+                const settled = amount + discount;
+                pvPartyBefore.textContent = fmtRs(dueBefore);
+                pvPartyDelta.textContent = `- ${fmtRs(settled)}`;
+                pvPartyAfter.textContent = fmtRs(dueBefore - settled);
+            }
+        } else if (srcGroup === 'other_source') {
+            const lbl = (document.getElementById('receive_source_label') && document.getElementById('receive_source_label').value || '').trim();
+            pvFromNode.textContent = lbl || 'Other Income / Payer';
+            pvCategory.textContent = recCat || 'Other Income';
+            pvSubcategory.textContent = recSub || 'Categorized Receipt';
+            pvGlDebit.textContent = '1010 / 1020 Cash or Bank';
+            pvGlCredit.textContent = `4000+ ${recCat || 'Income / Capital'}`;
+        } else {
+            const fromAccId = document.getElementById('receive_from_account_id') ? document.getElementById('receive_from_account_id').value : '';
+            const fromAcc = accountById[String(fromAccId)];
+            pvFromNode.textContent = fromAcc ? `${fromAcc.name} (${srcGroup})` : `${srcGroup} Account`;
+            pvCategory.textContent = recCat || srcGroup;
+            pvSubcategory.textContent = recSub || (fromAcc && fromAcc.class_subcategory) || 'Account Group Inflow';
+            pvGlDebit.textContent = '1010 / 1020 Destination Account';
+            pvGlCredit.textContent = fromAcc ? fromAcc.name : 'Source Group Account';
+        }
+
+        if (toAcc) {
+            const before = Number(toAcc.balance || 0);
+            pvAccBefore.textContent = fmtRs(before);
+            pvAccDelta.textContent = `+ ${fmtRs(amount)}`;
+            pvAccDelta.className = 'fw-bold text-success';
+            pvAccAfter.textContent = fmtRs(before + amount);
+        } else {
+            pvAccBefore.textContent = '—';
+            pvAccDelta.textContent = `+ ${fmtRs(amount)}`;
+            pvAccAfter.textContent = '—';
+        }
+    } else if (mode === 'pay') {
+        pvBadgeMode.textContent = 'Money Out (−)';
+        pvBadgeMode.className = 'badge bg-danger';
+        const fromAccId = document.getElementById('pay_from_account_id') ? document.getElementById('pay_from_account_id').value : '';
+        const fromAcc = accountById[String(fromAccId)];
+        const target = (document.getElementById('pay_target') && document.getElementById('pay_target').value) || 'other_expense';
+        const expCat = (document.getElementById('expense_category') && document.getElementById('expense_category').value) || '';
+        const expSub = (document.getElementById('expense_subcategory') && document.getElementById('expense_subcategory').value) || '';
+        const payee = (document.getElementById('payee') && document.getElementById('payee').value || '').trim();
+
+        pvFromNode.textContent = fromAcc ? `${fromAcc.name} (${fromAcc.category.toUpperCase()})` : 'Select Source Account';
+
+        if (target === 'supplier') {
+            const sName = (document.getElementById('paySupplierInput') && document.getElementById('paySupplierInput').value || '').trim();
+            const sId = document.getElementById('supplier_id') ? document.getElementById('supplier_id').value : '';
+            pvToNode.textContent = sName ? `Supplier: ${sName}` : 'Supplier (Payable Ledger)';
+            pvCategory.textContent = 'Payables';
+            pvSubcategory.textContent = 'Supplier Payable';
+            pvGlDebit.textContent = '2000 Accounts Payable (Supplier)';
+            pvGlCredit.textContent = '1010 / 1020 Cash or Bank';
+            if (sId && supplierPayableById[sId] !== undefined && pvPartyImpactBox) {
+                pvPartyImpactBox.classList.remove('d-none');
+                pvPartyImpactTitle.textContent = `Supplier Payable (${sName})`;
+                const before = Number(supplierPayableById[sId] || 0);
+                pvPartyBefore.textContent = fmtRs(before);
+                pvPartyDelta.textContent = `- ${fmtRs(amount)}`;
+                pvPartyAfter.textContent = fmtRs(before - amount);
+            }
+        } else if (target === 'driver') {
+            const dName = (document.getElementById('payDriverInput') && document.getElementById('payDriverInput').value || '').trim();
+            pvToNode.textContent = dName ? `Driver: ${dName}` : 'Driver (Delivery Rent Ledger)';
+            pvCategory.textContent = 'Payables';
+            pvSubcategory.textContent = 'Driver / Rent Payable';
+            pvGlDebit.textContent = '2100 Driver Payable';
+            pvGlCredit.textContent = '1010 / 1020 Cash or Bank';
+        } else if (target === 'loan') {
+            const toAccId = document.getElementById('pay_to_account_id') ? document.getElementById('pay_to_account_id').value : '';
+            const toAcc = accountById[String(toAccId)];
+            pvToNode.textContent = toAcc ? `Loan Account: ${toAcc.name}` : 'Select Loan Account';
+            pvCategory.textContent = expCat || 'Loans';
+            pvSubcategory.textContent = expSub || (toAcc && toAcc.class_account_type) || 'Loan Repayment';
+            pvGlDebit.textContent = '2300 Loan Payable';
+            pvGlCredit.textContent = '1010 / 1020 Cash or Bank';
+            if (toAcc && pvPartyImpactBox) {
+                pvPartyImpactBox.classList.remove('d-none');
+                pvPartyImpactTitle.textContent = `Loan Account (${toAcc.name})`;
+                const before = Number(toAcc.balance || 0);
+                pvPartyBefore.textContent = fmtRs(before);
+                pvPartyDelta.textContent = `+ ${fmtRs(amount)}`;
+                pvPartyAfter.textContent = fmtRs(before + amount);
+            }
+        } else if (target === 'company_transfer') {
+            const toAccId = document.getElementById('pay_to_account_id') ? document.getElementById('pay_to_account_id').value : '';
+            const toAcc = accountById[String(toAccId)];
+            pvToNode.textContent = toAcc ? `${toAcc.name}` : 'Select Destination Account';
+            pvCategory.textContent = 'Internal Transfer';
+            pvSubcategory.textContent = 'Company Account Transfer';
+            pvGlDebit.textContent = toAcc ? toAcc.name : 'Destination Account';
+            pvGlCredit.textContent = fromAcc ? fromAcc.name : 'Source Account';
+            if (toAcc && pvPartyImpactBox) {
+                pvPartyImpactBox.classList.remove('d-none');
+                pvPartyImpactTitle.textContent = `Destination (${toAcc.name})`;
+                const before = Number(toAcc.balance || 0);
+                pvPartyBefore.textContent = fmtRs(before);
+                pvPartyDelta.textContent = `+ ${fmtRs(amount)}`;
+                pvPartyAfter.textContent = fmtRs(before + amount);
+            }
+        } else if (target === 'client_refund') {
+            const cName = (document.getElementById('payClientInput') && document.getElementById('payClientInput').value || '').trim();
+            pvToNode.textContent = cName ? `Client Refund: ${cName}` : 'Client (Refund)';
+            pvCategory.textContent = 'Receivables';
+            pvSubcategory.textContent = 'Client Refund';
+            pvGlDebit.textContent = '1100 Accounts Receivable (Client)';
+            pvGlCredit.textContent = '1010 / 1020 Cash or Bank';
+        } else {
+            const catLbl = expCat || (target === 'personal_expense' ? 'Personal' : 'Operating Expense');
+            const subLbl = expSub || (document.getElementById('target_label') && document.getElementById('target_label').value) || 'General';
+            pvToNode.textContent = payee ? `${catLbl} (${payee})` : `${catLbl} ➔ ${subLbl}`;
+            pvCategory.textContent = catLbl;
+            pvSubcategory.textContent = subLbl;
+            pvGlDebit.textContent = `6000+ ${catLbl} (${subLbl})`;
+            pvGlCredit.textContent = '1010 / 1020 Cash or Bank';
+        }
+
+        if (fromAcc) {
+            const before = Number(fromAcc.balance || 0);
+            const after = before - amount;
+            pvAccBefore.textContent = fmtRs(before);
+            pvAccDelta.textContent = `- ${fmtRs(amount)}`;
+            pvAccDelta.className = 'fw-bold text-danger';
+            pvAccAfter.textContent = fmtRs(after);
+            if (after < 0 && pvInsufficientWarn) {
+                pvInsufficientWarn.classList.remove('d-none');
+            }
+        } else {
+            pvAccBefore.textContent = '—';
+            pvAccDelta.textContent = `- ${fmtRs(amount)}`;
+            pvAccAfter.textContent = '—';
+        }
+    } else if (mode === 'transfer') {
+        pvBadgeMode.textContent = 'Transfer (⇄)';
+        pvBadgeMode.className = 'badge bg-info text-dark';
+        const fromAccId = document.getElementById('transfer_from_account_id') ? document.getElementById('transfer_from_account_id').value : '';
+        const toAccId = document.getElementById('transfer_to_account_id') ? document.getElementById('transfer_to_account_id').value : '';
+        const fromAcc = accountById[String(fromAccId)];
+        const toAcc = accountById[String(toAccId)];
+        const tCat = (document.getElementById('tx_category') && document.getElementById('tx_category').value) || 'Internal Transfer';
+        const tSub = (document.getElementById('tx_subcategory') && document.getElementById('tx_subcategory').value) || 'Inter-Account Transfer';
+
+        pvFromNode.textContent = fromAcc ? `${fromAcc.name}` : 'Select Source Account';
+        pvToNode.textContent = toAcc ? `${toAcc.name}` : 'Select Destination Account';
+        pvCategory.textContent = tCat;
+        pvSubcategory.textContent = tSub;
+        pvGlDebit.textContent = toAcc ? `1010/1020 ${toAcc.name}` : 'Destination Account';
+        pvGlCredit.textContent = fromAcc ? `1010/1020 ${fromAcc.name}` : 'Source Account';
+
+        if (fromAcc) {
+            const before = Number(fromAcc.balance || 0);
+            const after = before - amount;
+            pvAccBefore.textContent = fmtRs(before);
+            pvAccDelta.textContent = `- ${fmtRs(amount)}`;
+            pvAccDelta.className = 'fw-bold text-danger';
+            pvAccAfter.textContent = fmtRs(after);
+            if (after < 0 && pvInsufficientWarn) {
+                pvInsufficientWarn.classList.remove('d-none');
+            }
+        }
+        if (toAcc && pvPartyImpactBox) {
+            pvPartyImpactBox.classList.remove('d-none');
+            pvPartyImpactTitle.textContent = `Destination (${toAcc.name})`;
+            const before = Number(toAcc.balance || 0);
+            pvPartyBefore.textContent = fmtRs(before);
+            pvPartyDelta.textContent = `+ ${fmtRs(amount)}`;
+            pvPartyAfter.textContent = fmtRs(before + amount);
+        }
+    }
+}
+
+// Interactive Transaction Tree Explorer controls
+function switchTxTreeTab(tab) {
+    const livePane = document.getElementById('txTreeLivePane');
+    const catalogPane = document.getElementById('txTreeCatalogPane');
+    const btnLive = document.getElementById('btnShowLiveTree');
+    const btnCatalog = document.getElementById('btnShowCatalogTree');
+    if (!livePane || !catalogPane) return;
+    const isLive = tab === 'live';
+    livePane.classList.toggle('d-none', !isLive);
+    catalogPane.classList.toggle('d-none', isLive);
+    if (btnLive) {
+        btnLive.classList.toggle('btn-dark', isLive);
+        btnLive.classList.toggle('active', isLive);
+        btnLive.classList.toggle('btn-outline-dark', !isLive);
+    }
+    if (btnCatalog) {
+        btnCatalog.classList.toggle('btn-dark', !isLive);
+        btnCatalog.classList.toggle('active', !isLive);
+        btnCatalog.classList.toggle('btn-outline-dark', isLive);
+    }
+}
+
+function toggleAllTxTreeDetails(expand) {
+    document.querySelectorAll('#txTreeLivePane details').forEach(d => {
+        d.open = Boolean(expand);
+    });
+}
+
+function openTransactionWithCategory(mode, categoryName, subcategoryName) {
+    const modalEl = document.getElementById('newTransactionModal');
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const radio = document.querySelector(`input[name="tx_mode"][value="${mode}"]`);
+    if (radio) {
+        radio.checked = true;
+    }
+    setTransactionMode();
+
+    if (mode === 'receive') {
+        const srcSelect = document.getElementById('receive_from_category');
+        if (srcSelect && categoryName !== 'Receivables') {
+            srcSelect.value = 'other_source';
+            setReceiveSourceMode();
+        }
+        const catSelect = document.getElementById('receive_category');
+        const subSelect = document.getElementById('receive_subcategory');
+        if (catSelect) {
+            catSelect.value = categoryName;
+            cascadeSubcategories('receive_category', 'receive_subcategory', 'in');
+        }
+        if (subSelect && subcategoryName) {
+            subSelect.value = subcategoryName;
+        }
+    } else if (mode === 'pay') {
+        const payTarget = document.getElementById('pay_target');
+        if (payTarget) {
+            payTarget.value = categoryName === 'Personal' || categoryName === 'Drawings'
+                ? 'personal_expense'
+                : 'other_expense';
+            setPayTargetMode();
+        }
+        const catSelect = document.getElementById('expense_category');
+        const subSelect = document.getElementById('expense_subcategory');
+        if (catSelect) {
+            catSelect.value = categoryName;
+            cascadeSubcategories('expense_category', 'expense_subcategory', 'out');
+        }
+        if (subSelect && subcategoryName) {
+            subSelect.value = subcategoryName;
+        }
+        const targetLabel = document.getElementById('target_label');
+        if (targetLabel && !targetLabel.value && subcategoryName) {
+            targetLabel.value = subcategoryName;
+        }
+    } else if (mode === 'transfer') {
+        const tCat = document.getElementById('tx_category');
+        const tSub = document.getElementById('tx_subcategory');
+        if (tCat && categoryName) tCat.value = categoryName;
+        if (tSub && subcategoryName) tSub.value = subcategoryName;
+    }
+
+    updateTxPreview();
+    modal.show();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const modeInputs = document.querySelectorAll('input[name="tx_mode"]');
     const targetSelect = document.getElementById('pay_target');
     const receiveSourceType = document.getElementById('receive_from_category');
     const receiveAccountSelect = document.getElementById('receive_account_id');
+    const payFromSelect = document.getElementById('pay_from_account_id');
+    const payToSelect = document.getElementById('pay_to_account_id');
+    const transferFromSelect = document.getElementById('transfer_from_account_id');
+    const transferToSelect = document.getElementById('transfer_to_account_id');
     const clientInput = document.getElementById('receiveClientInput');
     const amountInput = document.getElementById('tx_amount');
     const receiveDiscountInput = document.getElementById('receive_discount');
+    const expenseCatSelect = document.getElementById('expense_category');
+    const expenseSubSelect = document.getElementById('expense_subcategory');
+    const receiveCatSelect = document.getElementById('receive_category');
+    const receiveSubSelect = document.getElementById('receive_subcategory');
+
     modeInputs.forEach(input => input.addEventListener('change', setTransactionMode));
     const methodSelect = document.querySelector('select[name="method"]');
     if (methodSelect) {
         methodSelect.addEventListener('change', function() {
             populateAccountsForMethod();
             setTransactionMode();
+            updateTxPreview();
         });
     }
     if (targetSelect) targetSelect.addEventListener('change', setPayTargetMode);
     if (receiveSourceType) receiveSourceType.addEventListener('change', setReceiveSourceMode);
-    if (receiveAccountSelect) receiveAccountSelect.addEventListener('change', setReceiveSourceMode);
+    if (receiveAccountSelect) {
+        receiveAccountSelect.addEventListener('change', function() {
+            syncMethodFromAccount(receiveAccountSelect);
+            setReceiveSourceMode();
+            updateTxPreview();
+        });
+    }
+    if (payFromSelect) {
+        payFromSelect.addEventListener('change', function() {
+            syncMethodFromAccount(payFromSelect);
+            updateTxPreview();
+        });
+    }
+    if (payToSelect) payToSelect.addEventListener('change', updateTxPreview);
+    if (transferFromSelect) {
+        transferFromSelect.addEventListener('change', function() {
+            syncMethodFromAccount(transferFromSelect);
+            updateTxPreview();
+        });
+    }
+    if (transferToSelect) transferToSelect.addEventListener('change', updateTxPreview);
     if (amountInput) amountInput.addEventListener('input', updateReceiveSettlementState);
     if (receiveDiscountInput) receiveDiscountInput.addEventListener('input', updateReceiveSettlementState);
     if (clientInput) {
         clientInput.addEventListener('input', updateDueDisplay);
         clientInput.addEventListener('blur', updateDueDisplay);
     }
-    setTransactionMode();
+    if (expenseCatSelect) {
+        expenseCatSelect.addEventListener('change', function() {
+            cascadeSubcategories('expense_category', 'expense_subcategory', 'out');
+            updateTxPreview();
+        });
+    }
+    if (expenseSubSelect) {
+        expenseSubSelect.addEventListener('change', function() {
+            const targetLabel = document.getElementById('target_label');
+            if (targetLabel && !targetLabel.value && expenseSubSelect.value) {
+                targetLabel.value = expenseSubSelect.value;
+            }
+            updateTxPreview();
+        });
+    }
+    if (receiveCatSelect) {
+        receiveCatSelect.addEventListener('change', function() {
+            cascadeSubcategories('receive_category', 'receive_subcategory', 'in');
+            updateTxPreview();
+        });
+    }
+    if (receiveSubSelect) receiveSubSelect.addEventListener('change', updateTxPreview);
+
+    ['receive_source_label', 'payee', 'target_label', 'tx_category', 'tx_subcategory'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', updateTxPreview);
+            el.addEventListener('change', updateTxPreview);
+        }
+    });
+
     populateAccountsForMethod();
+    setTransactionMode();
     setReceiveSourceMode();
     setPayTargetMode();
+    updateTxPreview();
 });
 </script>
 {% endblock %}
