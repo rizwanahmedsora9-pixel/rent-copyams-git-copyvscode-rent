@@ -44,39 +44,33 @@ def _create_account(name="Main Cash", category="cash", balance=25_000.0, **extra
     return acc
 
 
-def test_unified_category_catalog_exposes_all_master_and_operational_categories(app):
-    """Every master category/subcategory from CLASSIFICATION and operational
-    categories/subcategories must appear in the transaction catalog.
-    """
-    from blueprints.accounts import classification as cls
+def test_unified_category_catalog_is_owner_defined_and_empty_by_default(app):
+    """The transaction catalog exposes only owner-created active labels."""
     from blueprints.accounts.transaction_tree import (
         build_unified_category_catalog,
         transaction_tree_registry_json,
     )
+    from models import CashFlowCategory, CashFlowSubcategory, db
 
     with app.app_context():
         reg = transaction_tree_registry_json()
         catalog = build_unified_category_catalog()
+        assert [m["mode"] for m in reg["modes"]] == ["receive", "pay", "transfer"]
+        assert catalog["all_categories"] == []
+        assert catalog["classification_groups"] == []
 
-        # All 3 top-level transaction modes exist
-        mode_keys = [m["mode"] for m in reg["modes"]]
-        assert mode_keys == ["receive", "pay", "transfer"]
+        parent = CashFlowCategory(name="Fuel & Transport", direction="out", is_active=True)
+        db.session.add(parent)
+        db.session.flush()
+        db.session.add(CashFlowSubcategory(category_id=parent.id, name="Generator Fuel", is_active=True))
+        db.session.commit()
 
-        # All 6 master classification categories and their 19 subcategories exist
-        class_group_names = {g["name"] for g in catalog["classification_groups"]}
-        assert class_group_names == set(cls.CLASSIFICATION.keys())
-
-        all_cat_names = {c["name"] for c in catalog["all_categories"]}
-        for master_cat, meta in cls.CLASSIFICATION.items():
-            for sub_name in meta["subcategories"].keys():
-                assert sub_name in all_cat_names, f"Missing subcategory {sub_name} from {master_cat}"
-
-        # Operational categories have non-empty subcategories
-        by_name = catalog["by_name"]
-        assert "Electricity Bill" in by_name["Utilities"]["subcategories"]
-        assert "Diesel & Petrol" in by_name["Fuel & Transport"]["subcategories"]
-        assert "Owner Drawings" in by_name["Personal"]["subcategories"]
-        assert "Product Sales" in by_name["Sales"]["subcategories"]
+        catalog = build_unified_category_catalog()
+        assert "Fuel & Transport" in catalog["by_name"]
+        assert "Generator Fuel" in catalog["by_name"]["Fuel & Transport"]["subcategories"]
+        parent.is_active = False
+        db.session.commit()
+        assert "Fuel & Transport" not in build_unified_category_catalog()["by_name"]
 
 
 def test_transactions_record_category_and_subcategory_and_show_on_ledger(app, client):
@@ -106,7 +100,20 @@ def test_transactions_record_category_and_subcategory_and_show_on_ledger(app, cl
 
     _login(client)
 
-    # 1. Record an expense with Category + Subcategory (without needing pre-seeded CashFlowCategory)
+    from models import CashFlowCategory, CashFlowSubcategory
+    with app.app_context():
+        for name, direction, child in (
+            ("Fuel & Transport", "out", "Generator Fuel"),
+            ("Other Income", "in", "Scrap / Misc Income"),
+            ("Internal Transfer", "both", "Cash Deposit to Bank"),
+        ):
+            parent = CashFlowCategory(name=name, direction=direction, is_active=True)
+            db.session.add(parent)
+            db.session.flush()
+            db.session.add(CashFlowSubcategory(category_id=parent.id, name=child, is_active=True))
+        db.session.commit()
+
+    # 1. Record an expense with an owner-defined Category + Subcategory.
     res_exp = client.post(
         "/accounts/transactions/new",
         data={

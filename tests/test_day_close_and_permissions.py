@@ -254,8 +254,9 @@ def test_account_master_requires_can_manage_account_masters(app, client):
         user.can_manage_account_masters = True
         db.session.commit()
 
-    allowed = client.get("/accounts/accounts/add")
+    allowed = client.get("/accounts/accounts/add", follow_redirects=True)
     assert allowed.status_code == 200
+    assert b"New account" in allowed.data
 
 
 def test_void_permission_gates_payment_delete(app, client):

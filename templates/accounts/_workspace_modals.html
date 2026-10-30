@@ -1,0 +1,108 @@
+<div class="modal fade" id="accountModal" tabindex="-1" aria-labelledby="accountModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content aw-modal" id="accountForm" method="post" action="{{ url_for('accounts.setup_save_account') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="account_id" id="account-id" value="{{ edit_account_id or form_values.get('account_id', '') }}">
+      <input type="hidden" name="expected_revision" id="account-revision" value="">
+      <div class="modal-header">
+        <h2 class="modal-title aw-modal-title" id="accountModalTitle">New account</h2>
+        <button type="button" class="aw-modal-close" data-bs-dismiss="modal" aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="aw-form-field">
+          <label class="aw-label" for="account-name">Account name <span aria-hidden="true">*</span></label>
+          <input class="aw-input" id="account-name" name="name" maxlength="100" required autocomplete="off" placeholder="e.g. Main cash, HBL current, JazzCash" value="{{ form_values.get('name', '') }}">
+        </div>
+        <div class="aw-form-field">
+          <label class="aw-label" for="account-type">Account type <span aria-hidden="true">*</span></label>
+          <select class="aw-select" id="account-type" name="account_type" required>
+            {% for key, meta in account_types.items() %}
+            <option value="{{ key }}" {% if form_values.get('account_type', 'cash') == key %}selected{% endif %}>{{ meta.label }}</option>
+            {% endfor %}
+          </select>
+          <input type="hidden" id="account-type-locked" name="account_type" value="" disabled>
+        </div>
+        <div class="aw-form-field">
+          <label class="aw-label" for="account-number" id="account-number-label">Account number</label>
+          <input class="aw-input aw-mono" id="account-number" name="account_number" maxlength="50" autocomplete="off" placeholder="Optional internal reference" value="{{ form_values.get('account_number', '') }}">
+          <div class="aw-help" id="account-number-help">Optional for cash accounts.</div>
+        </div>
+        <div class="aw-form-field">
+          <label class="aw-label" for="account-opening">Opening balance (PKR) <span aria-hidden="true">*</span></label>
+          <input class="aw-input aw-mono" id="account-opening" name="opening_balance" type="number" step="0.01" inputmode="decimal" required placeholder="0.00" value="{{ form_values.get('opening_balance', '0') }}">
+          <input type="hidden" id="account-opening-locked" name="opening_balance" value="" disabled>
+          <div class="aw-help" id="account-opening-help">The amount in this account when you start. Enter 0 if it is empty.</div>
+        </div>
+        <div class="aw-note" id="account-locked-note" hidden>
+          <i class="bi bi-lock" aria-hidden="true"></i>
+          <span>This account has financial history. Its type and opening balance are locked; you can still rename it, update the number, or suspend it.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="aw-btn aw-btn-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="aw-btn aw-btn-primary" id="account-save">Create account</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-labelledby="categoryModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content aw-modal" id="categoryForm" method="post" action="{{ url_for('accounts.setup_save_category') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="category_id" id="category-id" value="{{ edit_category_id or form_values.get('category_id', '') }}">
+      <div class="modal-header">
+        <h2 class="modal-title aw-modal-title" id="categoryModalTitle">New category</h2>
+        <button type="button" class="aw-modal-close" data-bs-dismiss="modal" aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="aw-form-field">
+          <label class="aw-label" for="category-name">Category name <span aria-hidden="true">*</span></label>
+          <input class="aw-input" id="category-name" name="name" maxlength="120" required autocomplete="off" placeholder="e.g. Rent income, Fuel, Repairs" value="{{ form_values.get('name', '') }}">
+        </div>
+        <fieldset class="aw-form-field">
+          <legend class="aw-label">Used for <span aria-hidden="true">*</span></legend>
+          <div class="aw-radio-cards">
+            {% for key, label in category_directions.items() %}
+            <label class="aw-radio-card">
+              <input type="radio" name="direction" value="{{ key }}" {% if form_values.get('direction', 'both') == key %}checked{% endif %}>
+              <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="category-direction-locked" name="direction" value="" disabled>
+        </fieldset>
+        <div class="aw-form-field">
+          <label class="aw-label" for="category-notes">Description <span class="aw-optional">(optional)</span></label>
+          <textarea class="aw-input aw-textarea" id="category-notes" name="notes" maxlength="300" rows="3" placeholder="A short note to help your team use this category consistently">{{ form_values.get('notes', '') }}</textarea>
+        </div>
+        <div class="aw-note" id="category-locked-note" hidden>
+          <i class="bi bi-lock" aria-hidden="true"></i>
+          <span>This category is already used. Its direction is locked so historical records keep their meaning.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="aw-btn aw-btn-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="aw-btn aw-btn-primary" id="category-save">Create category</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <form class="modal-content aw-modal" id="confirmForm" method="post" action="">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="expected_revision" id="confirm-revision" value="">
+      <input type="hidden" name="active" id="confirm-active" value="">
+      <div class="modal-body aw-confirm-body">
+        <h2 class="aw-modal-title" id="confirmModalTitle">Confirm</h2>
+        <p class="aw-muted" id="confirmModalBody"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="aw-btn aw-btn-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="aw-btn aw-btn-primary" id="confirmSubmit">Confirm</button>
+      </div>
+    </form>
+  </div>
+</div>

@@ -179,9 +179,9 @@ def active_suppliers():
 
 
 def active_cash_bank_accounts():
-    return Account.query.filter(
+    from app.services.account_setup import setup_accounts_query
+    return setup_accounts_query().filter(
         func.coalesce(Account.is_active, True) == True,
-        func.lower(func.trim(Account.category)).in_(("cash", "bank")),
     ).order_by(Account.name.asc(), Account.id.asc()).all()
 
 

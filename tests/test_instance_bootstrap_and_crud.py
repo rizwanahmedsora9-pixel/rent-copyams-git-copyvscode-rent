@@ -280,13 +280,9 @@ def test_crud_works_in_all_major_sections(app, client):
     # --- Accounts ---
     resp = client.post("/accounts/accounts/add", data={
         "name": "Yard Cash Drawer",
-        "class_category": "Assets",
-        "class_subcategory": "Cash",
-        "class_account_type": "Main Cash",
-        "account_status": "active",
-        "opening_amount": "100000",
-        "opening_position": "debit",
-        "opening_effective_date": "2026-01-01",
+        "account_type": "cash",
+        "account_number": "",
+        "opening_balance": "100000",
     }, follow_redirects=True)
     assert resp.status_code == 200
     with app.app_context():
@@ -295,11 +291,9 @@ def test_crud_works_in_all_major_sections(app, client):
         assert acc.balance == 100000.0
     resp = client.post(f"/accounts/{aid}/edit", data={
         "name": "Yard Cash Drawer",
-        "class_category": "Assets",
-        "class_subcategory": "Cash",
-        "class_account_type": "Main Cash",
-        "channel": "cash",
-        "account_status": "active",
+        "account_type": "cash",
+        "account_number": "",
+        "opening_balance": "100000",
     }, follow_redirects=True)
     assert b"Account updated" in resp.data
     resp = client.post(f"/accounts/{aid}/delete", data={}, follow_redirects=True)
@@ -310,13 +304,9 @@ def test_crud_works_in_all_major_sections(app, client):
             pass
     resp = client.post("/accounts/accounts/add", data={
         "name": "Yard Cash Drawer",
-        "class_category": "Assets",
-        "class_subcategory": "Cash",
-        "class_account_type": "Main Cash",
-        "account_status": "active",
-        "opening_amount": "100000",
-        "opening_position": "debit",
-        "opening_effective_date": "2026-01-01",
+        "account_type": "cash",
+        "account_number": "",
+        "opening_balance": "100000",
     }, follow_redirects=True)
     with app.app_context():
         aid = Account.query.filter_by(name="Yard Cash Drawer").one().id

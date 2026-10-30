@@ -27,34 +27,9 @@ def _deny_account_master_mutation():
 @accounts_bp.route('/accounts')
 @login_required
 def manage_accounts():
-    """Manage financial accounts."""
-    _ensure_default_account_categories()
-    _backfill_legacy_account_groups()
-    show_mode = (request.args.get('show') or 'active').strip().lower()
-    q = Account.query
-    if show_mode == 'archived':
-        q = q.filter(Account.is_active == False)
-    elif show_mode == 'all':
-        pass
-    else:
-        show_mode = 'active'
-        q = q.filter(func.coalesce(Account.is_active, True) == True)
-    accounts = q.order_by(Account.name.asc(), Account.id.asc()).all()
-    categories = _account_categories()
-    
-    # Group accounts by category and type for better organization
-    account_summary = {}
-    for account in accounts:
-        category_name = (account.category or 'Unknown').upper()
-        account_type_name = account.account_type or 'Unknown'
-        key = f"{category_name} - {account_type_name}"
-        if key not in account_summary:
-            account_summary[key] = []
-        account_summary[key].append(account)
-    
-    return render_template('accounts/manage_accounts.html', accounts=accounts, account_summary=account_summary,
-                           categories=categories, show_mode=show_mode,
-                           can_manage_master=_account_master_permission_ok())
+    """Manage Accounts tab of the rebuilt workspace."""
+    from .workspace import render_workspace
+    return render_workspace('accounts')
 
 
 @accounts_bp.route('/categories/add', methods=['POST'])
@@ -86,106 +61,23 @@ def add_account_category():
 @accounts_bp.route('/accounts/add', methods=['GET', 'POST'])
 @login_required
 def add_account():
-    """Add a new account (redesigned Create form)."""
+    """Create an account through the simple setup form."""
     _deny_account_master_mutation()
-    _ensure_default_account_categories()
-    _backfill_legacy_account_groups()
-    from .classification import registry_json
-    from .account_form import validate_account_form, cascade_options
-
-    if request.method == 'POST':
-        try:
-            cleaned = validate_account_form(request.form, is_edit=False)
-            name = cleaned["name"]
-
-            # Opening position (PART 7): amount + direction + effective date.
-            # Debit => positive opening (asset-like), Credit => negative opening
-            # (liability-like).  Stored as the explicit opening baseline used by
-            # ledger_balance(), so it is auditable and never a parallel balance.
-            from utils.money import from_minor, to_minor
-            opening_amount_raw = (request.form.get('opening_amount') or '0').strip()
-            opening_minor = to_minor(opening_amount_raw or 0, field='Opening amount')
-            position = (request.form.get('opening_position') or 'debit').strip().lower()
-            if position == 'credit':
-                opening_minor = -opening_minor
-            effective_raw = (request.form.get('opening_effective_date') or '').strip()
-            if effective_raw:
-                try:
-                    effective_dt = datetime.strptime(effective_raw, '%Y-%m-%d')
-                except ValueError:
-                    raise ValueError('Opening effective date must be a valid date (YYYY-MM-DD).')
-            else:
-                effective_dt = pk_now()
-            opening_value = float(from_minor(opening_minor))
-
-            account = Account(
-                name=name,
-                category=cleaned["category"],
-                source_category=cleaned["source_category"],
-                account_type=cleaned["account_type"],
-                type=cleaned["type"],
-                balance=opening_value,
-                balance_minor=opening_minor,
-                opening_balance=opening_value,
-                opening_balance_minor=opening_minor,
-                opening_balance_date=effective_dt,
-                bank_name=cleaned["bank_name"],
-                account_holder_name=cleaned["account_holder_name"],
-                account_number=cleaned["account_number"],
-                branch_code=cleaned["branch_code"],
-                class_category=cleaned["class_category"],
-                class_subcategory=cleaned["class_subcategory"],
-                class_account_type=cleaned["class_account_type"],
-                channel=cleaned["channel"],
-                cash_location=cleaned["cash_location"],
-                cash_responsible=cleaned["cash_responsible"],
-                wallet_provider=cleaned["wallet_provider"],
-                wallet_number=cleaned["wallet_number"],
-                wallet_holder=cleaned["wallet_holder"],
-                linked_entity_type=cleaned["linked_entity_type"],
-                linked_client_id=cleaned["linked_client_id"],
-                linked_supplier_id=cleaned["linked_supplier_id"],
-                linked_party_name=cleaned["linked_party_name"],
-                account_status=cleaned["account_status"],
-                is_active=cleaned["is_active"],
-                note=cleaned["note"],
-            )
-            from utils.accounting_audit import record_accounting_audit
-            db.session.add(account)
-            db.session.flush()
-            record_accounting_audit(
-                current_user, action='Create', entity_type='Account', entity_id=account.id,
-                after={
-                    'name': name, 'class_category': cleaned["class_category"],
-                    'class_subcategory': cleaned["class_subcategory"],
-                    'class_account_type': cleaned["class_account_type"],
-                    'channel': cleaned["channel"], 'account_status': cleaned["account_status"],
-                    'opening_balance': opening_value, 'opening_position': position,
-                },
-                amount_after=opening_value, account_after_id=account.id, reason=cleaned["note"],
-            )
-            db.session.commit()
-            flash('Account added successfully!', 'success')
-            return redirect(url_for('accounts.manage_accounts'))
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-            return redirect(url_for('accounts.add_account'))
-        except Exception:
-            db.session.rollback()
-            logger.exception('Add account failed')
-            flash('Unable to add account: the account could not be created. Please check the details and try again.', 'danger')
-            return redirect(url_for('accounts.add_account'))
-
-    return render_template(
-        'accounts/add_account.html',
-        categories=_account_categories(),
-        registry=registry_json(),
-        options=cascade_options(),
-        clients=_active_clients(),
-        suppliers=_active_suppliers(),
-        today=pk_today().strftime('%Y-%m-%d'),
-    )
+    from .workspace import setup_save_account, _tab_redirect
+    if request.method == 'GET':
+        return _tab_redirect('accounts', new=1)
+    form = request.form.to_dict()
+    # Compatibility for older integrations that still post the retired
+    # classification payload. The UI no longer exposes or requires it.
+    if 'account_type' not in form and form.get('class_subcategory'):
+        sub = form['class_subcategory'].strip().lower()
+        form['account_type'] = 'bank' if sub == 'bank' else ('wallet' if 'wallet' in sub else 'cash')
+        opening = form.get('opening_amount') or form.get('opening_balance') or '0'
+        if (form.get('opening_position') or '').strip().lower() == 'credit' and not opening.startswith('-'):
+            opening = '-' + opening
+        form['opening_balance'] = opening
+        form.setdefault('account_number', form.get('wallet_number') or '')
+    return setup_save_account(form_override=form)
 
 
 @accounts_bp.route('/ledger/<int:account_id>')
@@ -315,125 +207,30 @@ def account_data(account_id):
 @accounts_bp.route('/<int:account_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_account(account_id):
-    """Edit an account (redesigned Edit form).
-
-    Structurally identical to the Create form, plus one extra Current Balance &
-    Adjustment section (PART 12).  Opening can be corrected in place (rewrites
-    the historical baseline and shifts today's calculated balance).  A physical
-    mismatch is posted as a single traceable Adjustment ledger entry — never a
-    silent overwrite of current balance (PART 13/15).
-    """
+    """Edit an account through the simple setup form."""
     _deny_account_master_mutation()
-    from .classification import registry_json
-    from .account_form import validate_account_form, cascade_options
-    from app.services.payments_crud import ledger_balance, _assert_period_open
-
-    a = Account.query.get_or_404(account_id)
-
-    if request.method == 'POST':
-        try:
-            cleaned = validate_account_form(request.form, is_edit=True)
-            note = cleaned["note"]
-
-            before = {
-                'id': a.id, 'name': a.name, 'class_category': a.class_category,
-                'class_subcategory': a.class_subcategory, 'class_account_type': a.class_account_type,
-                'channel': a.channel, 'account_status': a.account_status,
-                'balance': _money_round(a.balance), 'is_active': bool(a.is_active),
-                'opening_balance': _money_round(a.opening_balance),
-                'opening_balance_date': (
-                    a.opening_balance_date.strftime('%Y-%m-%d') if a.opening_balance_date else None
-                ),
-            }
-
-            # Update classification + details.  validate_account_form already
-            # returned only the channel-relevant detail fields and cleared the
-            # incompatible ones (PART 11), so no stale bank/wallet data remains.
-            a.name = cleaned["name"]
-            a.class_category = cleaned["class_category"]
-            a.class_subcategory = cleaned["class_subcategory"]
-            a.class_account_type = cleaned["class_account_type"]
-            a.channel = cleaned["channel"]
-            a.category = cleaned["category"]
-            a.source_category = cleaned["source_category"]
-            a.account_type = cleaned["account_type"]
-            a.type = cleaned["type"]
-            a.cash_location = cleaned["cash_location"]
-            a.cash_responsible = cleaned["cash_responsible"]
-            a.bank_name = cleaned["bank_name"]
-            a.account_holder_name = cleaned["account_holder_name"]
-            a.account_number = cleaned["account_number"]
-            a.branch_code = cleaned["branch_code"]
-            a.wallet_provider = cleaned["wallet_provider"]
-            a.wallet_number = cleaned["wallet_number"]
-            a.wallet_holder = cleaned["wallet_holder"]
-            a.linked_entity_type = cleaned["linked_entity_type"]
-            a.linked_client_id = cleaned["linked_client_id"]
-            a.linked_supplier_id = cleaned["linked_supplier_id"]
-            a.linked_party_name = cleaned["linked_party_name"]
-            a.account_status = cleaned["account_status"]
-            a.is_active = cleaned["is_active"]
-            a.note = note
-
-            # ---- Opening baseline (editable historical start) ----
-            # Applied first so today's calculated balance already includes the
-            # corrected opening before any physical-cash adjustment is posted.
-            opening_msg = _apply_opening_update(a, request.form)
-            if opening_msg:
-                flash(opening_msg, 'info')
-
-            # ---- Balance adjustment (PART 12 / PART 13) ----
-            desired_raw = (request.form.get('desired_balance') or '').strip()
-            adjustment_msg = _apply_balance_adjustment(a, desired_raw, request.form)
-            if adjustment_msg:
-                flash(adjustment_msg, 'info')
-
-            a.updated_by = getattr(current_user, 'username', None)
-            a.revision = int(getattr(a, 'revision', None) or 1) + 1
-            from utils.accounting_audit import record_accounting_audit
-            after = {
-                'id': a.id, 'name': a.name, 'class_category': a.class_category,
-                'class_subcategory': a.class_subcategory, 'class_account_type': a.class_account_type,
-                'channel': a.channel, 'account_status': a.account_status,
-                'balance': _money_round(a.balance), 'is_active': bool(a.is_active),
-                'opening_balance': _money_round(a.opening_balance),
-                'opening_balance_date': (
-                    a.opening_balance_date.strftime('%Y-%m-%d') if a.opening_balance_date else None
-                ),
-            }
-            record_accounting_audit(
-                current_user, action='Edit', entity_type='Account', entity_id=a.id,
-                before=before, after=after, amount_before=before['balance'], amount_after=after['balance'],
-                account_before_id=a.id, account_after_id=a.id, reason=note,
-            )
-            db.session.commit()
-            flash('Account updated successfully.', 'success')
-            return redirect(url_for('accounts.manage_accounts'))
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), 'danger')
-        except Exception:
-            db.session.rollback()
-            logger.exception('Edit account failed')
-            flash('Unable to update account: the account could not be updated. Please check the details and try again.', 'danger')
-
-        # On validation failure, fall through to re-render the edit page so the
-        # user keeps their entered values and sees the flash message.
-
-    # GET (or re-render after a POST error): preload every value so dependent
-    # dropdowns initialise in the correct order (PART 10).
-    calculated = ledger_balance(a.id)
-    return render_template(
-        'accounts/edit_account.html',
-        account=a,
-        categories=_account_categories(),
-        registry=registry_json(),
-        options=cascade_options(),
-        clients=_active_clients(),
-        suppliers=_active_suppliers(),
-        calculated_balance=calculated,
-        today=pk_today().strftime('%Y-%m-%d'),
-    )
+    from .workspace import render_workspace, _tab_redirect
+    from app.services import account_setup as setup
+    account = Account.query.get_or_404(account_id)
+    if request.method == 'GET':
+        return _tab_redirect('accounts', edit=account.id)
+    try:
+        form = request.form.to_dict()
+        form['account_id'] = str(account.id)
+        setup.save_account(form, actor=current_user, account_id=account.id)
+        db.session.commit()
+        flash('Account updated.', 'success')
+        return _tab_redirect('accounts')
+    except setup.SetupError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+        return render_workspace('accounts', modal_open='account', form_values=request.form,
+                                edit_account_id=account.id, status=422)
+    except Exception:
+        db.session.rollback()
+        logger.exception('Account edit failed')
+        flash('The account could not be saved. No changes were applied.', 'danger')
+        return _tab_redirect('accounts')
 
 
 def _current_opening_minor(account):
@@ -593,99 +390,44 @@ def _apply_balance_adjustment(account, desired_raw, form):
 @accounts_bp.route('/<int:account_id>/toggle', methods=['POST'])
 @login_required
 def toggle_account(account_id):
-    """Soft-deactivate / reactivate an account (never corrupts history)."""
+    """Suspend/resume without touching balances or history."""
     _deny_account_master_mutation()
-    a = Account.query.get_or_404(account_id)
-    before = {'id': a.id, 'name': a.name, 'is_active': bool(a.is_active)}
-    a.is_active = not bool(a.is_active)
-    # Keep the 3-state status in sync with the legacy boolean so both the
-    # redesigned status pills and the legacy filters agree.
-    a.account_status = "active" if a.is_active else "inactive"
-    a.updated_by = getattr(current_user, 'username', None)
-    a.revision = int(getattr(a, 'revision', None) or 1) + 1
-    from utils.accounting_audit import record_accounting_audit
-    record_accounting_audit(
-        current_user, action='Activate' if a.is_active else 'Suspend',
-        entity_type='Account', entity_id=a.id, before=before,
-        after={'id': a.id, 'name': a.name, 'is_active': bool(a.is_active),
-               'account_status': a.account_status},
-        account_before_id=a.id, account_after_id=a.id,
-    )
-    db.session.commit()
-    flash(f'Account {"reactivated" if a.is_active else "deactivated"}.', 'success')
-    return redirect(url_for('accounts.manage_accounts'))
+    from .workspace import _tab_redirect
+    from app.services import account_setup as setup
+    account = Account.query.get_or_404(account_id)
+    try:
+        setup.set_account_active(account.id, active=not bool(account.is_active), actor=current_user, form=request.form)
+        db.session.commit()
+        flash(f'Account {"resumed" if account.is_active else "suspended"}.', 'success')
+    except setup.SetupError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+    except Exception:
+        db.session.rollback()
+        logger.exception('Account status change failed')
+        flash('The account status could not be changed.', 'danger')
+    return _tab_redirect('accounts')
 
 
 @accounts_bp.route('/<int:account_id>/delete', methods=['POST'])
 @login_required
 def delete_account(account_id):
+    """Delete only an unused account; used accounts must be suspended."""
     _deny_account_master_mutation()
-    """Delete an account safely.
-
-    Accounts that are referenced by any transaction/payment (voided or not) are
-    archived (soft-deleted) instead of hard-deleted so historical accounting
-    integrity is preserved.  Only unreferenced accounts are hard-deleted.
-    """
-    a = Account.query.get_or_404(account_id)
-    before = {'id': a.id, 'name': a.name, 'balance': _money_round(a.balance), 'is_active': bool(a.is_active)}
+    from .workspace import _tab_redirect
+    from app.services import account_setup as setup
     try:
-        # Inspect every declared FK to account.id (payments, transactions, GRNs,
-        # sales, rentals, cash-flow entries, reconciliations, etc.) rather than
-        # maintaining an incomplete hand-written list.
-        reference_count = 0
-        for table in db.metadata.sorted_tables:
-            for column in table.columns:
-                if any(fk.target_fullname == 'account.id' for fk in column.foreign_keys):
-                    # ``gl_account.linked_account_id`` is the account's own
-                    # bookkeeping mirror, not a historical reference: it is
-                    # detached below when the master row is deleted.
-                    if table.name == 'gl_account' and column.name == 'linked_account_id':
-                        continue
-                    reference_count += int(db.session.query(func.count()).select_from(table).filter(column == a.id).scalar() or 0)
-        from utils.accounting_audit import record_accounting_audit
-        if reference_count:
-            a.is_active = False
-            a.account_status = "archived"
-            a.updated_by = getattr(current_user, 'username', None)
-            a.revision = int(getattr(a, 'revision', None) or 1) + 1
-            record_accounting_audit(
-                current_user, action='Delete', entity_type='Account', entity_id=a.id,
-                before=before, after={**before, 'is_active': False, 'archived': True,
-                                      'historical_references': reference_count},
-                amount_before=before['balance'], amount_after=before['balance'],
-                account_before_id=a.id, account_after_id=a.id,
-                reason='Archived because historical references exist',
-            )
-            db.session.commit()
-            flash('Account has historical records and was safely archived. History and balances were preserved.', 'warning')
-        else:
-            record_accounting_audit(
-                current_user, action='Delete', entity_type='Account', entity_id=a.id,
-                before=before, after={'deleted': True}, amount_before=before['balance'], amount_after=0,
-                account_before_id=a.id, reason='Unreferenced account hard-deleted',
-            )
-            # Keep the book: detach the GL mirror, and drop it only when nothing
-            # was ever posted to it.
-            from models import GLAccount, JournalLine
-            for mirror in GLAccount.query.filter_by(linked_account_id=a.id).all():
-                posted = db.session.query(func.count(JournalLine.id)).filter(
-                    JournalLine.gl_account_id == mirror.id
-                ).scalar() or 0
-                if posted:
-                    mirror.linked_account_id = None
-                    mirror.is_active = False
-                else:
-                    db.session.delete(mirror)
-            db.session.delete(a)
-            db.session.commit()
-            flash('Unreferenced account deleted.', 'success')
+        setup.delete_account_setup(account_id, actor=current_user, form=request.form)
+        db.session.commit()
+        flash('Unused account deleted.', 'success')
+    except setup.SetupError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
     except Exception:
         db.session.rollback()
-        logger.exception('Delete account failed')
-        flash('Unable to delete account safely: the account could not be deleted. Please try again.', 'danger')
-    return redirect(url_for('accounts.manage_accounts'))
-
-
+        logger.exception('Account delete failed')
+        flash('The account could not be deleted. No changes were applied.', 'danger')
+    return _tab_redirect('accounts')
 
 
 @accounts_bp.route('/reconciliations')
@@ -778,61 +520,12 @@ def reconcile_account(account_id):
                            today=pk_today().strftime('%Y-%m-%d'))
 
 
-@accounts_bp.route('/categories', methods=['GET', 'POST'])
+@accounts_bp.route('/categories', methods=['GET'])
 @login_required
 def manage_categories():
-    _deny_account_master_mutation()
-    
-    if request.method == 'POST':
-        name = (request.form.get('name') or '').strip()
-        note = (request.form.get('note') or '').strip()
-
-        if not name:
-            flash('Category name is required.', 'danger')
-            return redirect(url_for('accounts.manage_categories'))
-
-        existing = AccountCategory.query.filter(
-            func.lower(func.trim(AccountCategory.name)) == name.lower()
-        ).first()
-        if existing:
-            if not existing.is_active:
-                existing.is_active = True
-                db.session.commit()
-                flash('Account category restored successfully.', 'success')
-            else:
-                flash('This account category already exists.', 'warning')
-            return redirect(url_for('accounts.manage_categories'))
-
-        db.session.add(AccountCategory(name=name, note=note or None))
-        db.session.commit()
-        audit_log(current_user, 'account.category.create', f'name={name}')
-        flash('Account category created successfully.', 'success')
-        return redirect(url_for('accounts.manage_categories'))
-
-    categories = AccountCategory.query.order_by(AccountCategory.name.asc()).all()
-    
-    category_counts = {}
-    for group_name, count in db.session.query(Account.source_category, func.count(Account.id)).group_by(Account.source_category).all():
-        if group_name:
-            category_counts[group_name.strip().lower()] = count
-
-    items = []
-    for cat in categories:
-        cnt = category_counts.get(cat.name.strip().lower(), 0)
-        items.append({
-            'id': cat.id,
-            'name': cat.name,
-            'note': cat.note or '',
-            'is_active': cat.is_active,
-            'accounts_count': cnt,
-            'is_used': cnt > 0
-        })
-
-    return render_template(
-        'accounts/manage_categories.html',
-        items=items,
-        can_manage_master=_account_master_permission_ok()
-    )
+    """Manage Categories tab of the rebuilt workspace."""
+    from .workspace import render_workspace
+    return render_workspace('categories')
 
 
 @accounts_bp.route('/categories/<int:category_id>/edit', methods=['POST'])
@@ -986,6 +679,5 @@ def transaction_categories():
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), 'danger')
-        return redirect(url_for('accounts.transaction_categories'))
-    return render_template('accounts/transaction_categories.html',
-                           categories=CashFlowCategory.query.order_by(CashFlowCategory.name).all())
+        return redirect(url_for('accounts.manage_categories'))
+    return redirect(url_for('accounts.manage_categories'))
