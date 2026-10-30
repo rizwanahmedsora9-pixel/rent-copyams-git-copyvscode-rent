@@ -288,6 +288,7 @@ def expenditures():
     per_page = 50
     search = (request.args.get('q') or '').strip()
     category_f = (request.args.get('category') or '').strip()
+    subcategory_f = (request.args.get('subcategory') or '').strip()
     method_f = (request.args.get('method') or '').strip()
     date_from, date_to_excl = _parse_date_range()
 
@@ -323,6 +324,11 @@ def expenditures():
                                AccountTransaction.payee.ilike(like), AccountTransaction.reference_no.ilike(like)))
     if category_f:
         tx_q = tx_q.filter(or_(AccountTransaction.category == category_f, AccountTransaction.description == category_f))
+    if subcategory_f:
+        # Subcategories live on the structured transaction detail; "Category /
+        # Subcategory" labels come from the synced manual cash-flow row.
+        tx_q = tx_q.filter(or_(AccountTransaction.subcategory == subcategory_f,
+                               AccountTransaction.description == subcategory_f))
     if method_f:
         tx_q = tx_q.join(Account, AccountTransaction.from_account_id == Account.id).filter(func.lower(Account.category) == method_f.lower())
     tx_expenditures = tx_q.all()
@@ -340,14 +346,32 @@ def expenditures():
             'type': 'FBM Cash Drawer',
             'photo_path': '',
         })
+    # Resolve accounts and synced cash-flow rows in bulk.  Doing this per row
+    # was an N+1 that made the page take seconds on a busy ledger.
+    account_by_id = {
+        account.id: account
+        for account in Account.query.filter(
+            Account.id.in_({tx.from_account_id for tx in tx_expenditures if tx.from_account_id})
+        ).all()
+    } if tx_expenditures else {}
+    cf_entry_ids = {
+        tx.source_id for tx in tx_expenditures
+        if (tx.source_type or '') == 'CashFlowEntry' and tx.source_id
+    }
+    cf_by_id = {}
+    if cf_entry_ids:
+        from models import CashFlowEntry
+        cf_by_id = {
+            entry.id: entry
+            for entry in CashFlowEntry.query.filter(CashFlowEntry.id.in_(cf_entry_ids)).all()
+        }
     for tx in tx_expenditures:
-        acc = Account.query.get(tx.from_account_id)
+        acc = account_by_id.get(tx.from_account_id)
         # Manual cash-flow rows sync into the account ledger; surface their
         # richer category/subcategory instead of the plain description.
         cf_category = None
         if (tx.source_type or '') == 'CashFlowEntry' and tx.source_id:
-            from models import CashFlowEntry
-            cf = db.session.get(CashFlowEntry, tx.source_id)
+            cf = cf_by_id.get(tx.source_id)
             if cf and cf.category:
                 cf_category = cf.category.name
                 if cf.subcategory:
@@ -438,10 +462,22 @@ def expenditures():
         all_methods.add(r[0].capitalize())
     methods = sorted(list(all_methods))
 
+    subcategory_options = set()
+    for r in db.session.query(AccountTransaction.subcategory).filter(
+        AccountTransaction.is_void == False,
+        AccountTransaction.subcategory.isnot(None),
+        AccountTransaction.subcategory != ''
+    ).distinct(AccountTransaction.subcategory).all():
+        subcategory_options.add(r[0])
+    from models import CashFlowSubcategory
+    for sub in CashFlowSubcategory.query.filter(CashFlowSubcategory.is_active == True).all():
+        subcategory_options.add(sub.name)
+
     return render_template('accounts/expenditures.html', expenditures=pagination_wrapper,
                            date_from=date_from, date_to=date_to_excl - timedelta(days=1),
-                           search=search, category_f=category_f, method_f=method_f,
+                           search=search, category_f=category_f, subcategory_f=subcategory_f, method_f=method_f,
                            categories=categories, methods=methods,
+                           subcategory_options=sorted(subcategory_options),
                            total_amount=total_amount, total_count=total_count,
                            page=page, per_page=per_page,
                            has_prev=(page > 1), has_next=(end < total_count))

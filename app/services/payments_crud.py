@@ -824,6 +824,53 @@ def ledger_balance(account_id, as_of=None) -> float:
     return float(from_minor(opening + incoming - outgoing))
 
 
+def ledger_balances(account_ids=None):
+    """Bulk, SQL-side version of :func:`ledger_balance` for list pages.
+
+    ``ledger_balance`` loads every transaction of an account into Python and
+    adds them up row by row; for a list of accounts (and a long history) that
+    dominates the page time.  The same figures are available from two grouped
+    aggregates, so use those when a whole list is needed.
+    """
+    from sqlalchemy import Integer
+
+    minor_expr = func.coalesce(
+        AccountTransaction.amount_minor,
+        func.cast(func.round(AccountTransaction.amount * 100), Integer),
+    )
+    base = db.session.query
+    incoming_q = (
+        base(AccountTransaction.to_account_id.label("account_id"), func.sum(minor_expr).label("total"))
+        .filter(AccountTransaction.is_void == False, AccountTransaction.to_account_id.isnot(None))  # noqa: E712
+        .group_by(AccountTransaction.to_account_id)
+    )
+    outgoing_q = (
+        base(AccountTransaction.from_account_id.label("account_id"), func.sum(minor_expr).label("total"))
+        .filter(AccountTransaction.is_void == False, AccountTransaction.from_account_id.isnot(None))  # noqa: E712
+        .group_by(AccountTransaction.from_account_id)
+    )
+    incoming = {int(a): int(t or 0) for a, t in incoming_q.all()}
+    outgoing = {int(a): int(t or 0) for a, t in outgoing_q.all()}
+    query = Account.query
+    if account_ids is not None:
+        ids = [int(a) for a in account_ids]
+        if not ids:
+            return {}
+        query = query.filter(Account.id.in_(ids))
+    result = {}
+    for account in query.all():
+        in_minor = incoming.get(account.id, 0)
+        out_minor = outgoing.get(account.id, 0)
+        if account.opening_balance_minor is not None:
+            opening = int(account.opening_balance_minor)
+        elif account.opening_balance is not None:
+            opening = to_minor(account.opening_balance)
+        else:
+            opening = _account_minor(account) - in_minor + out_minor
+        result[account.id] = float(from_minor(opening + in_minor - out_minor))
+    return result
+
+
 def _request_metadata():
     try:
         from flask import has_request_context, request, session

@@ -38,6 +38,12 @@
                     {% for c in categories %}<option value="{{ c }}" {% if c==category_f %}selected{% endif %}>{{ c }}</option>{% endfor %}
                 </select>
             </div>
+            <div><div class="form-label">Subcategory</div>
+                <select name="subcategory" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for c in subcategory_options %}<option value="{{ c }}" {% if c==subcategory_f %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                </select>
+            </div>
             <div class="flex-grow-1"><div class="form-label">Search</div><input type="text" name="q" class="form-control form-control-sm" placeholder="Note or category..." value="{{ search }}"></div>
             <div><button class="btn btn-sm btn-warning"><i class="bi bi-funnel me-1"></i>Apply</button></div>
             <div><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('accounts.expenditures') }}">Reset</a></div>

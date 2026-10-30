@@ -88,6 +88,8 @@ def account_ledger(account_id):
     per_page = 50
     search = (request.args.get('q') or '').strip()
     type_f = (request.args.get('type') or '').strip()
+    category_f = (request.args.get('category') or '').strip()
+    subcategory_f = (request.args.get('subcategory') or '').strip()
     show_voided = request.args.get('show_voided') == '1'
     date_from, date_to_excl = _parse_date_range(default_days=90)
 
@@ -113,6 +115,10 @@ def account_ledger(account_id):
         q = q.filter(or_(AccountTransaction.description.ilike(like), AccountTransaction.note.ilike(like)))
     if type_f:
         q = q.filter(AccountTransaction.transaction_type == type_f)
+    if category_f:
+        q = q.filter(func.lower(func.trim(AccountTransaction.category)) == category_f.lower())
+    if subcategory_f:
+        q = q.filter(func.lower(func.trim(AccountTransaction.subcategory)) == subcategory_f.lower())
 
     period_in = q.with_entities(func.coalesce(func.sum(AccountTransaction.amount), 0)).filter(
         AccountTransaction.to_account_id == account.id, AccountTransaction.is_void == False
@@ -159,10 +165,24 @@ def account_ledger(account_id):
 
     types = ['Receipt', 'Refund', 'Payment', 'Transfer', 'Supplier Payment', 'Driver Payment', 'Expense', 'Loss', 'Adjustment', 'Reconciliation Loss', 'Reconciliation Excess']
 
+    # Category tracing for this account: what it received and what it paid for.
+    label_rows = db.session.query(
+        AccountTransaction.category, AccountTransaction.subcategory,
+    ).filter(
+        or_(AccountTransaction.from_account_id == account.id, AccountTransaction.to_account_id == account.id),
+        AccountTransaction.date_posted >= date_from,
+        AccountTransaction.date_posted < date_to_excl,
+        AccountTransaction.category.isnot(None),
+    ).distinct().all()
+    category_options = sorted({(row[0] or '').strip() for row in label_rows if (row[0] or '').strip()}, key=str.lower)
+    subcategory_options = sorted({(row[1] or '').strip() for row in label_rows if (row[1] or '').strip()}, key=str.lower)
+
     return render_template('accounts/account_ledger.html', account=account, page_rows=page_rows,
                            opening_balance=opening_balance, period_in=period_in, period_out=period_out,
                            date_from=date_from, date_to=date_to_excl - timedelta(days=1),
                            search=search, type_f=type_f, types=types, show_voided=show_voided,
+                           category_f=category_f, subcategory_f=subcategory_f,
+                           category_options=category_options, subcategory_options=subcategory_options,
                            page=page, per_page=per_page, total_rows=total_rows,
                            has_prev=page > 1, has_next=end < total_rows)
 

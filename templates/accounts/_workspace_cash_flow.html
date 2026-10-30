@@ -23,9 +23,33 @@
   {% endif %}
 </div>
 
-<form class="aw-filters aw-filters-wide" method="get" action="{{ url_for('accounts.dashboard') }}">
+<form class="aw-filters aw-filters-wide" method="get" action="{{ url_for('accounts.dashboard') }}" data-cf-filter-form>
   <label class="aw-field-inline"><span>From</span><input class="aw-input" type="date" name="from_date" value="{{ cf_from }}"></label>
   <label class="aw-field-inline"><span>To</span><input class="aw-input" type="date" name="to_date" value="{{ cf_to }}"></label>
+  <label class="aw-field-inline"><span>Money</span>
+    <select class="aw-select" name="direction" data-cf-direction>
+      <option value="all" {% if cf_direction == 'all' %}selected{% endif %}>In &amp; out</option>
+      <option value="in" {% if cf_direction == 'in' %}selected{% endif %}>Money in</option>
+      <option value="out" {% if cf_direction == 'out' %}selected{% endif %}>Money out</option>
+      <option value="transfer" {% if cf_direction == 'transfer' %}selected{% endif %}>Transfers</option>
+    </select>
+  </label>
+  <label class="aw-field-inline"><span>Category</span>
+    <select class="aw-select" name="category" data-cf-category>
+      <option value="">All categories</option>
+      {% for option in cf_category_options %}
+      <option value="{{ option }}" {% if cf_category|lower == option|lower %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="aw-field-inline"><span>Subcategory</span>
+    <select class="aw-select" name="subcategory" data-cf-subcategory>
+      <option value="">All subcategories</option>
+      {% for option in cf_subcategory_options %}
+      <option value="{{ option }}" data-parent="{{ cf_subcategory_parents.get(option, '') }}" {% if cf_subcategory|lower == option|lower %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </label>
   <label class="aw-field-inline"><span>Account</span>
     <select class="aw-select" name="account_id">
       <option value="">All accounts</option>
@@ -36,7 +60,33 @@
   </label>
   <label class="aw-search"><i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Search movements</span><input type="search" name="q" value="{{ cf_q }}" placeholder="Search movements"></label>
   <button class="aw-btn aw-btn-ghost" type="submit">Apply</button>
+  {% if cf_category or cf_subcategory or cf_q or cf_account_id or cf_direction != 'all' %}
+  <a class="aw-btn aw-btn-ghost" href="{{ url_for('accounts.dashboard') }}">Reset</a>
+  {% endif %}
 </form>
+
+<script>
+  (function () {
+    // Narrow the subcategory list to the chosen category without a round trip.
+    var form = document.querySelector('[data-cf-filter-form]');
+    if (!form) return;
+    var categorySelect = form.querySelector('[data-cf-category]');
+    var subSelect = form.querySelector('[data-cf-subcategory]');
+    if (!categorySelect || !subSelect) return;
+    var options = Array.prototype.slice.call(subSelect.querySelectorAll('option[data-parent]'));
+    function sync() {
+      var chosen = (categorySelect.value || '').toLowerCase();
+      options.forEach(function (option) {
+        var parent = (option.getAttribute('data-parent') || '').toLowerCase();
+        option.hidden = !!chosen && parent !== chosen;
+      });
+      var current = subSelect.options[subSelect.selectedIndex];
+      if (current && current.hidden) subSelect.value = '';
+    }
+    categorySelect.addEventListener('change', sync);
+    sync();
+  })();
+</script>
 
 <div class="aw-metrics">
   <div class="aw-metric"><span>Active balance</span><strong class="aw-mono">{{ '{:,.2f}'.format(cf_active_balance) }}</strong></div>

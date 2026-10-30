@@ -31,6 +31,7 @@
     <thead>
       <tr>
         <th scope="col">Category</th>
+        <th scope="col">Subcategories</th>
         <th scope="col">Used for</th>
         <th scope="col">History</th>
         <th scope="col">Status</th>
@@ -43,7 +44,51 @@
         <td>
           <div class="aw-name">{{ category.name }}</div>
           {% if category.notes %}<div class="aw-muted">{{ category.notes }}</div>{% endif %}
-          {% if category.subcategory_count %}<div class="aw-muted">{{ category.subcategory_count }} subcategor{{ 'y' if category.subcategory_count == 1 else 'ies' }}</div>{% endif %}
+        </td>
+        <td>
+          <div class="aw-chips">
+            {% for sub in category.subcategories %}
+            <span class="aw-chip {{ 'is-off' if not sub.is_active }}" title="{{ sub.usage_count }} record{{ 's' if sub.usage_count != 1 else '' }}">
+              {{ sub.name }}
+              {% if can_manage %}
+              <button type="button" class="aw-chip-btn" aria-label="Edit {{ sub.name }}" title="Edit subcategory"
+                      data-sub-edit="{{ sub.id }}" data-sub-name="{{ sub.name }}" data-sub-notes="{{ sub.notes }}"
+                      data-sub-parent="{{ category.id }}"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+              <button type="button" class="aw-chip-btn" aria-label="{{ 'Resume' if not sub.is_active else 'Suspend' }} {{ sub.name }}"
+                      title="{{ 'Resume' if not sub.is_active else 'Suspend' }} subcategory"
+                      data-confirm-url="{{ url_for('accounts.setup_subcategory_status', subcategory_id=sub.id) }}"
+                      data-confirm-title="{{ 'Resume' if not sub.is_active else 'Suspend' }} “{{ sub.name }}”?"
+                      data-confirm-body="{{ 'It will be available for new transactions again.' if not sub.is_active else 'It will be hidden from new transactions. Existing records keep it.' }}"
+                      data-confirm-label="{{ 'Resume' if not sub.is_active else 'Suspend' }}"
+                      data-confirm-tone="{{ 'primary' if not sub.is_active else 'warning' }}"
+                      data-active="{{ '0' if sub.is_active else '1' }}">
+                <i class="bi {{ 'bi-play-circle' if not sub.is_active else 'bi-pause-circle' }}" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="aw-chip-btn aw-danger" aria-label="Delete {{ sub.name }}"
+                      title="{{ 'Delete subcategory' if sub.can_delete else 'Cannot delete: subcategory is used' }}"
+                      {% if not sub.can_delete %}disabled{% else %}
+                      data-confirm-url="{{ url_for('accounts.setup_delete_subcategory', subcategory_id=sub.id) }}"
+                      data-confirm-title="Delete “{{ sub.name }}”?"
+                      data-confirm-body="This permanently deletes the unused subcategory. This cannot be undone."
+                      data-confirm-label="Delete" data-confirm-tone="danger"{% endif %}>
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+              </button>
+              {% endif %}
+            </span>
+            {% else %}
+            <span class="aw-muted">No subcategories</span>
+            {% endfor %}
+          </div>
+          {% if can_manage %}
+          <form class="aw-sub-form" method="post" action="{{ url_for('accounts.setup_save_subcategory') }}" data-sub-form>
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="category_id" value="{{ category.id }}">
+            <input type="hidden" name="subcategory_id" value="" data-sub-id>
+            <input class="aw-input aw-input-sm" name="name" maxlength="120" required placeholder="Add subcategory…" autocomplete="off" data-sub-name-input>
+            <input class="aw-input aw-input-sm" name="notes" maxlength="300" placeholder="Note (optional)" autocomplete="off" data-sub-notes-input>
+            <button class="aw-btn aw-btn-ghost aw-btn-sm" type="submit" data-sub-submit><i class="bi bi-plus-lg" aria-hidden="true"></i> Add</button>
+          </form>
+          {% endif %}
         </td>
         <td><span class="aw-direction aw-direction-{{ category.direction }}">{{ category.direction_label }}</span></td>
         <td class="aw-muted">{{ category.usage_count ~ ' record' ~ ('s' if category.usage_count != 1 else '') if category.usage_count else 'Not used yet' }}</td>
@@ -60,7 +105,8 @@
                     data-confirm-title="{{ 'Resume' if not category.is_active else 'Suspend' }} “{{ category.name }}”?"
                     data-confirm-body="{{ 'This category will be available for new transactions again.' if not category.is_active else 'It will be hidden from new transactions. Existing records keep this category.' }}"
                     data-confirm-label="{{ 'Resume' if not category.is_active else 'Suspend' }}"
-                    data-confirm-tone="{{ 'primary' if not category.is_active else 'warning' }}">
+                    data-confirm-tone="{{ 'primary' if not category.is_active else 'warning' }}"
+                    data-active="{{ '0' if category.is_active else '1' }}">
               <i class="bi {{ 'bi-play-circle' if not category.is_active else 'bi-pause-circle' }}" aria-hidden="true"></i>
             </button>
             <button type="button" class="aw-icon-btn aw-danger" title="{{ 'Delete category' if category.can_delete else 'Cannot delete: category is used' }}"
@@ -91,3 +137,25 @@
   {% endif %}
 </div>
 {% endif %}
+
+<script>
+  (function () {
+    // Inline subcategory editor: the pencil on a chip loads that row into the
+    // category's own add form, so one small form covers create and rename.
+    document.querySelectorAll('[data-sub-edit]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = btn.closest('tr');
+        if (!row) return;
+        var form = row.querySelector('[data-sub-form]');
+        if (!form) return;
+        form.querySelector('[data-sub-id]').value = btn.getAttribute('data-sub-edit');
+        form.querySelector('[data-sub-name-input]').value = btn.getAttribute('data-sub-name') || '';
+        form.querySelector('[data-sub-notes-input]').value = btn.getAttribute('data-sub-notes') || '';
+        var submit = form.querySelector('[data-sub-submit]');
+        if (submit) submit.innerHTML = '<i class="bi bi-check2" aria-hidden="true"></i> Save';
+        form.querySelector('[data-sub-name-input]').focus();
+        form.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+    });
+  })();
+</script>

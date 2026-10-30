@@ -1329,7 +1329,25 @@ def collect_cash_flow_rows(from_date, to_date, *, posted_after=None, include_voi
             created_by=getattr(sp, 'created_by', None) or '',
         ))
 
-    tx_q = AccountTransaction.query.filter(
+    # Only the columns the row builder needs: ORM entity hydration is the
+    # single largest cost of this function on a busy ledger (tens of thousands
+    # of movements per month), and none of it is used here.
+    tx_q = db.session.query(
+        AccountTransaction.id,
+        AccountTransaction.from_account_id,
+        AccountTransaction.to_account_id,
+        AccountTransaction.transaction_type,
+        AccountTransaction.amount,
+        AccountTransaction.reference_no,
+        AccountTransaction.description,
+        AccountTransaction.note,
+        AccountTransaction.category,
+        AccountTransaction.subcategory,
+        AccountTransaction.payee,
+        AccountTransaction.created_by,
+        AccountTransaction.date_posted,
+        AccountTransaction.source_type,
+    ).filter(
         AccountTransaction.is_void == False,
         AccountTransaction.transaction_type.in_(['Expense', 'Payment', 'Driver Payment', 'Transfer', 'Receipt']),
         func.date(AccountTransaction.date_posted) >= from_date,
@@ -1513,7 +1531,12 @@ def apply_running_balance(rows, opening_balance, account_id=None):
     return running
 
 
-def summarize_cash_flow_rows(rows, account_id=None):
+def summarize_cash_flow_rows(rows, account_id=None, *, breakdown=True):
+    """Total money in/out (and optionally the category/party/account split).
+
+    ``breakdown=False`` skips three per-row grouping dictionaries, which is the
+    bulk of the cost when a page only needs the headline totals.
+    """
     active = [r for r in rows if (r.get('status') or 'active') == 'active']
     total_in = sum(float(r.get('cash_in') or 0) for r in active)
     total_out = sum(float(r.get('cash_out') or 0) for r in active)
@@ -1532,7 +1555,7 @@ def summarize_cash_flow_rows(rows, account_id=None):
             transfer_in += amt
             transfer_out += amt
     breakdown_cat, breakdown_party, breakdown_account = {}, {}, {}
-    for r in active:
+    for r in (active if breakdown else ()):
         ck = (r.get('category') or '—').strip() or '—'
         breakdown_cat.setdefault(ck, {'in': 0.0, 'out': 0.0, 'transfer': 0.0})
         breakdown_cat[ck]['in'] += float(r.get('cash_in') or 0)
