@@ -79,9 +79,12 @@ def test_unified_category_catalog_exposes_all_master_and_operational_categories(
         assert "Product Sales" in by_name["Sales"]["subcategories"]
 
 
-def test_dashboard_renders_all_categories_subcategories_and_live_tree(app, client):
-    """The Accounts Dashboard renders the Transaction Tree explorer, all
-    Categories & Subcategories in the modal, and the daily balance equation.
+def test_transactions_record_category_and_subcategory_and_show_on_ledger(app, client):
+    """Transactions posted from the Accounts API keep their Category /
+    Subcategory and show up on the account ledger.
+
+    The Accounts dashboard itself is blank by design (being rebuilt), so this
+    test no longer asserts on its markup.
     """
     from models import db
 
@@ -162,20 +165,7 @@ def test_dashboard_renders_all_categories_subcategories_and_live_tree(app, clien
     assert res_xfer.status_code == 200
     assert b"Transfer transaction recorded successfully" in res_xfer.data
 
-    # 4. Verify Dashboard HTML shows the Transaction Tree, Categories, Subcategories, and Flows
-    dash = client.get("/accounts/?tree_range=today")
-    assert dash.status_code == 200
-    html = dash.get_data(as_text=True)
-
-    assert "Data-Driven Transaction Tree" in html
-    assert "Fuel &amp; Transport" in html
-    assert "Generator Fuel" in html
-    assert "Other Income" in html
-    assert "Scrap / Misc Income" in html
-    assert "Cash Deposit to Bank" in html
-    assert "Live Visual Flow Preview" in html
-
-    # 5. Verify Account Ledger shows concrete [From -> To] flow and subcategory pill
+    # 4. Verify Account Ledger shows concrete [From -> To] flow and subcategory pill
     ledger = client.get(f"/accounts/ledger/{cash_id}")
     assert ledger.status_code == 200
     ledger_html = ledger.get_data(as_text=True)
