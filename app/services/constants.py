@@ -346,6 +346,13 @@ ENDPOINT_PERMISSION_MAP = {
     'accounts.setup_save_category': 'can_manage_account_masters',
     'accounts.setup_category_status': 'can_manage_account_masters',
     'accounts.setup_delete_category': 'can_manage_account_masters',
+    # New Transaction moves business money, so it keeps the Accounts gate the
+    # blueprint prefix already applies — stated here so the money entry points
+    # are auditable in one place.
+    'accounts.add_transaction': ('can_manage_accounts', 'can_manage_payments'),
+    # The receive picker reads one client's live payable. Same data the client
+    # 360 summary exposes, plus anyone allowed to receive money in Accounts.
+    'accounts.transaction_client_dues': ('can_view_client_ledger', 'can_manage_accounts', 'can_manage_payments'),
 
     # --- Cash Flow module (new) ---
     'cash_flow': 'can_view_cash_flow',

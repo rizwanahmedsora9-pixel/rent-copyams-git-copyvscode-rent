@@ -109,7 +109,10 @@ flashes, `check_bill` auto bills, stock/bill/receivable blind spots) lives in
 auto-migrations, wipe, ledgers/PDF and login have their own modules.
 
 The end-to-end FIFO/GRN/P&L/API/live-refresh regression is in
-`tests/test_fifo_grn_profit_realtime.py`.
+`tests/test_fifo_grn_profit_realtime.py`. The Accounts workspace money entry
+paths are covered by `tests/test_accounts_new_transaction.py` (Receive / Pay /
+Transfer) and `tests/test_accounts_receive_from_clients.py` (client and party
+receives, payable lookup, discounts and waive-offs).
 
 `tests/frontend/` holds offline DOM tests for the browser-side scripts. They are
 not collected by pytest; run them with node after installing jsdom:
@@ -119,7 +122,7 @@ npm i jsdom
 node tests/frontend/test_grn_consumption_dom.js   # GRN consumption indicator
 node tests/frontend/test_pan_view_dom.js          # table pan / fit behaviour
 node tests/frontend/test_ledger_live_dom.js       # live revision watcher
-node tests/frontend/test_accounts_transaction_dom.js # Receive / Pay / Transfer form
+node tests/frontend/test_accounts_transaction_dom.js # Receive / Pay / Transfer, client + party pickers
 ```
 
 Point `GRN_PAGE_HTML` at a saved `/grn` page to run the consumption test against
@@ -149,6 +152,31 @@ Do **not** re-open these as if they were still broken:
 Sale, booking, payment, GRN, stock, ledger and wipe paths are exercised by
 pytest. The predator truth engine (`tools/predator_truth_engine.py`) can still
 be run against a copy of a live DB for an independent raw-SQL check.
+
+---
+
+## Accounts → New Transaction (Receive, Pay, Transfer)
+
+`/accounts/transactions/new` is the fourth Accounts workspace tab and the front
+door for money movement. All three modes validate in
+`app/services/account_transactions.py` and then hand the movement to the same
+balance applier, journal autoposting, period guard, idempotency index and
+accounting audit as every other entry point — never to a second ledger.
+
+**Receive → who the money came from**
+
+| Source | What it does |
+|---|---|
+| **Client** | Searchable picker over the active client master (name, code, phone). Picking a client fetches its live payable from `/accounts/transactions/client-dues` and shows it under the field. The receipt settles through `save_client_payment`, so FIFO bill allocation, waive-off loss rows and the client ledger stay authoritative. A **general discount** is supported: `amount 0` plus a discount posts a Waive-Off, needs no destination account and moves no cash. |
+| **Party** | Loan givers, lenders, partners and other outside parties, stored in `CashFlowParty`. Picking a saved party reuses it and its type; typing a new name registers it so the list grows. A `loan` party is described as "Loan received from …" on the ledger row. |
+| **Other** | Free-text counterparty recorded on the transaction only. This is the original behaviour and is still what a post with no `receive_source` means. |
+
+A discount only makes sense against a receivable, so it is refused for party,
+free-text, Pay and Transfer submissions instead of being dropped silently.
+
+The picker rows come from the page payload (`window.AW_DATA.clients` /
+`.parties`) and are capped at 50 visible matches; the payable is fetched for the
+one picked client, so opening the tab never projects every client ledger.
 
 ---
 

@@ -288,6 +288,68 @@ def edit_account_transaction(tx_id):
     return redirect(request.referrer or url_for('accounts.dashboard'))
 
 
+def _client_dues_payload(client):
+    """One client's live receivable, projected by the authoritative ledger.
+
+    Returns ``balance: None`` when the projection itself fails so the form can
+    say "unavailable" instead of quietly showing a wrong (or zero) payable.
+    """
+    from app.services.finance_clients import _client_balance_as_of
+    from app.services.time_money import pk_now
+
+    balance = None
+    try:
+        balance = round(float(_client_balance_as_of(client) or 0), 2)
+    except Exception:
+        logger.exception('Client dues lookup failed for %s', getattr(client, 'code', ''))
+    payload = {
+        'found': True,
+        'kind': 'client',
+        'code': (client.code or '').strip(),
+        'name': (client.name or '').strip(),
+        'phone': (client.phone or '').strip(),
+        'is_active': client.is_active is not False,
+        'balance': balance,
+        'generated_at': pk_now().strftime('%Y-%m-%d %H:%M'),
+    }
+    if balance is None:
+        payload.update({'payable': None, 'advance': None, 'status': 'unavailable'})
+    else:
+        payload.update({
+            'payable': round(max(0.0, balance), 2),
+            'advance': round(max(0.0, -balance), 2),
+            'status': 'payable' if balance > 0.004 else ('advance' if balance < -0.004 else 'settled'),
+        })
+    return payload
+
+
+@accounts_bp.route('/transactions/client-dues')
+@login_required
+def transaction_client_dues():
+    """JSON payable snapshot behind the New Transaction client picker.
+
+    Read-only and deliberately narrow: it answers "what does this one client
+    owe right now?" so the receive form can show the payable under the picked
+    client without projecting every client ledger on page load.
+    """
+    from .workspace import _require_view
+
+    _require_view()
+    picked = (request.args.get('client_code') or request.args.get('q') or '').strip()
+    payload = {'found': False}
+    if picked:
+        from app.services.payments_crud import _resolve_client
+        client = _resolve_client(picked, picked)
+        if client:
+            payload = _client_dues_payload(client)
+    response = jsonify(payload)
+    # A stale payable is worse than no payable: never let a proxy cache it.
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
 @accounts_bp.route('/transactions/new', methods=['GET', 'POST'])
 @login_required
 def add_transaction():
@@ -300,12 +362,12 @@ def add_transaction():
     # party-ledger / driver / loan payloads below for older integrations.
     if request.form.get('entry_source') == 'accounts_workspace':
         _require_post_transactions()
-        from app.services.account_transactions import MODES, save_workspace_transaction
+        from app.services.account_transactions import save_workspace_transaction
         try:
-            tx, created = save_workspace_transaction(request.form, actor=current_user)
+            from app.services.account_transactions import success_message
+            _record, created = save_workspace_transaction(request.form, actor=current_user)
             db.session.commit()
-            mode = (request.form.get('tx_mode') or 'receive').strip().lower()
-            flash(MODES[mode]['message'] if created else 'This transaction was already saved. No duplicate was recorded.', 'success')
+            flash(success_message(request.form, created=created), 'success')
             return redirect(url_for('accounts.add_transaction'))
         except ValueError as exc:
             db.session.rollback()

@@ -40,7 +40,11 @@
     'editAccountId': edit_account_id,
     'editCategoryId': edit_category_id,
     'formValues': form_values,
-    'transactionCategories': tx_categories|default([])
+    'transactionCategories': tx_categories|default([]),
+    'clients': tx_clients|default([]),
+    'parties': tx_parties|default([]),
+    'receiveSources': tx_receive_sources|default({}),
+    'clientDuesUrl': url_for('accounts.transaction_client_dues')
   }|tojson }};
 </script>
 <script src="{{ url_for('static', filename='accounts_workspace.js') }}"></script>
