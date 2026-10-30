@@ -248,39 +248,13 @@ def _validate_account_matches_method(account, method, role_label):
 
 
 def _ensure_default_account_categories():
-    defaults = ['Company', 'Own Funds', 'Clients', 'External', 'Loan']
-    existing = {
-        (row.name or '').strip().lower()
-        for row in AccountCategory.query.filter_by(is_active=True).all()
-    }
-    created = False
-    for name in defaults:
-        if name.lower() in existing:
-            continue
-        db.session.add(AccountCategory(name=name))
-        created = True
-    if created:
-        db.session.commit()
+    """Account groups are owner-defined; never seed them on page views."""
+    return None
 
 
 def _backfill_legacy_account_groups():
-    changed = False
-    for account in Account.query.filter(
-        func.coalesce(Account.is_active, True) == True,
-        or_(Account.source_category.is_(None), func.trim(Account.source_category) == '')
-    ).all():
-        account_type = (account.account_type or '').strip().lower()
-        if 'client' in account_type:
-            account.source_category = 'Clients'
-        elif 'loan' in account_type:
-            account.source_category = 'Loan'
-        elif 'supplier' in account_type or 'external' in account_type:
-            account.source_category = 'External'
-        else:
-            account.source_category = 'Company'
-        changed = True
-    if changed:
-        db.session.commit()
+    """Do not silently classify existing accounts when visiting a page."""
+    return None
 
 
 def _apply_payment_to_pending_bills(client, paid_amount, discount_amount=0):

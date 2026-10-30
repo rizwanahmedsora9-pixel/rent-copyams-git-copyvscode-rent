@@ -963,6 +963,8 @@ def transaction_categories():
                     parent_id = request.form.get('category_id', type=int)
                     if not parent_id or not db.session.get(CashFlowCategory, parent_id):
                         raise ValueError('Select a parent category.')
+                    if row and row.category_id != parent_id:
+                        raise ValueError('A subcategory cannot be moved to another parent.')
                     query = query.filter(model.category_id == parent_id)
                 if query.first():
                     raise ValueError('That name already exists. Edit or enable the existing entry.')
