@@ -2,7 +2,7 @@
 {% block title %}Accounts{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='accounts_workspace.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='accounts_workspace.css', v='2') }}">
 <div class="aw-shell">
   <nav class="aw-tabs" aria-label="Accounts workspace">
     {% for key, label, endpoint, icon in tabs %}
@@ -48,8 +48,10 @@
     'parties': tx_parties|default([]),
     'sourceAccounts': tx_source_accounts|default([]),
     'receiveSources': tx_receive_sources|default({}),
-    'clientDuesUrl': url_for('accounts.transaction_client_dues')
+    'clientDuesUrl': url_for('accounts.transaction_client_dues'),
+    'supplierDuesUrl': url_for('accounts.transaction_supplier_dues'),
+    'accountBalanceUrl': url_for('accounts.transaction_account_balance')
   }|tojson }};
 </script>
-<script src="{{ url_for('static', filename='accounts_workspace.js') }}"></script>
+<script src="{{ url_for('static', filename='accounts_workspace.js', v='2') }}"></script>
 {% endblock %}

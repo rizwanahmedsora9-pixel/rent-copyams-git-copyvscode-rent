@@ -110,6 +110,8 @@
       const partyList = data.parties || [];
       const receiveSources = data.receiveSources || {};
       const duesUrl = data.clientDuesUrl || '';
+      const supplierDuesUrl = data.supplierDuesUrl || '';
+      const accountBalanceUrl = data.accountBalanceUrl || '';
       const modeInput = $('tx-mode');
       const sourceInput = $('tx-receive-source');
       const amountInput = $('tx-amount');
@@ -120,6 +122,7 @@
       const categorySection = $('tx-category-section');
       const receiveAccountInput = $('tx-receive-account');
       const submit = $('tx-submit');
+      let isSubmitting = false;
       const formatter = new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const descriptions = {
         receive: 'Receive mode: choose the transaction group first, then the source entry, and finally the destination account.',
@@ -138,7 +141,7 @@
       // decide what the preview shows or what the submit gate accepts.
       const moneyCents = input => {
         const value = (input.value || '').trim().replace(/,/g, '');
-        if (!value || !/^\\d+(?:\\.\\d{1,2})?$/.test(value)) return 0;
+        if (!value || !/^\d+(?:\.\d{1,2})?$/.test(value)) return 0;
         const [whole, fraction = ''] = value.split('.');
         const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
         return Number.isSafeInteger(result) && result > 0 && result <= 99999999999999 ? result : 0;
@@ -157,6 +160,34 @@
       const pickedClient = () => clientList.find(item => item.code === pickedClientCode());
       // Signed paisa: positive means the client still owes us.
       let duesCents = null;
+      // Keep live balances separate from the initial page snapshot. Unknown or
+      // failed lookups must never be treated as a real zero balance.
+      const accountStates = new Map();
+      const accountTokens = new Map();
+      let supplierState = { status: 'empty', id: '', minor: null };
+      let supplierToken = 0;
+      const minorValue = (minor, major) => {
+        if (minor !== null && minor !== undefined && minor !== '') {
+          const number = Number(minor);
+          return Number.isSafeInteger(number) ? number : null;
+        }
+        if (major === null || major === undefined || major === '') return null;
+        const number = Number(major);
+        const result = Math.round(number * 100);
+        return Number.isFinite(number) && Number.isSafeInteger(result) ? result : null;
+      };
+      const accountState = id => {
+        const account = selectedAccount(id);
+        if (!account) return null;
+        const live = accountStates.get(String(id));
+        if (live) return live;
+        const minor = minorValue(account.current_balance_minor, account.current_balance);
+        return { status: minor === null ? 'unavailable' : 'snapshot', minor, ledgerMinor: null };
+      };
+      const supplierValue = () => {
+        const field = document.querySelector('[data-picker="supplier"] [data-picker-value]');
+        return field ? field.value.trim() : '';
+      };
 
       /* ----- Searchable, data-driven picker (clients and parties) ----- */
       function createPicker(root) {
@@ -176,9 +207,9 @@
         // filter by it: "Ali Traders (C-001)" would match nothing.
         let selectedText = '';
 
-        const haystack = item => [item.name, item.code, item.phone, item.category, item.type_label, item.note]
+        const haystack = item => [item.name, item.code, item.display_code, item.phone, item.category, item.type_label, item.note]
           .filter(Boolean).join(' ').toLowerCase();
-        const displayText = item => (kind === 'party' ? item.name : item.name + (item.code ? ' (' + item.code + ')' : ''));
+        const displayText = item => (kind === 'party' ? item.name : item.name + ((item.display_code || item.code) ? ' (' + (item.display_code || item.code) + ')' : ''));
 
         function close() {
           list.hidden = true;
@@ -209,7 +240,7 @@
           }
           const code = document.createElement('span');
           code.className = 'aw-picker-code';
-          code.textContent = item.code || '';
+          code.textContent = item.display_code || item.code || '';
           option.append(code, name);
           if (item.phone) {
             meta.textContent = item.phone;
@@ -220,7 +251,7 @@
 
         function render() {
           const typed = input.value.trim();
-          const tokens = (typed && typed !== selectedText ? typed.toLowerCase() : '').split(/\\s+/).filter(Boolean);
+          const tokens = (typed && typed !== selectedText ? typed.toLowerCase() : '').split(/\s+/).filter(Boolean);
           matches = items.filter(item => (kind !== 'account' || item.group === $('tx-receive-group').value) && tokens.every(token => haystack(item).includes(token)));
           list.replaceChildren();
           cursor = -1;
@@ -234,18 +265,20 @@
           });
           const foot = document.createElement('div');
           foot.className = 'aw-picker-foot' + (matches.length ? '' : ' is-empty');
+          const itemLabel = kind === 'supplier' ? 'supplier' : kind === 'account' ? 'source entry' : 'client';
+          const pluralLabel = kind === 'account' ? 'source entries' : itemLabel + 's';
           if (!items.length) {
             foot.textContent = kind === 'party'
               ? 'No saved parties yet — type a name to add one.'
-              : 'No active clients yet. Add one from the Clients page.';
+              : 'No active ' + pluralLabel + ' found.';
           } else if (!matches.length) {
             foot.textContent = kind === 'party'
               ? 'No party matches “' + typed + '”. Press Enter to add it as a new party.'
-              : 'No client matches “' + typed + '”.';
+              : 'No ' + itemLabel + ' matches “' + typed + '”.';
           } else if (matches.length > shown.length) {
             foot.textContent = 'Showing ' + shown.length + ' of ' + matches.length + ' — keep typing to narrow the list.';
           } else {
-            foot.textContent = matches.length + (kind === 'party' ? ' parties' : ' clients') + ' shown.';
+            foot.textContent = matches.length + (kind === 'party' ? ' parties' : ' ' + pluralLabel) + ' shown.';
           }
           list.append(foot);
           list.hidden = false;
@@ -271,6 +304,7 @@
           suppressInput = false;
           selectedText = input.value;
           valueInput.value = kind === 'party' ? String(item.id) : (item.code || '');
+          input.setCustomValidity('');
           if (kind === 'party') $('tx-party-name').value = item.name || '';
           close();
           onPick(item);
@@ -300,98 +334,7 @@
               ? (item.name + ' is saved as “' + (item.type_label || 'Other') + '”.')
               : defaultHelp;
           } else if (kind === 'supplier') {
-            // LIVE SUPPLIER LEDGER BALANCE FETCH
-            const supplierCode = valueInput.value.trim();
-            const supplierPanel = $('tx-supplier-dues');
-            if (supplierPanel) {
-              supplierPanel.hidden = false;
-              supplierPanel.classList.add('is-loading');
-              supplierPanel.classList.remove('is-payable', 'is-advance', 'is-settled');
-              $('tx-supplier-payable').textContent = '…';
-              $('tx-supplier-dues-note').textContent = 'Checking supplier ledger…';
-              if (duesUrl && typeof window.fetch === 'function') {
-                // Create a dedicated supplier endpoint or reuse client endpoint with supplier_code
-                // We will fetch from /transactions/supplier-dues?supplier_code=...
-                // (We will add this endpoint in the backend in the next step)
-                const supplierDuesUrl = duesUrl.replace('client-dues', 'supplier-dues');
-                window.fetch(supplierDuesUrl + '?supplier_code=' + encodeURIComponent(supplierCode), {
-                  headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
-                })
-                  .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
-                  .then(payload => {
-                    supplierPanel.classList.remove('is-loading');
-                    if (!payload || !payload.found || payload.balance === null || payload.balance === undefined) {
-                      supplierPanel.hidden = true;
-                      return;
-                    }
-                    const sCents = cents(payload.balance);
-                    const name = payload.name || 'Supplier';
-                    const status = payload.status || 'settled';
-                    supplierPanel.classList.toggle('is-payable', status === 'payable');
-                    supplierPanel.classList.toggle('is-advance', status === 'advance');
-                    supplierPanel.classList.toggle('is-settled', status === 'settled');
-                    $('tx-supplier-payable').textContent = displayDues(sCents);
-                    $('tx-supplier-dues-note').textContent = status === 'payable'
-                      ? name + ' owes ' + displayDues(sCents) + '. What you pay here reduces that balance.'
-                      : (status === 'advance'
-                        ? name + ' already has an advance of ' + displayDues(sCents) + '. A payment adds to it.'
-                        : name + ' has no outstanding dues. A payment is kept as an advance.');
-                    updatePreview();
-                  })
-                .catch(() => {
-                  supplierPanel.classList.remove('is-loading');
-                  supplierPanel.hidden = true;
-                  // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
-                  if (window.hideLoading) window.hideLoading();
-                  if (window.finishTaskProgress) window.finishTaskProgress();
-                });
-              } else {
-                supplierPanel.hidden = true;
-              }
-            }
-          } else if (kind === 'account') {
-            // LIVE ACCOUNT STATUS / BALANCE FETCH
-            const accountId = valueInput.value.trim();
-            const accountPanel = $('tx-account-dues');
-            if (accountId && accountPanel) {
-              accountPanel.hidden = false;
-              accountPanel.classList.add('is-loading');
-              accountPanel.classList.remove('is-payable', 'is-advance', 'is-settled');
-              $('tx-account-payable').textContent = '…';
-              $('tx-account-dues-note').textContent = 'Checking account status…';
-              // Fetch live account status
-              window.fetch('/accounts/transactions/account-status?account_id=' + encodeURIComponent(accountId), {
-                headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
-              })
-                .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
-                .then(payload => {
-                  accountPanel.classList.remove('is-loading');
-                  if (!payload || !payload.found) {
-                    accountPanel.hidden = true;
-                    return;
-                  }
-                  const aCents = cents(payload.balance);
-                  const name = payload.name || 'Account';
-                  const status = payload.status || 'active';
-                  accountPanel.classList.toggle('is-payable', status === 'active');
-                  accountPanel.classList.toggle('is-advance', status === 'suspended');
-                  accountPanel.classList.toggle('is-settled', status === 'inactive');
-                  $('tx-account-payable').textContent = displayMoney(aCents);
-                  $('tx-account-dues-note').textContent = status === 'active'
-                    ? name + ' balance is ' + displayMoney(aCents) + '.'
-                    : (status === 'suspended'
-                      ? name + ' is suspended.'
-                      : name + ' is inactive.');
-                  updatePreview();
-                })
-                .catch(() => {
-                  accountPanel.classList.remove('is-loading');
-                  accountPanel.hidden = true;
-                  // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
-                  if (window.hideLoading) window.hideLoading();
-                  if (window.finishTaskProgress) window.finishTaskProgress();
-                });
-            }
+            loadSupplierDues(valueInput.value.trim(), item);
           } else {
             if (kind === 'client') loadDues(valueInput.value.trim(), item);
           }
@@ -404,17 +347,14 @@
           // Manual editing invalidates the hidden selection immediately.
           selectedText = '';
           valueInput.value = '';
+          input.setCustomValidity('');
           if (kind === 'party') {
             $('tx-party-name').value = input.value.trim();
             $('tx-party-type').disabled = false;
           } else if (kind === 'client') {
             loadDues('', null);
           } else if (kind === 'supplier') {
-            const supplierPanel = $('tx-supplier-dues');
-            if (supplierPanel) supplierPanel.hidden = true;
-          } else if (kind === 'account') {
-            const accountPanel = $('tx-account-dues');
-            if (accountPanel) accountPanel.hidden = true;
+            loadSupplierDues('', null);
           }
           render();
           updatePreview();
@@ -539,6 +479,167 @@
           });
       }
 
+      /* ----- Live account and supplier balances ----- */
+      function fetchBalance(url) {
+        const controller = typeof window.AbortController === 'function' ? new window.AbortController() : null;
+        let timer;
+        const timeout = new Promise((resolve, reject) => {
+          timer = window.setTimeout(() => {
+            if (controller) controller.abort();
+            reject(new Error('Balance lookup timed out'));
+          }, 10000);
+        });
+        const options = { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' };
+        if (controller) options.signal = controller.signal;
+        let request;
+        try {
+          request = window.fetch(url, options).then(response => response.ok ? response.json() : Promise.reject(new Error(response.status)));
+        } catch (error) {
+          window.clearTimeout(timer);
+          return Promise.reject(error);
+        }
+        return Promise.race([request, timeout]).finally(() => window.clearTimeout(timer));
+      }
+
+      function loadAccountBalance(id, force) {
+        id = String(id || '');
+        if (!id || !selectedAccount(id)) return;
+        const old = accountStates.get(id);
+        if (!force && old && old.status === 'loading') return;
+        const token = (accountTokens.get(id) || 0) + 1;
+        accountTokens.set(id, token);
+        accountStates.set(id, { status: 'loading', minor: null, ledgerMinor: null });
+        updatePreview();
+        if (!accountBalanceUrl || typeof window.fetch !== 'function') {
+          accountStates.set(id, { status: 'unavailable', minor: null, ledgerMinor: null });
+          updatePreview();
+          return;
+        }
+        fetchBalance(accountBalanceUrl + '?account_id=' + encodeURIComponent(id))
+          .then(payload => {
+            if (accountTokens.get(id) !== token) return;
+            let state;
+            if (!payload || !payload.found) {
+              state = { status: 'missing', minor: null, ledgerMinor: null };
+            } else if (payload.id != null && String(payload.id) !== id) {
+              state = { status: 'unavailable', minor: null, ledgerMinor: null };
+            } else if (payload.is_active === false) {
+              state = { status: 'inactive', minor: null, ledgerMinor: null };
+            } else {
+              const minor = minorValue(payload.balance_minor, payload.balance);
+              state = {
+                status: minor === null ? 'unavailable' : 'ready',
+                minor,
+                ledgerMinor: minorValue(payload.ledger_balance_minor, payload.ledger_balance)
+              };
+            }
+            accountStates.set(id, state);
+            updatePreview();
+          })
+          .catch(() => {
+            if (accountTokens.get(id) !== token) return;
+            accountStates.set(id, { status: 'unavailable', minor: null, ledgerMinor: null });
+            updatePreview();
+          });
+      }
+
+      function loadSupplierDues(id, supplier, force) {
+        id = String(id || '');
+        if (!id) {
+          supplierToken += 1;
+          supplierState = { status: 'empty', id: '', minor: null };
+          updatePreview();
+          return;
+        }
+        if (!force && supplierState.id === id && supplierState.status === 'loading') return;
+        const token = ++supplierToken;
+        supplierState = { status: 'loading', id, minor: null, name: supplier && supplier.name };
+        updatePreview();
+        if (!supplierDuesUrl || typeof window.fetch !== 'function') {
+          supplierState = { status: 'unavailable', id, minor: null };
+          updatePreview();
+          return;
+        }
+        fetchBalance(supplierDuesUrl + '?supplier_id=' + encodeURIComponent(id))
+          .then(payload => {
+            if (token !== supplierToken || supplierValue() !== id) return;
+            if (!payload || !payload.found) {
+              supplierState = { status: 'missing', id, minor: null };
+            } else if (payload.id != null && String(payload.id) !== id) {
+              supplierState = { status: 'unavailable', id, minor: null };
+            } else if (payload.is_active === false) {
+              supplierState = { status: 'inactive', id, minor: null };
+            } else {
+              const minor = minorValue(payload.balance_minor, payload.balance);
+              supplierState = {
+                status: minor === null ? 'unavailable' : 'ready', id, minor,
+                name: payload.name || (supplier && supplier.name) || 'this supplier'
+              };
+            }
+            updatePreview();
+          })
+          .catch(() => {
+            if (token !== supplierToken || supplierValue() !== id) return;
+            supplierState = { status: 'unavailable', id, minor: null };
+            updatePreview();
+          });
+      }
+
+      function renderSupplierDues(amount) {
+        const panel = $('tx-supplier-dues');
+        if (!panel) return;
+        const id = supplierValue();
+        if (!id || supplierState.id !== id) { panel.hidden = true; return; }
+        panel.hidden = false;
+        panel.classList.remove('is-loading', 'is-payable', 'is-advance', 'is-settled');
+        const label = $('tx-supplier-balance-label');
+        const payable = $('tx-supplier-payable');
+        const note = $('tx-supplier-dues-note');
+        const after = $('tx-supplier-after');
+        label.textContent = 'Supplier balance';
+        payable.textContent = '—';
+        after.textContent = '';
+        if (supplierState.status === 'loading') {
+          panel.classList.add('is-loading');
+          note.textContent = 'Checking the latest supplier ledger…';
+        } else if (supplierState.status === 'inactive' || supplierState.status === 'missing') {
+          note.textContent = 'This supplier is no longer active or available. Choose another supplier.';
+        } else if (supplierState.status !== 'ready') {
+          note.textContent = 'Supplier balance could not be loaded. Use Refresh balances to try again; the payment still updates the supplier ledger.';
+        } else {
+          const balance = supplierState.minor;
+          const name = supplierState.name;
+          const status = balance > 0 ? 'payable' : (balance < 0 ? 'advance' : 'settled');
+          panel.classList.add('is-' + status);
+          label.textContent = status === 'payable' ? 'Owed to supplier' : (status === 'advance' ? 'Supplier advance' : 'Supplier balance');
+          payable.textContent = displayDues(balance);
+          note.textContent = status === 'payable'
+            ? 'You owe ' + name + ' ' + displayDues(balance) + '. A payment reduces this balance.'
+            : (status === 'advance'
+              ? 'You have paid ' + name + ' an advance of ' + displayDues(balance) + '.'
+              : 'No amount is currently owed. A payment will be an advance.');
+          if (amount > 0) {
+            const remaining = balance - amount;
+            after.textContent = remaining > 0
+              ? 'After this payment: you owe ' + displayDues(remaining) + '.'
+              : (remaining < 0 ? 'After this payment: advance ' + displayDues(remaining) + '.' : 'After this payment: settled.');
+          }
+        }
+      }
+
+      function refreshSelectedBalances(force) {
+        const mode = modeInput.value;
+        const ids = mode === 'receive' ? [$('tx-receive-account').value]
+          : (mode === 'pay' ? [$('tx-pay-account').value] : [$('tx-transfer-from').value, $('tx-transfer-to').value]);
+        new Set(ids.filter(Boolean)).forEach(id => loadAccountBalance(id, force));
+        if (mode === 'pay' && $('tx-pay-target').value === 'supplier' && supplierValue()) {
+          const id = supplierValue();
+          const supplier = (data.suppliers || []).find(item => String(item.code) === id);
+          loadSupplierDues(id, supplier, force);
+        }
+        if (isClientSource() && pickedClientCode()) loadDues(pickedClientCode(), pickedClient());
+      }
+
       function updateSubcategories(preserve) {
         const previous = preserve ? subcategoryInput.value : '';
         const category = txCategories.find(item => item.name === categoryInput.value);
@@ -649,6 +750,16 @@
           categorySection.disabled = true;
         }
         $('tx-party').required = paying && !ledgerPayment;
+        ['supplier', 'client_refund'].forEach(key => {
+          const root = document.querySelector('[data-picker="' + key + '"]');
+          if (!root) return;
+          const input = root.querySelector('[data-picker-input]');
+          const value = root.querySelector('[data-picker-value]');
+          const active = paying && target === key;
+          input.required = active;
+          input.setCustomValidity(active && input.value.trim() && !value.value
+            ? 'Select an active ' + (key === 'supplier' ? 'supplier' : 'client') + ' from the list.' : '');
+        });
       }
       function payeeLabel() {
         const target = $('tx-pay-target').value;
@@ -660,68 +771,26 @@
         const mode = modeInput.value;
         const amount = amountCents();
         const discount = discountCents();
-        const sourceId = mode === 'pay' ? $('tx-pay-account').value : $('tx-transfer-from').value;
-        const destinationId = mode === 'receive' ? $('tx-receive-account').value : $('tx-transfer-to').value;
+        const discountOnly = isDiscountOnly();
+        const sourceId = mode === 'pay' ? $('tx-pay-account').value : (mode === 'transfer' ? $('tx-transfer-from').value : '');
+        const destinationId = mode === 'receive' ? $('tx-receive-account').value : (mode === 'transfer' ? $('tx-transfer-to').value : '');
         const source = selectedAccount(sourceId);
         const destination = selectedAccount(destinationId);
         const balanceAccount = mode === 'receive' ? destination : source;
+        const balanceState = balanceAccount ? accountState(balanceAccount.id) : null;
         const sameAccount = mode === 'transfer' && sourceId && sourceId === destinationId;
-        let remaining = null;
-        
-        // LIVE BALANCE FETCH FOR CURRENT ACCOUNT (Receive/Pay)
-        if (balanceAccount && amount > 0 && !sameAccount) {
-          // Instead of using static window.AW_DATA.accounts.current_balance,
-          // we fetch live status dynamically for the selected account.
-          // We will update the preview balance label dynamically.
-          const balancePanel = $('tx-balance-live');
-          if (balancePanel) {
-            balancePanel.hidden = false;
-            balancePanel.classList.add('is-loading');
-            balancePanel.classList.remove('is-payable', 'is-advance', 'is-settled');
-            $('tx-balance-payable').textContent = '…';
-            $('tx-balance-dues-note').textContent = 'Checking live account status…';
-            window.fetch('/accounts/transactions/account-status?account_id=' + encodeURIComponent(balanceAccount.id), {
-              headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
-            })
-              .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
-              .then(payload => {
-                balancePanel.classList.remove('is-loading');
-                if (!payload || !payload.found) {
-                  balancePanel.hidden = true;
-                  remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
-                  return;
-                }
-                const bCents = cents(payload.balance);
-                const name = payload.name || 'Account';
-                const status = payload.status || 'active';
-                balancePanel.classList.toggle('is-payable', status === 'active');
-                balancePanel.classList.toggle('is-advance', status === 'suspended');
-                balancePanel.classList.toggle('is-settled', status === 'inactive');
-                $('tx-balance-payable').textContent = displayMoney(bCents);
-                $('tx-balance-dues-note').textContent = status === 'active'
-                  ? name + ' balance is ' + displayMoney(bCents) + '.'
-                  : (status === 'suspended'
-                    ? name + ' is suspended.'
-                    : name + ' is inactive.');
-                remaining = bCents + (mode === 'receive' ? amount : -amount);
-                updatePreview();
-              })
-              .catch(() => {
-                balancePanel.classList.remove('is-loading');
-                balancePanel.hidden = true;
-                remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
-                // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
-                if (window.hideLoading) window.hideLoading();
-                if (window.finishTaskProgress) window.finishTaskProgress();
-              });
-          } else {
-            remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
-          }
-        } else {
-          remaining = cents(balanceAccount ? balanceAccount.current_balance : 0) + (mode === 'receive' ? amount : -amount);
-        }
-        
-        const insufficient = remaining !== null && remaining < 0;
+        const remaining = balanceState && balanceState.minor !== null
+          ? balanceState.minor + (mode === 'receive' ? amount : -amount) : null;
+        const insufficient = mode !== 'receive' && amount > 0 && remaining !== null && remaining < 0;
+        // A discount-only client settlement does not touch an account, even
+        // if one happens to remain selected in the receive control.
+        const relevantStates = discountOnly ? [] : (mode === 'transfer' ? [accountState(sourceId), accountState(destinationId)] : [balanceState]).filter(Boolean);
+        const checkingAccount = relevantStates.some(state => state.status === 'loading');
+        const invalidAccount = relevantStates.some(state => ['inactive', 'missing'].includes(state.status));
+        const payingSupplier = mode === 'pay' && $('tx-pay-target').value === 'supplier' && Boolean(supplierValue());
+        const checkingSupplier = payingSupplier && supplierState.id === supplierValue() && supplierState.status === 'loading';
+        const invalidSupplier = payingSupplier && supplierState.id === supplierValue() && ['inactive', 'missing'].includes(supplierState.status);
+
         $('tx-preview-amount').textContent = displayMoney(amount);
         $('tx-preview-from').textContent = mode === 'receive' ? receivedFromLabel() : accountName(sourceId);
         $('tx-preview-to').textContent = mode === 'pay' ? payeeLabel() : accountName(destinationId);
@@ -732,8 +801,11 @@
         $('tx-preview-balance').classList.toggle('aw-negative', insufficient);
         $('tx-same-account').hidden = !sameAccount;
         $('tx-transfer-to').setCustomValidity(sameAccount ? 'Choose two different accounts.' : '');
-        $('tx-funds-warning').hidden = !insufficient;
-        $('tx-funds-warning').textContent = insufficient ? 'Insufficient funds. Choose another account or enter a smaller amount.' : '';
+        const warning = invalidAccount ? 'An account is no longer active or available. Choose another account.'
+          : (invalidSupplier ? 'This supplier is no longer active or available. Choose another supplier.'
+            : (insufficient ? 'Insufficient funds. Choose another account or enter a smaller amount.' : ''));
+        $('tx-funds-warning').hidden = !warning;
+        $('tx-funds-warning').textContent = warning;
 
         const showDues = isClientSource() && Boolean(pickedClientCode());
         $('tx-preview-dues').hidden = !showDues;
@@ -746,23 +818,40 @@
           $('tx-preview-remaining').textContent = after === null ? '—' : (after < 0 ? 'Advance ' + displayDues(after) : displayMoney(after));
           $('tx-preview-remaining').classList.toggle('aw-negative', after !== null && after > 0);
         }
+        renderSupplierDues(amount);
 
-        const discountOnly = isDiscountOnly();
-        $('tx-preview-help').textContent = mode === 'transfer'
-          ? 'Both account balances update together. Total business money stays the same.'
-          : (discountOnly
-            ? 'Discount only: no cash moves, so account balances stay the same and the client owes less.'
-            : (balanceAccount && amount ? 'This preview includes the amount above. Your saved balance is checked again on the server.' : 'Select an account and enter an amount to preview the balance.'));
+        $('tx-preview-help').textContent = discountOnly
+          ? 'Discount only: no cash moves, so account balances stay the same and the client owes less.'
+          : (checkingAccount
+            ? 'Checking the latest account balance…'
+            : (balanceState && balanceState.status === 'unavailable'
+              ? 'Live balance unavailable. Try Refresh balances; the server checks funds when you save.'
+              : (mode === 'transfer'
+                ? 'Both account balances update together. Total business money stays the same.'
+                : (balanceAccount && amount ? 'This preview includes the amount above. Your saved balance is checked again on the server.' : 'Select an account and enter an amount to preview the balance.'))));
         const transferUnavailable = mode === 'transfer' && accountList.filter(account => account.is_active).length < 2;
-        submit.disabled = Boolean(sameAccount || insufficient || transferUnavailable);
-        submit.querySelector('span').textContent = discountOnly ? 'Save discount' : submitLabels[mode];
+        submit.disabled = Boolean(isSubmitting || sameAccount || insufficient || transferUnavailable || invalidAccount || invalidSupplier || checkingAccount || checkingSupplier);
+        submit.querySelector('span').textContent = isSubmitting ? 'Saving…' : (discountOnly ? 'Save discount' : submitLabels[mode]);
+        const accountIds = {
+          receive: $('tx-receive-account').value,
+          pay: $('tx-pay-account').value,
+          'transfer-from': $('tx-transfer-from').value,
+          'transfer-to': $('tx-transfer-to').value
+        };
         document.querySelectorAll('[data-balance-help]').forEach(help => {
-          const key = help.dataset.balanceHelp;
-          const id = key === 'receive' ? $('tx-receive-account').value
-            : key === 'pay' ? $('tx-pay-account').value
-            : key === 'transfer-from' ? sourceId : destinationId;
+          const id = accountIds[help.dataset.balanceHelp];
           const account = selectedAccount(id);
-          help.textContent = account ? 'Current balance: ' + displayMoney(cents(account.current_balance)) : 'Only active business accounts are available.';
+          const state = accountState(id);
+          if (!account) help.textContent = 'Only active business accounts are available.';
+          else if (state.status === 'loading') help.textContent = 'Refreshing current balance…';
+          else if (state.status === 'unavailable') help.textContent = 'Current balance unavailable. Use Refresh balances or save to check it on the server.';
+          else if (state.status === 'inactive' || state.status === 'missing') help.textContent = 'This account is no longer active or available. Choose another account.';
+          else {
+            help.textContent = 'Current balance: ' + displayMoney(state.minor);
+            if (state.ledgerMinor !== null && state.ledgerMinor !== state.minor) {
+              help.textContent += ' · Account ledger: ' + displayMoney(state.ledgerMinor) + '. These balances differ; review and reconcile the account.';
+            }
+          }
         });
         applyReceiveSource();
         applyPayTarget();
@@ -785,6 +874,7 @@
         $('tx-intro').textContent = descriptions[mode];
         updateCategories(true);
         updatePreview();
+        refreshSelectedBalances(false);
         if (updateUrl) {
           const url = new URL(window.location.href);
           url.searchParams.set('mode', mode);
@@ -821,7 +911,15 @@
         tab.addEventListener('click', () => setSource(tab.dataset.txSource));
       });
       transactionForm.addEventListener('input', updatePreview);
-      transactionForm.addEventListener('change', updatePreview);
+      transactionForm.addEventListener('change', event => {
+        if (event.target.matches('[data-account-select]')) loadAccountBalance(event.target.value, false);
+        if (event.target.id === 'tx-pay-target' && event.target.value === 'supplier' && supplierValue()) {
+          const id = supplierValue();
+          loadSupplierDues(id, (data.suppliers || []).find(item => String(item.code) === id), false);
+        }
+        updatePreview();
+      });
+      $('tx-refresh-balances').addEventListener('click', () => refreshSelectedBalances(true));
       categoryInput.addEventListener('change', () => updateSubcategories(false));
       transactionForm.addEventListener('submit', event => {
         updatePreview();
@@ -846,6 +944,7 @@
         $('tx-client-search').setCustomValidity('');
         // Keep the server-generated key on retries. The server's unique index
         // prevents a double click or repeated POST from posting twice.
+        isSubmitting = true;
         submit.disabled = true;
         submit.querySelector('span').textContent = 'Saving…';
         
@@ -855,11 +954,22 @@
         }
       });
       window.addEventListener('pageshow', () => {
+        isSubmitting = false;
         submit.querySelector('span').textContent = isDiscountOnly() ? 'Save discount' : submitLabels[modeInput.value];
         updatePreview();
-        // HIDE OVERLAY ON PAGESHOW
+        refreshSelectedBalances(false);
         if (window.hideLoading) window.hideLoading();
       });
+      // Another tab may have received money, posted a GRN or paid a supplier
+      // while this form was open. Refresh on return and periodically while it
+      // is visible; ordinary amount edits never trigger network requests.
+      window.addEventListener('focus', () => refreshSelectedBalances(false));
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') refreshSelectedBalances(false);
+      });
+      window.setInterval(() => {
+        if (document.visibilityState === 'visible') refreshSelectedBalances(false);
+      }, 30000);
 
       // Restore a picked client/party after a server-side validation failure:
       // the hidden value survives the round trip, the visible text does not.

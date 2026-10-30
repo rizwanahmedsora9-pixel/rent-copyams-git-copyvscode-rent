@@ -834,6 +834,9 @@ def ledger_balances(account_ids=None):
     """
     from sqlalchemy import Integer
 
+    ids = None if account_ids is None else [int(a) for a in account_ids]
+    if ids is not None and not ids:
+        return {}
     minor_expr = func.coalesce(
         AccountTransaction.amount_minor,
         func.cast(func.round(AccountTransaction.amount * 100), Integer),
@@ -842,20 +845,18 @@ def ledger_balances(account_ids=None):
     incoming_q = (
         base(AccountTransaction.to_account_id.label("account_id"), func.sum(minor_expr).label("total"))
         .filter(AccountTransaction.is_void == False, AccountTransaction.to_account_id.isnot(None))  # noqa: E712
-        .group_by(AccountTransaction.to_account_id)
     )
     outgoing_q = (
         base(AccountTransaction.from_account_id.label("account_id"), func.sum(minor_expr).label("total"))
         .filter(AccountTransaction.is_void == False, AccountTransaction.from_account_id.isnot(None))  # noqa: E712
-        .group_by(AccountTransaction.from_account_id)
     )
-    incoming = {int(a): int(t or 0) for a, t in incoming_q.all()}
-    outgoing = {int(a): int(t or 0) for a, t in outgoing_q.all()}
+    if ids is not None:
+        incoming_q = incoming_q.filter(AccountTransaction.to_account_id.in_(ids))
+        outgoing_q = outgoing_q.filter(AccountTransaction.from_account_id.in_(ids))
+    incoming = {int(a): int(t or 0) for a, t in incoming_q.group_by(AccountTransaction.to_account_id).all()}
+    outgoing = {int(a): int(t or 0) for a, t in outgoing_q.group_by(AccountTransaction.from_account_id).all()}
     query = Account.query
-    if account_ids is not None:
-        ids = [int(a) for a in account_ids]
-        if not ids:
-            return {}
+    if ids is not None:
         query = query.filter(Account.id.in_(ids))
     result = {}
     for account in query.all():

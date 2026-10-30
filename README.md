@@ -111,8 +111,11 @@ auto-migrations, wipe, ledgers/PDF and login have their own modules.
 The end-to-end FIFO/GRN/P&L/API/live-refresh regression is in
 `tests/test_fifo_grn_profit_realtime.py`. The Accounts workspace money entry
 paths are covered by `tests/test_accounts_new_transaction.py` (Receive / Pay /
-Transfer) and `tests/test_accounts_receive_from_clients.py` (client and party
-receives, payable lookup, discounts and waive-offs).
+Transfer), `tests/test_accounts_receive_from_clients.py` (client and party
+receives, payable lookup, discounts and waive-offs), and
+`tests/test_accounts_pay_live_balances.py` (GRNs, supplier payments and live
+balance refresh). The latter also tests the rendered form in a browser DOM
+when Node and jsdom are installed.
 
 `tests/frontend/` holds offline DOM tests for the browser-side scripts. They are
 not collected by pytest; run them with node after installing jsdom:
