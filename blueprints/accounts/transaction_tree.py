@@ -609,6 +609,7 @@ def transaction_tree_registry_json() -> Dict[str, Any]:
 _SRC_TAG_RE = re.compile(r"\[SRC:([A-Za-z_]+)(?::(\d+))?\]", re.IGNORECASE)
 _AUTO_GRN_RE = re.compile(r"\[AUTO_GRN_PAY:(\d+)\]", re.IGNORECASE)
 _CLIENT_TAG_RE = re.compile(r"\[CLIENT:(\d+)\]", re.IGNORECASE)
+_BOOKING_VOID_TAG_RE = re.compile(r"\[VOID_BY_BOOKING:\d+\]", re.IGNORECASE)
 
 
 def strip_internal_markers(note: Optional[str]) -> str:
@@ -618,6 +619,7 @@ def strip_internal_markers(note: Optional[str]) -> str:
     cleaned = _SRC_TAG_RE.sub("", note)
     cleaned = _AUTO_GRN_RE.sub("", cleaned)
     cleaned = _CLIENT_TAG_RE.sub("", cleaned)
+    cleaned = _BOOKING_VOID_TAG_RE.sub("", cleaned)
     return re.sub(r"\s{2,}", " ", cleaned).strip()
 
 

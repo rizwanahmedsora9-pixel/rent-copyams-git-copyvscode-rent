@@ -100,11 +100,12 @@ def account_ledger(account_id):
     if not show_voided:
         base_filters.append(AccountTransaction.is_void == False)
 
-    # Reproducible opening from the explicit account baseline + ledger, not from
-    # a frontend/current-balance subtraction that can include later periods.
-    from app.services.payments_crud import ledger_balance
-    opening_cutoff = datetime.combine(date_from, datetime.min.time()) - timedelta(microseconds=1)
-    opening_balance = ledger_balance(account.id, as_of=opening_cutoff)
+    # Reproducible opening from the account baseline and prior ledger.  A
+    # baseline effective after the period starts is introduced on its own date.
+    from app.services.cash_flow_svc import _account_report_opening, _account_opening_minor, _opening_day
+    opening_balance = _account_report_opening(account.id, date_from)
+    account_opening_day = _opening_day(account)
+    baseline_during_period = bool(account_opening_day and date_from < account_opening_day < date_to_excl)
 
     q = AccountTransaction.query.filter(*base_filters,
         AccountTransaction.date_posted >= date_from,
@@ -120,12 +121,21 @@ def account_ledger(account_id):
     if subcategory_f:
         q = q.filter(func.lower(func.trim(AccountTransaction.subcategory)) == subcategory_f.lower())
 
-    period_in = q.with_entities(func.coalesce(func.sum(AccountTransaction.amount), 0)).filter(
+    # The integer amount is authoritative; legacy REAL values are only a
+    # fallback. Aggregate and run balances in paisa just like ledger_balance.
+    from sqlalchemy import Integer
+    from utils.money import from_minor, to_minor
+    from app.services.accounting import _account_minor, _tx_minor
+    minor_expr = func.coalesce(AccountTransaction.amount_minor,
+        func.cast(func.round(AccountTransaction.amount * 100), Integer))
+    period_in_minor = q.with_entities(func.coalesce(func.sum(minor_expr), 0)).filter(
         AccountTransaction.to_account_id == account.id, AccountTransaction.is_void == False
     ).scalar() or 0
-    period_out = q.with_entities(func.coalesce(func.sum(AccountTransaction.amount), 0)).filter(
+    period_out_minor = q.with_entities(func.coalesce(func.sum(minor_expr), 0)).filter(
         AccountTransaction.from_account_id == account.id, AccountTransaction.is_void == False
     ).scalar() or 0
+    period_in = float(from_minor(period_in_minor))
+    period_out = float(from_minor(period_out_minor))
 
     # Running balances include *all* active movements, even when the displayed
     # rows are narrowed by search/type filters.
@@ -134,26 +144,33 @@ def account_ledger(account_id):
         AccountTransaction.date_posted >= date_from,
         AccountTransaction.date_posted < date_to_excl,
     ).order_by(AccountTransaction.date_posted.asc(), AccountTransaction.id.asc()).all()
-    running = opening_balance
+    running = to_minor(opening_balance)
     running_by_id = {}
+    baseline_pending = baseline_during_period
     for row in all_period_rows:
+        if baseline_pending and row.date_posted and row.date_posted.date() >= account_opening_day:
+            running += _account_opening_minor(account)
+            baseline_pending = False
         if not row.is_void:
+            amount = _tx_minor(row)
             if row.to_account_id == account.id:
-                running += float(row.amount or 0)
+                running += amount
             if row.from_account_id == account.id:
-                running -= float(row.amount or 0)
-        running_by_id[row.id] = running
+                running -= amount
+        running_by_id[row.id] = float(from_minor(running))
 
     rows_asc = q.order_by(AccountTransaction.date_posted.asc(), AccountTransaction.id.asc()).all()
     enriched = []
     for r in rows_asc:
-        delta = 0.0
+        amount = _tx_minor(r)
+        delta = 0
         if not r.is_void:
             if r.to_account_id == account.id:
-                delta += float(r.amount or 0)
+                delta += amount
             if r.from_account_id == account.id:
-                delta -= float(r.amount or 0)
-        enriched.append({'tx': r, 'delta': delta, 'running': running_by_id.get(r.id)})
+                delta -= amount
+        enriched.append({'tx': r, 'amount': float(from_minor(amount)),
+                         'delta': float(from_minor(delta)), 'running': running_by_id.get(r.id)})
 
     enriched.reverse()  # display newest first
 
@@ -178,6 +195,10 @@ def account_ledger(account_id):
     subcategory_options = sorted({(row[1] or '').strip() for row in label_rows if (row[1] or '').strip()}, key=str.lower)
 
     return render_template('accounts/account_ledger.html', account=account, page_rows=page_rows,
+                           current_balance=float(from_minor(_account_minor(account))),
+                           baseline_during_period=baseline_during_period,
+                           account_opening_day=account_opening_day,
+                           account_opening_amount=float(from_minor(_account_opening_minor(account))),
                            opening_balance=opening_balance, period_in=period_in, period_out=period_out,
                            date_from=date_from, date_to=date_to_excl - timedelta(days=1),
                            search=search, type_f=type_f, types=types, show_voided=show_voided,

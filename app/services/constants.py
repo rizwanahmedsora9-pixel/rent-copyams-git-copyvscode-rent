@@ -353,6 +353,8 @@ ENDPOINT_PERMISSION_MAP = {
     # The receive picker reads one client's live payable. Same data the client
     # 360 summary exposes, plus anyone allowed to receive money in Accounts.
     'accounts.transaction_client_dues': ('can_view_client_ledger', 'can_manage_accounts', 'can_manage_payments'),
+    'accounts.transaction_account_balance': ('can_manage_accounts', 'can_manage_payments'),
+    'accounts.transaction_supplier_dues': ('can_manage_accounts', 'can_manage_payments'),
 
     # --- Cash Flow module (new) ---
     'cash_flow': 'can_view_cash_flow',

@@ -167,6 +167,7 @@
 .aw-tx-footer .aw-muted { font-size: .76rem; }
 .aw-tx-aside { position: sticky; top: 1rem; }
 .aw-tx-preview { padding: 1.25rem; }
+.aw-tx-refresh { width: 100%; justify-content: center; margin-top: .65rem; }
 .aw-tx-eyebrow { display: block; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; font-size: .7rem; font-weight: 700; }
 .aw-tx-preview-amount { display: block; font-size: 1.6rem; margin: .6rem 0 1.25rem; overflow-wrap: anywhere; }
 .aw-tx-flow { display: flex; flex-direction: column; gap: .65rem; }

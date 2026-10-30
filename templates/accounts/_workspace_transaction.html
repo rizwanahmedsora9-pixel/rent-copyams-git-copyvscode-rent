@@ -46,7 +46,7 @@
           <option value="{{ account.id }}" {% if tx_values.get('pay_from_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
           {% endfor %}
         </select>
-        <p class="aw-help" data-balance-help="pay"></p>
+        <p class="aw-help" data-balance-help="pay" aria-live="polite"></p>
       </fieldset>
 
       <fieldset class="aw-tx-section" data-tx-panel="transfer" {% if mode != 'transfer' %}disabled hidden{% endif %}>
@@ -63,7 +63,7 @@
               <option value="{{ account.id }}" {% if tx_values.get('transfer_from_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
               {% endfor %}
             </select>
-            <p class="aw-help" data-balance-help="transfer-from"></p>
+            <p class="aw-help" data-balance-help="transfer-from" aria-live="polite"></p>
           </div>
           <div>
             <label class="aw-label" for="tx-transfer-to">To account <span aria-hidden="true">*</span></label>
@@ -73,7 +73,7 @@
               <option value="{{ account.id }}" {% if tx_values.get('transfer_to_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
               {% endfor %}
             </select>
-            <p class="aw-help" data-balance-help="transfer-to"></p>
+            <p class="aw-help" data-balance-help="transfer-to" aria-live="polite"></p>
           </div>
         </div>
         <p class="aw-field-error" id="tx-same-account" role="alert" hidden>Choose two different accounts.</p>
@@ -180,7 +180,7 @@
           <option value="{{ account.id }}" {% if tx_values.get('receive_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
           {% endfor %}
         </select>
-        <p class="aw-help" data-balance-help="receive"></p>
+        <p class="aw-help" data-balance-help="receive" aria-live="polite"></p>
       </fieldset>
 
       <fieldset class="aw-tx-section" data-tx-panel="pay" {% if mode != 'pay' %}disabled hidden{% endif %}>
@@ -205,6 +205,16 @@
             <input type="hidden" name="{{ field }}" data-picker-value value="{{ tx_values.get(field, '') }}">
             <p class="aw-help" data-picker-help>Select an active {{ 'supplier' if key == 'supplier' else 'client' }} from the searchable list.</p>
           </div>
+          {% if key == 'supplier' %}
+          <div class="aw-dues" id="tx-supplier-dues" aria-live="polite" hidden>
+            <div class="aw-dues-head">
+              <span class="aw-tx-eyebrow" id="tx-supplier-balance-label">Supplier balance</span>
+              <strong class="aw-mono" id="tx-supplier-payable">—</strong>
+            </div>
+            <p class="aw-help" id="tx-supplier-dues-note"></p>
+            <p class="aw-help" id="tx-supplier-after"></p>
+          </div>
+          {% endif %}
         </fieldset>
         {% endfor %}
         <fieldset class="aw-tx-source" data-pay-target-panel="expense other">
@@ -299,6 +309,7 @@
       <div class="aw-tx-balance"><span id="tx-preview-balance-label">Balance after transaction</span><strong class="aw-mono" id="tx-preview-balance">—</strong></div>
       <p class="aw-field-error" id="tx-funds-warning" role="alert" hidden></p>
       <p class="aw-help" id="tx-preview-help">Select an account and enter an amount to preview the balance.</p>
+      <button type="button" class="aw-btn aw-btn-ghost aw-tx-refresh" id="tx-refresh-balances"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh balances</button>
     </div>
     <div class="aw-note aw-tx-tip"><i class="bi bi-info-circle" aria-hidden="true"></i><span>Receive and Pay update money in/out. Transfers only move money between your accounts and do not change total cash flow.</span></div>
   </aside>

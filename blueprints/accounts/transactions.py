@@ -108,6 +108,13 @@ def delete_account_transaction(tx_id):
             payment = db.session.get(SupplierPayment, source_id)
             if not payment or not delete_supplier_payment(payment, actor=current_user):
                 raise ValueError('The linked supplier payment is already deleted or missing.')
+        elif source_type.lower() in ('booking', 'directsale', 'deliverypersonpayment') or re.search(
+            r'\[SRC:(?:Booking|DirectSale|DeliveryPersonPayment):\d+\]', note_txt, re.IGNORECASE
+        ):
+            # Reversing only the receipt would leave the booking/sale, stock,
+            # party ledger and cash-flow source active. Manage the document in
+            # its owning module rather than silently splitting the books.
+            raise ValueError('This entry belongs to a Booking, Sale or Driver payment; delete it from its source document.')
         else:
             from app.services.accounting import _void_account_tx
             from app.services.payments_crud import _assert_period_open
@@ -176,7 +183,10 @@ def restore_account_transaction(tx_id):
 def edit_account_transaction(tx_id):
     tx = AccountTransaction.query.get_or_404(tx_id)
     try:
-        if tx.reconciliation_id or tx.source_type in ('Payment', 'SupplierPayment', 'AccountReconciliation') or re.search(r'\[SRC:(?:Payment|ClientRefund|SupplierPayment):\d+\]', tx.note or '', re.IGNORECASE):
+        if (tx.reconciliation_id or (tx.source_type or '').lower() in
+                ('payment', 'supplierpayment', 'accountreconciliation', 'booking', 'directsale', 'deliverypersonpayment') or
+                re.search(r'\[SRC:(?:Payment|ClientRefund|SupplierPayment|Booking|DirectSale|DeliveryPersonPayment):\d+\]',
+                          tx.note or '', re.IGNORECASE)):
             raise ValueError('Linked financial entries must be edited from their shared source form; reconciliation entries are immutable.')
         from app.services.payments_crud import _assert_period_open
         for account_id in {tx.from_account_id, tx.to_account_id}:
@@ -353,28 +363,41 @@ def transaction_client_dues():
 @accounts_bp.route('/transactions/account-balance')
 @login_required
 def transaction_account_balance():
-    """JSON live balance snapshot for the Accounts workspace Receive/Pay/Transfer.
-
-    Read-only: answers "what is the current balance and status of this account?"
-    """
+    """Return the current spendable account balance used when saving payments."""
     from .workspace import _require_view
+    from app.services.account_setup import setup_accounts_query
+    from app.services.accounting import _account_minor
+    from app.services.payments_crud import ledger_balances
+    from utils.money import from_minor, to_minor
 
     _require_view()
-    picked = (request.args.get('account_id') or '').strip()
+    account_id = request.args.get('account_id', type=int)
+    account = (setup_accounts_query().filter(Account.id == account_id).first()
+               if account_id and account_id > 0 else None)
     payload = {'found': False}
-    if picked:
-        account = Account.query.get(picked)
-        if account:
-            balance = round(float(account.balance or 0), 2)
-            payload = {
-                'found': True,
-                'kind': 'account',
-                'id': account.id,
-                'name': account.name,
-                'is_active': account.is_active is not False,
-                'balance': balance,
-                'status': 'active' if account.is_active else ('suspended' if account.is_suspended else 'inactive'),
-            }
+    if account:
+        # Posting uses balance_minor, not the legacy float. Also expose the
+        # independently calculated ledger balance so an existing discrepancy
+        # is visible instead of silently changing any financial records.
+        balance_minor = _account_minor(account)
+        ledger_minor = None
+        try:
+            ledger_minor = to_minor(ledger_balances([account.id])[account.id])
+        except Exception:
+            logger.exception('Account ledger balance lookup failed for %s', account.id)
+        active = account.is_active is not False
+        payload = {
+            'found': True,
+            'kind': 'account',
+            'id': account.id,
+            'name': account.name,
+            'is_active': active,
+            'balance': float(from_minor(balance_minor)),
+            'balance_minor': balance_minor,
+            'ledger_balance': float(from_minor(ledger_minor)) if ledger_minor is not None else None,
+            'ledger_balance_minor': ledger_minor,
+            'status': 'active' if active else 'suspended',
+        }
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
@@ -385,48 +408,49 @@ def transaction_account_balance():
 @accounts_bp.route('/transactions/supplier-dues')
 @login_required
 def transaction_supplier_dues():
-    """JSON payable snapshot behind the New Transaction supplier picker.
-
-    Read-only: answers "what does this supplier owe/have in advance?"
-    """
+    """Return the selected supplier's current, unfiltered ledger balance."""
     from .workspace import _require_view
+    from app.services.time_money import pk_now
+    from utils.money import from_minor, to_minor
 
     _require_view()
-    picked = (request.args.get('supplier_code') or request.args.get('q') or '').strip()
+    supplier_id = request.args.get('supplier_id', type=int)
+    # Preserve the old numeric parameter name for existing callers.
+    if supplier_id is None:
+        supplier_id = request.args.get('supplier_code', type=int)
+    supplier = db.session.get(Supplier, supplier_id) if supplier_id and supplier_id > 0 else None
     payload = {'found': False}
-    if picked:
-        from app.services.payments_crud import _resolve_supplier
-        supplier = _resolve_supplier(picked)
-        if supplier:
-            # We use the same pattern as client dues but for supplier ledger.
-            # For now, we use supplier's balance (if available) or calculate from ledger.
-            # Assuming Supplier model has balance or similar.
-            balance = None
-            try:
-                # If Supplier has a balance field or similar service
-                from app.services.finance_suppliers import _supplier_balance_as_of
-                balance = round(float(_supplier_balance_as_of(supplier) or 0), 2)
-            except Exception:
-                logger.exception('Supplier dues lookup failed for %s', getattr(supplier, 'code', ''))
-            
-            payload = {
-                'found': True,
-                'kind': 'supplier',
-                'code': (supplier.code or '').strip(),
-                'name': (supplier.name or '').strip(),
-                'phone': (supplier.phone or '').strip(),
-                'is_active': supplier.is_active is not False,
-                'balance': balance,
-                'generated_at': pk_now().strftime('%Y-%m-%d %H:%M'),
-            }
-            if balance is None:
-                payload.update({'payable': None, 'advance': None, 'status': 'unavailable'})
-            else:
-                payload.update({
-                    'payable': round(max(0.0, balance), 2),
-                    'advance': round(max(0.0, -balance), 2),
-                    'status': 'payable' if balance > 0.004 else ('advance' if balance < -0.004 else 'settled'),
-                })
+    if supplier:
+        balance_minor = None
+        try:
+            # This is the same projection used by the supplier ledger: it
+            # includes GRNs, opening balances, payments, refunds and legacy
+            # GRN payments without counting linked payments twice.
+            from app.services.financial_ledgers import build_supplier_financial_ledger
+            balance_minor = to_minor(build_supplier_financial_ledger(supplier)['closing_balance'])
+        except Exception:
+            logger.exception('Supplier dues lookup failed for %s', supplier.id)
+
+        payload = {
+            'found': True,
+            'kind': 'supplier',
+            'id': supplier.id,
+            'code': f'SUP-{supplier.id:04d}',
+            'name': (supplier.name or '').strip(),
+            'phone': (supplier.phone or '').strip(),
+            'is_active': supplier.is_active is not False,
+            'balance': float(from_minor(balance_minor)) if balance_minor is not None else None,
+            'balance_minor': balance_minor,
+            'generated_at': pk_now().strftime('%Y-%m-%d %H:%M'),
+        }
+        if balance_minor is None:
+            payload.update({'payable': None, 'advance': None, 'status': 'unavailable'})
+        else:
+            payload.update({
+                'payable': float(from_minor(max(0, balance_minor))),
+                'advance': float(from_minor(max(0, -balance_minor))),
+                'status': 'payable' if balance_minor > 0 else ('advance' if balance_minor < 0 else 'settled'),
+            })
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'

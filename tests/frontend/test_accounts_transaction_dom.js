@@ -25,7 +25,7 @@ const picker = (kind, items, inputId, listId, valueId, value, placeholder, label
     <button type="button" class="aw-picker-toggle" data-picker-toggle tabindex="-1"></button>
   </div>
   <div class="aw-picker-list" id="${listId}" role="listbox" data-picker-list hidden></div>
-  <input type="hidden" name="${kind === 'party' ? 'party_id' : 'client_code'}" id="${valueId}" data-picker-value value="${value}">
+  <input type="hidden" name="${({party: 'party_id', sourceAccount: 'receive_from_account_id', supplier: 'supplier_id', client_refund: 'refund_client_code'})[kind] || 'client_code'}" id="${valueId}" data-picker-value value="${value}">
   ${kind === 'party' ? '<input type="hidden" name="party_name" id="tx-party-name" value="">' : ''}
   <p class="aw-help" data-picker-help>${kind === 'party' ? 'Pick a saved party, or type a new name.' : '2 active clients.'}</p>
 </div>`;
@@ -36,11 +36,15 @@ const fixture = `<!doctype html><html><body>
 <input name="idempotency_key" value="browser-test-key-123456"><input type="hidden" id="tx-mode" name="tx_mode" value="receive">
 <a data-tx-mode="receive" class="is-active">Receive</a><a data-tx-mode="pay">Pay</a><a data-tx-mode="transfer">Transfer</a>
 <p id="tx-intro"></p>
-<fieldset data-tx-panel="receive"><select id="tx-receive-account" name="receive_account_id" required>${accountOptions([['', 'Select an account', false], ...accounts])}</select><p data-balance-help="receive"></p></fieldset>
-<fieldset data-tx-panel="pay" disabled hidden><select id="tx-pay-account" name="pay_from_account_id" required>${accountOptions([['', 'Select', false], ...accounts])}</select><p data-balance-help="pay"></p></fieldset>
-<fieldset data-tx-panel="transfer" disabled hidden><select id="tx-transfer-from" name="transfer_from_account_id" required>${accountOptions([['', 'Select', false], ...accounts])}</select><select id="tx-transfer-to" name="transfer_to_account_id" required>${accountOptions([['', 'Select', false], ['1', 'Till', false], ['2', 'Bank', true]])}</select><p data-balance-help="transfer-from"></p><p data-balance-help="transfer-to"></p><p id="tx-same-account" hidden></p></fieldset>
+<fieldset data-tx-panel="receive"><select id="tx-receive-account" name="receive_account_id" required data-account-select>${accountOptions([['', 'Select an account', false], ...accounts])}</select><p data-balance-help="receive"></p></fieldset>
+<fieldset data-tx-panel="pay" disabled hidden><select id="tx-pay-account" name="pay_from_account_id" required data-account-select>${accountOptions([['', 'Select', false], ...accounts])}</select><p data-balance-help="pay"></p></fieldset>
+<fieldset data-tx-panel="transfer" disabled hidden><select id="tx-transfer-from" name="transfer_from_account_id" required data-account-select>${accountOptions([['', 'Select', false], ...accounts])}</select><select id="tx-transfer-to" name="transfer_to_account_id" required data-account-select>${accountOptions([['', 'Select', false], ['1', 'Till', false], ['2', 'Bank', true]])}</select><p data-balance-help="transfer-from"></p><p data-balance-help="transfer-to"></p><p id="tx-same-account" hidden></p></fieldset>
 <fieldset data-tx-panel="receive">
   <input type="hidden" name="receive_source" id="tx-receive-source" value="client">
+  <select id="tx-receive-group" name="receive_group"><option value="client_ledger">Client Ledger</option><option value="party">Party</option><option value="other_source">Other</option><option value="Loan">Loan</option></select>
+  <fieldset data-tx-source-panel="account" disabled hidden>
+    ${picker('sourceAccount', 'sourceAccounts', 'tx-source-account-search', 'tx-source-account-list', 'tx-source-account-id', '', 'Search accounts…', 'Source account')}
+  </fieldset>
   <button type="button" data-tx-source="client" class="aw-source-tab is-active">Client</button>
   <button type="button" data-tx-source="party" class="aw-source-tab">Party</button>
   <button type="button" data-tx-source="other" class="aw-source-tab">Other</button>
@@ -61,7 +65,14 @@ const fixture = `<!doctype html><html><body>
     <input id="tx-receive-other" name="party" value="">
   </fieldset>
 </fieldset>
-<fieldset data-tx-panel="pay" disabled hidden><label id="tx-party-label" for="tx-party">Paid to </label><input id="tx-party" name="party" value=""></fieldset>
+<fieldset data-tx-panel="pay" disabled hidden>
+  <select id="tx-pay-target" name="pay_target"><option value="supplier">Supplier</option><option value="client_refund">Refund</option><option value="expense" selected>Expense</option><option value="other">Other</option></select>
+  <fieldset data-pay-target-panel="supplier" disabled hidden>${picker('supplier', 'suppliers', 'tx-supplier-search', 'tx-supplier-list', 'tx-supplier-id', '', 'Search suppliers…', 'Supplier')}
+    <div id="tx-supplier-dues" hidden><span id="tx-supplier-balance-label"></span><strong id="tx-supplier-payable"></strong><p id="tx-supplier-dues-note"></p><p id="tx-supplier-after"></p></div>
+  </fieldset>
+  <fieldset data-pay-target-panel="client_refund" disabled hidden>${picker('client_refund', 'refundClients', 'tx-client_refund-search', 'tx-client_refund-list', 'tx-refund-code', '', 'Search clients…', 'Client')}</fieldset>
+  <fieldset data-pay-target-panel="expense other"><label id="tx-party-label" for="tx-party">Paid to </label><input id="tx-party" name="party" value=""></fieldset>
+</fieldset>
 <fieldset data-tx-panel="receive pay" id="tx-category-section"><select id="tx-category" name="category"><option value="">Uncategorized</option><option value="Income">Income</option><option value="Expense">Expense</option><option value="Both">Both</option></select><span id="tx-category-help"></span><div id="tx-subcategory-field"><select id="tx-subcategory" name="subcategory"><option value="">None</option></select></div><p id="tx-category-client-note" hidden></p></fieldset>
 <label id="tx-amount-label" for="tx-amount">Amount (PKR) *</label><input id="tx-amount" name="amount" type="number" min="0" step="0.01" required value="125.25"><p id="tx-amount-help"></p>
 <div id="tx-discount-field" hidden><label id="tx-discount-label" for="tx-discount">Discount (PKR)</label><input id="tx-discount" name="discount" type="number" min="0" step="0.01" disabled value=""></div>
@@ -70,7 +81,7 @@ const fixture = `<!doctype html><html><body>
 <strong id="tx-preview-amount"></strong><span id="tx-preview-from-label"></span><strong id="tx-preview-from"></strong><span id="tx-preview-to-label"></span><strong id="tx-preview-to"></strong>
 <div id="tx-preview-dues" hidden><strong id="tx-preview-payable"></strong><strong id="tx-preview-received"></strong><strong id="tx-preview-discount"></strong><strong id="tx-preview-remaining"></strong></div>
 <span id="tx-preview-balance-label"></span><strong id="tx-preview-balance"></strong><p id="tx-funds-warning" hidden></p><p id="tx-preview-help"></p>
-<button id="tx-submit" type="submit"><span>Receive money</span></button>
+<button id="tx-refresh-balances" type="button">Refresh</button><button id="tx-submit" type="submit"><span>Receive money</span></button>
 </form></body></html>`;
 
 const html = process.env.AW_PAGE_HTML ? fs.readFileSync(process.env.AW_PAGE_HTML, 'utf8') : fixture;
@@ -86,6 +97,12 @@ w.bootstrap = { Modal: { getOrCreateInstance: () => ({ show() {} }) } };
 const duesCalls = [];
 let duesPayload = { found: true, name: 'Ali Traders', code: 'C-001', balance: 12500, payable: 12500, advance: 0, status: 'payable' };
 w.fetch = url => {
+  const parsed = new URL(url, w.location.href);
+  if (parsed.pathname.endsWith('/account-balance')) {
+    const account = w.AW_DATA.accounts.find(a => String(a.id) === parsed.searchParams.get('account_id'));
+    const payload = account ? { found: true, id: account.id, is_active: true, balance: account.current_balance } : { found: false };
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) });
+  }
   duesCalls.push(String(url));
   return Promise.resolve({ ok: true, json: () => Promise.resolve(duesPayload) });
 };
@@ -116,6 +133,8 @@ if (!process.env.AW_PAGE_HTML) {
       other: { label: 'Other', hint: 'Type a name.' }
     },
     clientDuesUrl: '/accounts/transactions/client-dues',
+    supplierDuesUrl: '/accounts/transactions/supplier-dues',
+    accountBalanceUrl: '/accounts/transactions/account-balance',
     accountsList: [], formValues: {}
   };
 }
@@ -127,7 +146,7 @@ function check(name, condition, extra) {
 }
 const $ = id => d.getElementById(id);
 const clickMode = mode => d.querySelector('[data-tx-mode="' + mode + '"]').click();
-const clickSource = source => d.querySelector('[data-tx-source="' + source + '"]').click();
+const clickSource = source => { const group = $('tx-receive-group'); group.value = ({client: 'client_ledger', party: 'party', other: 'other_source'})[source]; group.dispatchEvent(new w.Event('change', { bubbles: true })); };
 const change = (id, value) => { $(id).value = value; $(id).dispatchEvent(new w.Event('change', { bubbles: true })); };
 const type = (id, value) => { $(id).value = value; $(id).dispatchEvent(new w.Event('input', { bubbles: true })); };
 const panelOf = source => d.querySelector('[data-tx-source-panel="' + source + '"]');
@@ -156,7 +175,7 @@ if (process.env.AW_PAGE_HTML) {
   const aliases = Object.fromEntries(Object.entries(names).map(([alias, name]) => [name, alias]));
   categories.forEach(c => { c.name = aliases[c.name] || c.name; });
   accounts[0].name = 'Till'; accounts[1].name = 'Bank';
-  accounts[0].current_balance = 1000; accounts[1].current_balance = 500;
+  accounts[0].current_balance = 1000; accounts[0].current_balance_minor = 100000; accounts[1].current_balance = 500; accounts[1].current_balance_minor = 50000;
   categories.find(c => c.name === 'Income').subcategories = ['Hire'];
   categories.find(c => c.name === 'Expense').subcategories = ['Fuel', 'Repairs'];
   // Point the dues stub at whatever client the rendered page actually has.
@@ -166,7 +185,7 @@ if (process.env.AW_PAGE_HTML) {
   }
 }
 w.eval(code);
-d.dispatchEvent(new w.Event('DOMContentLoaded'));
+await settle(); await settle();
 
 /* ----- mode + source defaults ----- */
 check('receive is the initial mode', $('tx-mode').value === 'receive');
@@ -281,6 +300,7 @@ check('escape closes the list', $('tx-client-list').hidden);
 
 /* ----- pay / transfer behaviour is unchanged ----- */
 clickMode('pay');
+await settle(); await settle();
 check('pay switches panels and URL', $('tx-mode').value === 'pay' && !$('tx-pay-account').closest('fieldset').disabled && $('tx-receive-account').closest('fieldset').disabled && w.location.search.includes('mode=pay'));
 check('pay hides every receive source panel', ['client', 'party', 'other'].every(source => panelOf(source).disabled));
 check('pay keeps the discount closed', $('tx-discount').disabled && $('tx-discount-field').hidden);
@@ -296,11 +316,13 @@ check('insufficient funds blocks submit', !$('tx-funds-warning').hidden && $('tx
 change('tx-amount', '100');
 check('valid amount re-enables submit', !$('tx-submit').disabled);
 clickMode('transfer');
+await settle(); await settle();
 check('transfer disables party and category fields', $('tx-party').closest('fieldset').disabled && $('tx-category').closest('fieldset').disabled);
 check('transfer preview shows both accounts', $('tx-preview-from').textContent === 'Till' && $('tx-preview-to').textContent === 'Bank');
 change('tx-transfer-to', $('tx-transfer-from').value);
 check('same-account transfer is blocked', !$('tx-same-account').hidden && $('tx-submit').disabled && $('tx-transfer-to').validity.customError);
 change('tx-transfer-to', Array.from($('tx-transfer-to').options).find(option => option.value && option.value !== $('tx-transfer-from').value).value);
+await settle(); await settle();
 check('different destination restores submit', !$('tx-submit').disabled);
 
 /* ----- submit ----- */
@@ -322,6 +344,7 @@ check('submit retains idempotency key and prevents double click', posts === 1 &&
 $('tx-submit').click();
 check('second click does not submit', posts === 1 && blocked === 0, [posts, blocked]);
 w.dispatchEvent(new w.Event('pageshow'));
+await settle(); await settle();
 check('back-forward cache restores button', !$('tx-submit').disabled);
 
 /* ----- an unpicked client cannot be submitted ----- */

@@ -89,7 +89,7 @@
 </script>
 
 <div class="aw-metrics">
-  <div class="aw-metric"><span>Active balance</span><strong class="aw-mono">{{ '{:,.2f}'.format(cf_active_balance) }}</strong></div>
+  <div class="aw-metric"><span>{{ "Account balance" if cf_account_id else "Active balance" }}</span><strong class="aw-mono">{{ '{:,.2f}'.format(cf_active_balance) }}</strong></div>
   <div class="aw-metric"><span>Money in</span><strong class="aw-mono aw-positive">{{ '{:,.2f}'.format(cf_summary.total_cash_in) }}</strong></div>
   <div class="aw-metric"><span>Money out</span><strong class="aw-mono aw-negative">{{ '{:,.2f}'.format(cf_summary.total_cash_out) }}</strong></div>
   <div class="aw-metric"><span>Net movement</span><strong class="aw-mono {{ 'aw-positive' if cf_net >= 0 else 'aw-negative' }}">{{ '{:,.2f}'.format(cf_net) }}</strong></div>
@@ -103,7 +103,12 @@
       {% for row in cf_rows %}
       <tr>
         <td class="aw-muted aw-nowrap">{{ row.date.strftime('%d %b %Y') if row.date else '—' }}</td>
-        <td><div class="aw-name">{{ row.description or row.origin_label or row.reference or 'Movement' }}</div>{% if row.party_name %}<div class="aw-muted">{{ row.party_name }}</div>{% endif %}</td>
+        <td>
+          <div class="aw-name">{{ row.description or row.origin_label or row.reference or 'Movement' }}</div>
+          {% if row.party_name %}<div class="aw-muted">{{ row.party_name }}</div>{% endif %}
+          <div class="aw-muted">{{ row.origin_label }}{% if row.reference %} · {{ row.reference }}{% endif %}</div>
+          {% if row.warning %}<div class="text-danger">{{ row.warning }}</div>{% endif %}
+        </td>
         <td>{{ row.category or '—' }}{% if row.subcategory %}<div class="aw-muted">{{ row.subcategory }}</div>{% endif %}</td>
         <td>{{ row.account_display or row.account_name or '—' }}</td>
         <td><span class="aw-direction aw-direction-{{ 'in' if row.type == 'in' else ('out' if row.type == 'out' else 'both') }}">{{ row.tx_type_label }}</span></td>
@@ -116,7 +121,7 @@
   </table>
 </div>
 <div class="aw-table-footer">
-  <span class="aw-muted">{{ cf_total_rows }} movement{{ 's' if cf_total_rows != 1 else '' }} · transfers between your accounts are not counted as money in or out</span>
+  <span class="aw-muted">{{ cf_total_rows }} movement{{ 's' if cf_total_rows != 1 else '' }} · internal transfers are not counted as money in or out{% if cf_account_id %}, but are included in this account’s net movement{% endif %}</span>
   {% if cf_total_pages > 1 %}
   <div class="aw-pagination">
     {% if cf_prev_url %}<a class="aw-btn aw-btn-ghost aw-btn-sm" href="{{ cf_prev_url }}">Previous</a>{% endif %}

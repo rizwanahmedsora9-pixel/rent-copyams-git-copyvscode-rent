@@ -52,23 +52,23 @@
           <div class="bg-light p-3 rounded">
             <div class="row mb-2">
               <div class="col-6">Calculated Closing:</div>
-              <div class="col-6 text-end"><strong>Rs. {{ "{:,.0f}".format(reconciliation.calculated_closing or 0) }}</strong></div>
+              <div class="col-6 text-end"><strong>Rs. {{ "{:,.2f}".format(reconciliation.calculated_closing or 0) }}</strong></div>
             </div>
             <div class="row mb-2">
               <div class="col-6">Physical Cash:</div>
-              <div class="col-6 text-end"><strong style="color:#0369a1;">Rs. {{ "{:,.0f}".format(reconciliation.physical_cash_available) }}</strong></div>
+              <div class="col-6 text-end"><strong style="color:#0369a1;">Rs. {{ "{:,.2f}".format(reconciliation.physical_cash_available) }}</strong></div>
             </div>
             <div class="row mb-2 border-top pt-2">
               <div class="col-6">Difference:</div>
-              <div class="col-6 text-end"><strong style="color:{{ '#dc2626' if reconciliation.difference < 0 else '#16a34a' }};">Rs. {{ "{:,.0f}".format(reconciliation.difference) }}</strong></div>
+              <div class="col-6 text-end"><strong style="color:{{ '#dc2626' if reconciliation.difference < 0 else '#16a34a' }};">Rs. {{ "{:,.2f}".format(reconciliation.difference) }}</strong></div>
             </div>
           </div>
-          <p class="mt-2"><small class="text-muted">Next day opening = Physical Cash = Rs. {{ "{:,.0f}".format(reconciliation.physical_cash_available) }}</small></p>
+          <p class="mt-2"><small class="text-muted">Next day opening = Physical Cash = Rs. {{ "{:,.2f}".format(reconciliation.physical_cash_available) }}</small></p>
           {% else %}
           <div class="bg-light p-3 rounded">
             <div class="row mb-2">
               <div class="col-6">Difference (Legacy):</div>
-              <div class="col-6 text-end"><strong>Rs. {{ "{:,.0f}".format(reconciliation.amount or 0) }}</strong></div>
+              <div class="col-6 text-end"><strong>Rs. {{ "{:,.2f}".format(reconciliation.amount or 0) }}</strong></div>
             </div>
           </div>
           <p class="mt-2"><small class="text-muted">Legacy workflow - no physical cash data</small></p>
@@ -123,28 +123,28 @@
             <td><small>{{ audit.changed_by or "—" }}</small></td>
             <td class="text-end">
               {% if audit.old_physical_cash is not none %}
-              <small>Rs. {{ "{:,.0f}".format(audit.old_physical_cash) }}</small>
+              <small>Rs. {{ "{:,.2f}".format(audit.old_physical_cash) }}</small>
               {% else %}
               <small class="text-muted">—</small>
               {% endif %}
             </td>
             <td class="text-end">
               {% if audit.new_physical_cash is not none %}
-              <small><strong>Rs. {{ "{:,.0f}".format(audit.new_physical_cash) }}</strong></small>
+              <small><strong>Rs. {{ "{:,.2f}".format(audit.new_physical_cash) }}</strong></small>
               {% else %}
               <small class="text-muted">—</small>
               {% endif %}
             </td>
             <td class="text-end">
               {% if audit.old_difference is not none %}
-              <small>Rs. {{ "{:,.0f}".format(audit.old_difference) }}</small>
+              <small>Rs. {{ "{:,.2f}".format(audit.old_difference) }}</small>
               {% else %}
               <small class="text-muted">—</small>
               {% endif %}
             </td>
             <td class="text-end">
               {% if audit.new_difference is not none %}
-              <small><strong>Rs. {{ "{:,.0f}".format(audit.new_difference) }}</strong></small>
+              <small><strong>Rs. {{ "{:,.2f}".format(audit.new_difference) }}</strong></small>
               {% else %}
               <small class="text-muted">—</small>
               {% endif %}
