@@ -330,6 +330,23 @@
             flex-direction: column;
         }
         .loading-overlay.show { display: flex; }
+        /* Slim, non-blocking progress bar used for page links.  The full-screen
+           overlay stays reserved for work that actually needs the user to wait
+           (saves, imports, exports). */
+        .ams-top-progress {
+            position: fixed;
+            top: 0; left: 0;
+            height: 3px;
+            width: 0;
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+            z-index: 10000;
+            opacity: 0;
+            transition: width .2s ease, opacity .2s ease;
+            pointer-events: none;
+        }
+        .ams-top-progress.show { opacity: 1; }
+        .loading-overlay.soft { background: rgba(15, 23, 42, 0.35); }
         .loading-spinner {
             width: 50px; height: 50px;
             border: 4px solid #334155;
@@ -364,6 +381,7 @@
 </head>
 <body>
 
+<div class="ams-top-progress" id="amsTopProgress" aria-hidden="true"></div>
 <div class="loading-overlay" id="loadingOverlay">
     <div class="loading-spinner"></div>
     <div class="loading-text mt-3 text-warning fw-bold">Processing...</div>
@@ -960,8 +978,31 @@ function toggleNavGroup(groupId, btn) {
     // Global Utilities
     let loadingShownAt = 0;
     let loadingWatchTimer = null;
+    let loadingDelayTimer = null;
     let __formSubmitting = false;
-    function showLoading() {
+    const topProgress = document.getElementById('amsTopProgress');
+    let topProgressTimer = null;
+    function showTopProgress() {
+        // Navigation feedback without a blocking curtain: a fast page change
+        // never shows the "Processing…" overlay, so the app feels immediate.
+        if (!topProgress) return;
+        topProgress.classList.add('show');
+        topProgress.style.width = '35%';
+        if (topProgressTimer) clearTimeout(topProgressTimer);
+        topProgressTimer = setTimeout(() => { topProgress.style.width = '70%'; }, 400);
+    }
+    function hideTopProgress() {
+        if (topProgressTimer) { clearTimeout(topProgressTimer); topProgressTimer = null; }
+        if (!topProgress) return;
+        topProgress.style.width = '100%';
+        setTimeout(() => {
+            if (!topProgress) return;
+            topProgress.classList.remove('show');
+            topProgress.style.width = '0';
+        }, 180);
+    }
+    function _revealLoadingOverlay() {
+        loadingDelayTimer = null;
         if (!loadingOverlay) return;
         loadingOverlay.classList.add('show');
         loadingShownAt = Date.now();
@@ -973,6 +1014,20 @@ function toggleNavGroup(groupId, btn) {
         if (loadingWatchTimer) clearTimeout(loadingWatchTimer);
         // Reduced from 120s to 30s — users should not wait 2 minutes for a stuck overlay
         loadingWatchTimer = setTimeout(hideLoading, 30000);
+    }
+    function showLoading(delayMs) {
+        // Waiting a beat before covering the screen means a normal save that
+        // finishes in ~200ms never paints the overlay at all.
+        const wait = (typeof delayMs === 'number') ? Math.max(0, delayMs) : 220;
+        if (loadingDelayTimer) { clearTimeout(loadingDelayTimer); loadingDelayTimer = null; }
+        if (wait === 0) { _revealLoadingOverlay(); return; }
+        hideTopProgress();
+        loadingDelayTimer = setTimeout(_revealLoadingOverlay, wait);
+    }
+    function showLoadingNow() {
+        if (loadingDelayTimer) { clearTimeout(loadingDelayTimer); loadingDelayTimer = null; }
+        hideTopProgress();
+        _revealLoadingOverlay();
     }
     function lockForm(form, lock) {
         // Immediate visual + behavioural submit lock: disable submit controls so
@@ -989,6 +1044,7 @@ function toggleNavGroup(groupId, btn) {
         document.querySelectorAll('form').forEach(function (f) { lockForm(f, false); });
     }
     function hideLoading() {
+        if (loadingDelayTimer) { clearTimeout(loadingDelayTimer); loadingDelayTimer = null; }
         if (loadingOverlay) loadingOverlay.classList.remove('show');
         loadingShownAt = 0;
         __formSubmitting = false;
@@ -1014,7 +1070,14 @@ function toggleNavGroup(groupId, btn) {
         if (typeof closeTaskProgressNow === 'function') closeTaskProgressNow();
     });
     window.showLoading = showLoading;
+    window.showLoadingNow = showLoadingNow;
+    window.showTopProgress = showTopProgress;
+    window.hideTopProgress = hideTopProgress;
     window.hideLoading = hideLoading;
+    // A page restored from the back/forward cache (or a navigation that was
+    // cancelled) must never keep a curtain up.
+    window.addEventListener('pageshow', function () { hideTopProgress(); hideLoading(); });
+    window.addEventListener('pagehide', function () { hideTopProgress(); });
     document.addEventListener('click', function (e) {
         if (e.target && e.target.id === 'loadingDismissBtn') hideLoading();
     });
@@ -1410,6 +1473,18 @@ function toggleNavGroup(groupId, btn) {
     }
     function startTaskProgress(title, text) {
         if (typeof hideLoading === 'function') hideLoading();  // one progress state at a time
+        // Give the browser a moment to finish the request first.  A save that
+        // completes quickly never shows this dialog at all, which removes the
+        // "Processing…" flash that made the app feel slow.
+        if (typeof showTopProgress === 'function') showTopProgress();
+        if (window.__amsTaskStartTimer) clearTimeout(window.__amsTaskStartTimer);
+        window.__amsTaskStartTimer = setTimeout(function () {
+            window.__amsTaskStartTimer = null;
+            _beginTaskProgress(title, text);
+        }, 320);
+    }
+    function _beginTaskProgress(title, text) {
+        if (typeof hideTopProgress === 'function') hideTopProgress();
         const modal = ensureTaskProgressModal();
         if (!modal) return;
         if (taskProgressTitle) taskProgressTitle.textContent = title || 'Processing';
@@ -1431,6 +1506,8 @@ function toggleNavGroup(groupId, btn) {
         modal.show();
     }
     function finishTaskProgress() {
+        if (window.__amsTaskStartTimer) { clearTimeout(window.__amsTaskStartTimer); window.__amsTaskStartTimer = null; }
+        if (typeof hideTopProgress === 'function') hideTopProgress();
         if (taskProgressWatchdog) { clearTimeout(taskProgressWatchdog); taskProgressWatchdog = null; }
         if (taskProgressTimer) {
             clearInterval(taskProgressTimer);
@@ -1442,6 +1519,8 @@ function toggleNavGroup(groupId, btn) {
         }, 250);
     }
     function closeTaskProgressNow() {
+        if (window.__amsTaskStartTimer) { clearTimeout(window.__amsTaskStartTimer); window.__amsTaskStartTimer = null; }
+        if (typeof hideTopProgress === 'function') hideTopProgress();
         if (taskProgressWatchdog) { clearTimeout(taskProgressWatchdog); taskProgressWatchdog = null; }
         if (taskProgressTimer) {
             clearInterval(taskProgressTimer);
@@ -1765,7 +1844,7 @@ function toggleNavGroup(groupId, btn) {
                 return;
             }
             __formSubmitting = true;
-            showLoading();
+            showTopProgress();
         });
     });
 
@@ -1830,7 +1909,7 @@ function toggleNavGroup(groupId, btn) {
                 return;
             }
             __formSubmitting = true;
-            showLoading();
+            showTopProgress();
         });
     });
 

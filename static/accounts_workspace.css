@@ -308,3 +308,36 @@
   .aw-picker-meta { white-space: normal; }
   .aw-tx-preview { position: static; }
 }
+
+/* ---- Category / subcategory chips ---------------------------------------
+   Subcategories are managed inline on the Categories tab: the chips show what
+   exists (and how it is used) while the small form below them adds a new one
+   or renames the one picked with the pencil. */
+.aw-chips { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.aw-chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .18rem .45rem .18rem .55rem;
+  border: 1px solid var(--border-color, rgba(148,163,184,.35));
+  border-radius: 999px;
+  background: rgba(148,163,184,.10);
+  font-size: .78rem; line-height: 1.5; text-decoration: none; color: inherit;
+  white-space: nowrap;
+}
+.aw-chip.is-off { opacity: .55; text-decoration: line-through; }
+.aw-chip-btn {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  padding: 0 .1rem; line-height: 1; display: inline-flex; align-items: center;
+  opacity: .55; font-size: .72rem;
+}
+.aw-chip-btn:hover, .aw-chip-btn:focus-visible { opacity: 1; }
+.aw-chip-btn:disabled { opacity: .25; cursor: not-allowed; }
+.aw-chip-btn.aw-danger:hover { color: #ef4444; }
+.aw-sub-form {
+  display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .5rem;
+}
+.aw-input.aw-input-sm, .aw-sub-form .aw-input {
+  min-height: 34px; padding: .25rem .5rem; font-size: .82rem; width: auto; flex: 1 1 10rem;
+}
+.aw-sub-form .aw-btn-sm { min-height: 34px; }
+.aw-expense-summary { margin-bottom: 1.25rem; }
+.aw-expense-summary .aw-chip { font-variant-numeric: tabular-nums; }

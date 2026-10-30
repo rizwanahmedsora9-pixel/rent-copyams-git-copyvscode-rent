@@ -1,0 +1,144 @@
+<div class="aw-toolbar">
+  <div>
+    <h1 class="aw-heading">Expenses</h1>
+    <p class="aw-subheading">Every rupee that left an account, traced by category and subcategory.</p>
+  </div>
+  {% if can_post %}
+  <a class="aw-btn aw-btn-primary" href="{{ url_for('accounts.add_transaction', mode='pay') }}"><i class="bi bi-plus-lg" aria-hidden="true"></i> Record expense</a>
+  {% endif %}
+</div>
+
+<form class="aw-filters aw-filters-wide" method="get" action="{{ url_for('accounts.expenses') }}" data-ex-filter-form>
+  <label class="aw-field-inline"><span>From</span><input class="aw-input" type="date" name="from_date" value="{{ ex_from }}"></label>
+  <label class="aw-field-inline"><span>To</span><input class="aw-input" type="date" name="to_date" value="{{ ex_to }}"></label>
+  <label class="aw-field-inline"><span>Category</span>
+    <select class="aw-select" name="category" data-ex-category>
+      <option value="">All categories</option>
+      {% for option in ex_category_options %}
+      <option value="{{ option }}" {% if ex_category|lower == option|lower %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="aw-field-inline"><span>Subcategory</span>
+    <select class="aw-select" name="subcategory" data-ex-subcategory>
+      <option value="">All subcategories</option>
+      {% for option in ex_subcategory_options %}
+      <option value="{{ option }}" data-parent="{{ ex_subcategory_parents.get(option, '') }}" {% if ex_subcategory|lower == option|lower %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="aw-field-inline"><span>Paid from</span>
+    <select class="aw-select" name="account_id">
+      <option value="">All accounts</option>
+      {% for account in accounts %}
+      <option value="{{ account.id }}" {% if ex_account_id == account.id %}selected{% endif %}>{{ account.name }}{{ ' (suspended)' if not account.is_active }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="aw-search"><i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Search expenses</span><input type="search" name="q" value="{{ ex_q }}" placeholder="Search payee, note, reference"></label>
+  <button class="aw-btn aw-btn-ghost" type="submit">Apply</button>
+  {% if ex_category or ex_subcategory or ex_q or ex_account_id %}
+  <a class="aw-btn aw-btn-ghost" href="{{ url_for('accounts.expenses') }}">Reset</a>
+  {% endif %}
+</form>
+
+<div class="aw-metrics">
+  <div class="aw-metric"><span>Money out in period</span><strong class="aw-mono aw-negative">{{ '{:,.2f}'.format(ex_total) }}</strong></div>
+  <div class="aw-metric"><span>Expense entries</span><strong class="aw-mono">{{ ex_count }}</strong></div>
+  <div class="aw-metric"><span>Categories used</span><strong class="aw-mono">{{ ex_category_totals|length }}</strong></div>
+</div>
+
+{% if ex_category_totals %}
+<div class="aw-table-wrap aw-expense-summary">
+  <table class="aw-table">
+    <thead><tr><th scope="col">Category</th><th scope="col">Subcategories</th><th scope="col" class="aw-num">Spent</th><th scope="col" class="aw-num">Entries</th></tr></thead>
+    <tbody>
+      {% for item in ex_category_totals %}
+      <tr>
+        <td>
+          <a class="aw-name" href="{{ url_for('accounts.expenses', from_date=ex_from, to_date=ex_to, category=item.category) }}">{{ item.category }}</a>
+        </td>
+        <td>
+          <div class="aw-chips">
+            {% for sub in item.subcategory_rows %}
+            <a class="aw-chip" href="{{ url_for('accounts.expenses', from_date=ex_from, to_date=ex_to, category=item.category, subcategory=sub.name) }}" title="Filter by this subcategory">{{ sub.name }} · {{ '{:,.2f}'.format(sub.total) }}</a>
+            {% else %}
+            <span class="aw-muted">—</span>
+            {% endfor %}
+          </div>
+        </td>
+        <td class="aw-num aw-mono aw-negative">{{ '{:,.2f}'.format(item.total) }}</td>
+        <td class="aw-num aw-mono">{{ item.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if ex_rows %}
+<div class="aw-table-wrap">
+  <table class="aw-table">
+    <thead><tr><th scope="col">Date</th><th scope="col">Details</th><th scope="col">Category</th><th scope="col">Paid from</th><th scope="col">Type</th><th scope="col" class="aw-num">Amount</th></tr></thead>
+    <tbody>
+      {% for row in ex_rows %}
+      <tr>
+        <td class="aw-muted aw-nowrap">{{ row.date.strftime('%d %b %Y') if row.date else '—' }}</td>
+        <td>
+          <div class="aw-name">{{ row.description or row.origin_label or row.reference or 'Expense' }}</div>
+          {% if row.party_name %}<div class="aw-muted">{{ row.party_name }}</div>{% endif %}
+        </td>
+        <td>{{ row.category or 'Uncategorized' }}{% if row.subcategory %}<div class="aw-muted">{{ row.subcategory }}</div>{% endif %}</td>
+        <td>{{ row.account_display or row.account_name or '—' }}</td>
+        <td><span class="aw-direction aw-direction-out">{{ row.tx_type_label }}</span></td>
+        <td class="aw-num aw-mono aw-negative">−{{ '{:,.2f}'.format(row.amount) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="aw-table-footer">
+  <span class="aw-muted">{{ ex_count }} expense{{ 's' if ex_count != 1 else '' }} · totals include every money-out movement, including supplier payments and transfers out of an account</span>
+  {% if ex_total_pages > 1 %}
+  <div class="aw-pagination">
+    {% if ex_prev_url %}<a class="aw-btn aw-btn-ghost aw-btn-sm" href="{{ ex_prev_url }}">Previous</a>{% endif %}
+    <span class="aw-muted">Page {{ ex_page }} of {{ ex_total_pages }}</span>
+    {% if ex_next_url %}<a class="aw-btn aw-btn-ghost aw-btn-sm" href="{{ ex_next_url }}">Next</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="aw-empty aw-empty-inline">
+  <div class="aw-empty-icon"><i class="bi bi-receipt-cutoff" aria-hidden="true"></i></div>
+  <h2>No expenses in this period</h2>
+  <p>Payments, supplier payments and other money-out entries appear here as soon as they are recorded against an account.</p>
+  {% if can_post %}
+  <div class="aw-empty-actions">
+    <a class="aw-btn aw-btn-primary" href="{{ url_for('accounts.add_transaction', mode='pay') }}"><i class="bi bi-plus-lg" aria-hidden="true"></i> Record an expense</a>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+  (function () {
+    // Narrow the subcategory list to the selected category, like Cash Flow.
+    var form = document.querySelector('[data-ex-filter-form]');
+    if (!form) return;
+    var categorySelect = form.querySelector('[data-ex-category]');
+    var subSelect = form.querySelector('[data-ex-subcategory]');
+    if (!categorySelect || !subSelect) return;
+    var options = Array.prototype.slice.call(subSelect.querySelectorAll('option[data-parent]'));
+    function sync() {
+      var chosen = (categorySelect.value || '').toLowerCase();
+      options.forEach(function (option) {
+        var parent = (option.getAttribute('data-parent') || '').toLowerCase();
+        option.hidden = !!chosen && parent !== chosen;
+      });
+      var current = subSelect.options[subSelect.selectedIndex];
+      if (current && current.hidden) subSelect.value = '';
+    }
+    categorySelect.addEventListener('change', sync);
+    sync();
+  })();
+</script>

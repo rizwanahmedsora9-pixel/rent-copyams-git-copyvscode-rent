@@ -22,6 +22,8 @@
       {% include 'accounts/_workspace_accounts.html' %}
     {% elif active_tab == 'categories' %}
       {% include 'accounts/_workspace_categories.html' %}
+    {% elif active_tab == 'expenses' %}
+      {% include 'accounts/_workspace_expenses.html' %}
     {% else %}
       {% include 'accounts/_workspace_cash_flow.html' %}
     {% endif %}

@@ -8,6 +8,7 @@ never deleted by a setup action; used records can only be suspended.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func
@@ -88,6 +89,100 @@ def account_reference_count(account_id):
                 total += int(db.session.query(func.count()).select_from(table).filter(column == account_id).scalar() or 0)
     total += CashDayAccountPosition.query.filter_by(account_id=account_id).count()
     return total
+
+
+def account_reference_counts():
+    """Bulk version of :func:`account_reference_count`.
+
+    The per-account helper issues one COUNT per foreign key, so rendering a
+    list of *n* accounts costs ``n * (#columns referencing account.id)``
+    queries.  Grouping once per column brings that down to a fixed handful of
+    queries no matter how many accounts exist.
+    """
+    counts = defaultdict(int)
+    for table in db.metadata.sorted_tables:
+        for column in table.columns:
+            if table.name == "gl_account" and column.name == "linked_account_id":
+                continue
+            if not any(fk.target_fullname == "account.id" for fk in column.foreign_keys):
+                continue
+            rows = (
+                db.session.query(column, func.count())
+                .select_from(table)
+                .filter(column.isnot(None))
+                .group_by(column)
+                .all()
+            )
+            for account_id, total in rows:
+                try:
+                    counts[int(account_id)] += int(total or 0)
+                except (TypeError, ValueError):
+                    continue
+    for account_id, total in (
+        db.session.query(CashDayAccountPosition.account_id, func.count())
+        .filter(CashDayAccountPosition.account_id.isnot(None))
+        .group_by(CashDayAccountPosition.account_id)
+        .all()
+    ):
+        counts[int(account_id)] += int(total or 0)
+    return dict(counts)
+
+
+def _label_counts(column):
+    """Lower-cased label -> number of AccountTransaction rows using it."""
+    rows = (
+        db.session.query(func.lower(func.trim(column)), func.count(AccountTransaction.id))
+        .filter(column.isnot(None), func.trim(column) != "")
+        .group_by(func.lower(func.trim(column)))
+        .all()
+    )
+    return {name: int(total or 0) for name, total in rows if name}
+
+
+def category_usage_map():
+    """One-pass usage counts for every category and subcategory.
+
+    ``category_usage_count`` runs several COUNT queries per category, which made
+    the Categories tab slow once a business had more than a few labels.  This
+    gathers the same figures with a fixed number of grouped queries.
+    """
+    cat_by_id, sub_by_id = defaultdict(int), defaultdict(int)
+    for category_id, total in (
+        db.session.query(CashFlowEntry.category_id, func.count(CashFlowEntry.id))
+        .filter(CashFlowEntry.category_id.isnot(None))
+        .group_by(CashFlowEntry.category_id)
+        .all()
+    ):
+        cat_by_id[int(category_id)] += int(total or 0)
+    for subcategory_id, total in (
+        db.session.query(CashFlowEntry.subcategory_id, func.count(CashFlowEntry.id))
+        .filter(CashFlowEntry.subcategory_id.isnot(None))
+        .group_by(CashFlowEntry.subcategory_id)
+        .all()
+    ):
+        sub_by_id[int(subcategory_id)] += int(total or 0)
+    return {
+        "categories": dict(cat_by_id),
+        "subcategories": dict(sub_by_id),
+        "tx_categories": _label_counts(AccountTransaction.category),
+        "tx_subcategories": _label_counts(AccountTransaction.subcategory),
+    }
+
+
+def category_usage_from_map(usage_map, category, subcategories=()):
+    """Total records pointing at one category, including its children."""
+    key = (category.name or "").strip().lower()
+    total = int(usage_map["categories"].get(category.id, 0))
+    total += int(usage_map["tx_categories"].get(key, 0))
+    for sub in subcategories:
+        total += int(usage_map["subcategories"].get(sub.id, 0))
+        total += int(usage_map["tx_subcategories"].get((sub.name or "").strip().lower(), 0))
+    return total
+
+
+def subcategory_usage_from_map(usage_map, sub):
+    key = (sub.name or "").strip().lower()
+    return int(usage_map["subcategories"].get(sub.id, 0)) + int(usage_map["tx_subcategories"].get(key, 0))
 
 
 def _check_revision(account, form):
@@ -392,6 +487,108 @@ def set_category_active(category_id, *, active, actor):
     )
     db.session.flush()
     return category
+
+
+def subcategory_snapshot(sub):
+    return {
+        "id": sub.id,
+        "category_id": sub.category_id,
+        "name": sub.name,
+        "notes": sub.notes or "",
+        "is_active": bool(sub.is_active),
+    }
+
+
+def subcategory_usage_count(sub):
+    """Business records that still point at this subcategory."""
+    key = (sub.name or "").strip().lower()
+    total = CashFlowEntry.query.filter(CashFlowEntry.subcategory_id == sub.id).count()
+    total += AccountTransaction.query.filter(
+        func.lower(func.trim(AccountTransaction.subcategory)) == key
+    ).count()
+    return total
+
+
+def save_subcategory(form, *, actor, category_id=None, subcategory_id=None):
+    """Create or rename one child label of a parent category."""
+    sub = db.session.get(CashFlowSubcategory, subcategory_id) if subcategory_id else None
+    if subcategory_id and not sub:
+        raise SetupError("Subcategory not found.")
+    parent_id = category_id or (sub.category_id if sub else None)
+    parent = db.session.get(CashFlowCategory, parent_id) if parent_id else None
+    if not parent:
+        raise SetupError("Choose the parent category for this subcategory.")
+    name = _text(form, "name")
+    if not name or len(name) > 120:
+        raise SetupError("Enter a subcategory name of up to 120 characters.")
+    notes = _text(form, "notes")
+    if len(notes) > 300:
+        raise SetupError("Description must be up to 300 characters.")
+    clash = CashFlowSubcategory.query.filter(
+        CashFlowSubcategory.category_id == parent.id,
+        func.lower(func.trim(CashFlowSubcategory.name)) == name.lower(),
+    )
+    if sub:
+        clash = clash.filter(CashFlowSubcategory.id != sub.id)
+    if clash.first():
+        raise SetupError(f"“{parent.name}” already has a subcategory with this name.")
+    before = subcategory_snapshot(sub) if sub else None
+    created = sub is None
+    old_name = sub.name if sub else None
+    if created:
+        sub = CashFlowSubcategory(category_id=parent.id, is_active=True)
+        db.session.add(sub)
+    sub.name = name
+    sub.notes = notes or None
+    sub.updated_at = pk_now()
+    if old_name and old_name.strip().lower() != name.lower():
+        # Transactions store the label itself, so keep history grouped under
+        # the new spelling in exactly the same way a category rename does.
+        AccountTransaction.query.filter(
+            AccountTransaction.category == parent.name,
+            func.lower(func.trim(AccountTransaction.subcategory)) == old_name.strip().lower(),
+        ).update({AccountTransaction.subcategory: name}, synchronize_session=False)
+    db.session.flush()
+    record_accounting_audit(
+        actor, action="Create" if created else "Update", entity_type="CashFlowSubcategory",
+        entity_id=sub.id, before=before, after=subcategory_snapshot(sub),
+        reason=f"Subcategory of {parent.name}",
+    )
+    db.session.flush()
+    return sub, created
+
+
+def set_subcategory_active(subcategory_id, *, active, actor):
+    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    if not sub:
+        raise SetupError("Subcategory not found.")
+    before = subcategory_snapshot(sub)
+    sub.is_active = bool(active)
+    sub.updated_at = pk_now()
+    db.session.flush()
+    record_accounting_audit(
+        actor, action="Resume" if active else "Suspend", entity_type="CashFlowSubcategory",
+        entity_id=sub.id, before=before, after=subcategory_snapshot(sub),
+        reason="Subcategory setup",
+    )
+    db.session.flush()
+    return sub
+
+
+def delete_subcategory(subcategory_id, *, actor):
+    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    if not sub:
+        raise SetupError("Subcategory not found.")
+    if subcategory_usage_count(sub):
+        raise SetupError("This subcategory is used by financial records and cannot be deleted. Suspend it instead.")
+    before = subcategory_snapshot(sub)
+    record_accounting_audit(
+        actor, action="Delete", entity_type="CashFlowSubcategory", entity_id=sub.id,
+        before=before, after={"deleted": True}, reason="Unused subcategory deleted during setup",
+    )
+    db.session.delete(sub)
+    db.session.flush()
+    return True
 
 
 def delete_category_setup(category_id, *, actor):

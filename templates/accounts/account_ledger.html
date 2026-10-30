@@ -79,8 +79,19 @@
                     {% for t in types %}<option value="{{ t }}" {% if t==type_f %}selected{% endif %}>{{ t }}</option>{% endfor %}
                 </select>
             </div>
+            <div><div class="form-label">Category</div>
+                <select name="category" class="form-select form-select-sm">
+                    <option value="">All Categories</option>
+                    {% for c in category_options %}<option value="{{ c }}" {% if c|lower==category_f|lower %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                </select>
+            </div>
+            <div><div class="form-label">Subcategory</div>
+                <select name="subcategory" class="form-select form-select-sm">
+                    <option value="">All Subcategories</option>
+                    {% for c in subcategory_options %}<option value="{{ c }}" {% if c|lower==subcategory_f|lower %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                </select>
+            </div>
             <div class="flex-grow-1"><div class="form-label">Search</div><input type="text" name="q" class="form-control form-control-sm" placeholder="Description or note..." value="{{ search }}"></div>
-            <div class="d-none"></div>
             <div><button class="btn btn-sm btn-primary"><i class="bi bi-funnel me-1"></i>Apply</button></div>
             <div><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('accounts.account_ledger', account_id=account.id) }}">Reset</a></div>
         </form>
