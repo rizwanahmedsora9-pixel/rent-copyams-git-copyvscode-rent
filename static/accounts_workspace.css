@@ -280,3 +280,31 @@
   .aw-source-tab { justify-content: center; padding-inline: .35rem; font-size: .78rem; }
   .aw-picker-list { max-height: 14rem; }
 }
+
+/* Consistent field rhythm and alignment across the Accounts workspace. */
+.aw-shell *, .aw-shell *::before, .aw-shell *::after { box-sizing: border-box; }
+.aw-shell .aw-input, .aw-shell .aw-select { min-height: 44px; line-height: 1.45; }
+.aw-shell .aw-label { display: block; margin-bottom: .45rem; line-height: 1.4; }
+.aw-tx-section-title { float: none; display: block; padding: 0; margin-bottom: 1rem; letter-spacing: .015em; }
+.aw-tx-section-title + * { clear: none; }
+.aw-tx-source { border: 0; padding: 0; margin: 1rem 0 0; min-width: 0; }
+.aw-tx-source > div + div { margin-top: 1rem; }
+.aw-tx-section.aw-form-grid > legend { grid-column: 1 / -1; margin-bottom: 0; }
+.aw-help { line-height: 1.55; margin-top: .45rem; overflow-wrap: anywhere; }
+.aw-tx-card { box-shadow: 0 4px 20px rgba(0,0,0,.035); }
+.aw-tx-card-body { padding: clamp(1rem, 2.5vw, 1.75rem); }
+.aw-tx-preview { position: sticky; top: 1.25rem; }
+.aw-picker-list { box-shadow: 0 12px 28px rgba(0,0,0,.18); z-index: 40; }
+.aw-picker-item { min-height: 44px; gap: .65rem; }
+.aw-picker-name { min-width: 0; }
+.aw-tx-section [data-pay-target-panel][hidden] { display: none; }
+.aw-tx-footer { gap: 1rem; flex-wrap: wrap; }
+.aw-shell .aw-btn:focus-visible, .aw-picker-toggle:focus-visible, .aw-tx-mode:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .aw-toolbar > *, .aw-filters > .aw-field-inline { width: 100%; }
+  .aw-tx-footer .aw-btn { width: 100%; min-height: 46px; }
+  .aw-picker-meta { white-space: normal; }
+  .aw-tx-preview { position: static; }
+}

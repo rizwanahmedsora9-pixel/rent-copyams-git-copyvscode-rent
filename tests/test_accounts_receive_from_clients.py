@@ -95,9 +95,9 @@ def test_receive_form_offers_clients_parties_and_other_sources(app, client):
     text = client.get(NEW_TRANSACTION).get_data(as_text=True)
     # All three receive sources are offered, with the client list first.
     for source in ("client", "party", "other"):
-        assert f'data-tx-source="{source}"' in text
         assert f'data-tx-source-panel="{source}"' in text
-    assert text.index('data-tx-source="client"') < text.index('data-tx-source="party"')
+    assert 'id="tx-receive-group"' in text
+    assert "Client Ledger" in text
     # Active clients and parties are searchable; suspended rows are not offered.
     assert "Ali Traders" in text and "Bilal Steel Works" in text and "Haji Abdul" in text
     assert "Suspended Client" not in text and "Retired Party" not in text
@@ -559,3 +559,64 @@ def test_refund_retry_is_recognised_as_a_replay(app, client):
     with app.app_context():
         assert Payment.query.count() == 1
         assert db.session.get(Account, cash_id).balance_minor == 475000
+
+
+def test_receive_group_picker_and_loan_account_posting(app, client):
+    with app.app_context():
+        destination = account()
+        loan = Account(name="Saved loan source", account_type="cash", source_category="Loan", balance=0, is_active=True)
+        db.session.add(loan)
+        db.session.commit()
+        destination_id, loan_id = destination.id, loan.id
+    login(client)
+    text = client.get(NEW_TRANSACTION).get_data(as_text=True)
+    assert "Receive From Transaction Group" in text
+    assert 'data-picker-items="sourceAccounts"' in text
+    assert "Saved loan source" in text
+    response = post(client, payload(source="account", receive_group="Loan",
+        receive_from_account_id=str(loan_id), receive_account_id=str(destination_id)))
+    assert response.status_code == 302
+    with app.app_context():
+        row = AccountTransaction.query.filter_by(from_account_id=loan_id, to_account_id=destination_id).one()
+        assert row.transaction_type == "Transfer"
+        assert row.amount_minor == 100000
+    response = post(client, payload(source="account", receive_group="Company",
+        receive_from_account_id=str(loan_id), receive_account_id=str(destination_id)))
+    assert response.status_code == 422
+    assert "does not belong" in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("target", ["supplier", "client_refund", "expense", "other"])
+def test_workspace_pay_types_post_to_correct_ledger(app, client, target):
+    from models import Supplier, SupplierPayment
+    with app.app_context():
+        source = account(opening="5000")
+        customer = client_row(code="REF-01", name="Refund Customer")
+        supplier = Supplier(name="Pay Supplier", is_active=True)
+        db.session.add(supplier)
+        db.session.commit()
+        source_id, supplier_id = source.id, supplier.id
+    login(client)
+    page = client.get(NEW_TRANSACTION + "?mode=pay")
+    assert page.status_code == 200
+    assert "Client Refund / Payback" in page.get_data(as_text=True)
+    data = payload(mode="pay", pay_target=target, pay_from_account_id=str(source_id),
+                   supplier_id=str(supplier_id), refund_client_code="REF-01", party="Spending recipient")
+    response = post(client, data)
+    assert response.status_code == 302, response.get_data(as_text=True)
+    with app.app_context():
+        from app.services.payments_crud import ledger_balance
+        assert ledger_balance(source_id) == pytest.approx(4000)
+        if target == "supplier":
+            assert SupplierPayment.query.filter_by(supplier_id=supplier_id).one().amount == 1000
+        elif target == "client_refund":
+            row = Payment.query.filter_by(client_name="Refund Customer").one()
+            assert row.amount == -1000
+            assert row.payment_type == "Refund"
+        else:
+            row = AccountTransaction.query.filter_by(from_account_id=source_id, transaction_type="Expense").one()
+            assert row.payee == "Spending recipient"
+    # Retrying the same form must not post the spending twice.
+    assert post(client, data).status_code == 302
+    with app.app_context():
+        assert ledger_balance(source_id) == pytest.approx(4000)

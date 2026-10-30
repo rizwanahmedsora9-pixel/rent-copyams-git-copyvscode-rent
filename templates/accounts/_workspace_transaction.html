@@ -35,19 +35,7 @@
     </nav>
 
     <div class="aw-tx-card-body">
-      <p class="aw-muted aw-tx-intro" id="tx-intro">{{ 'Record money received into a business account.' if mode == 'receive' else ('Record a business expense or payment out of an account.' if mode == 'pay' else 'Move money between two of your own accounts. This is not income or an expense.') }}</p>
-
-      <fieldset class="aw-tx-section" data-tx-panel="receive" {% if mode != 'receive' %}disabled hidden{% endif %}>
-        <legend class="aw-tx-section-title">Receive into</legend>
-        <label class="aw-label" for="tx-receive-account">Destination account <span aria-hidden="true">*</span></label>
-        <select class="aw-select" id="tx-receive-account" name="receive_account_id" required data-account-select>
-          <option value="">Select an account</option>
-          {% for account in tx_accounts %}
-          <option value="{{ account.id }}" {% if tx_values.get('receive_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
-          {% endfor %}
-        </select>
-        <p class="aw-help" data-balance-help="receive"></p>
-      </fieldset>
+      <p class="aw-muted aw-tx-intro" id="tx-intro">{{ 'Receive mode: choose the transaction group first, then the source entry, and finally the destination account.' if mode == 'receive' else ('Record a business expense or payment out of an account.' if mode == 'pay' else 'Move money between two of your own accounts. This is not income or an expense.') }}</p>
 
       <fieldset class="aw-tx-section" data-tx-panel="pay" {% if mode != 'pay' %}disabled hidden{% endif %}>
         <legend class="aw-tx-section-title">Pay from</legend>
@@ -93,22 +81,35 @@
 
       {# ---- Received from: clients, parties (loan givers), or a typed name ---- #}
       <fieldset class="aw-tx-section" data-tx-panel="receive" {% if mode != 'receive' %}disabled hidden{% endif %}>
-        <legend class="aw-tx-section-title">Received from</legend>
+        <legend class="aw-tx-section-title">Receive Money Details</legend>
         <input type="hidden" name="receive_source" id="tx-receive-source" value="{{ receive_source }}">
-        <div class="aw-source-tabs" role="group" aria-label="Who the money was received from">
-          {% for key in ['client', 'party', 'other'] %}
-          <button type="button" class="aw-source-tab {{ 'is-active' if receive_source == key }}" data-tx-source="{{ key }}"
-                  aria-pressed="{{ 'true' if receive_source == key else 'false' }}">
-            <i class="bi {{ source_icons[key] }}" aria-hidden="true"></i><span>{{ tx_receive_sources[key].label }}</span>
-          </button>
+        <label class="aw-label" for="tx-receive-group">Receive From Transaction Group</label>
+        <select class="aw-select" id="tx-receive-group" name="receive_group" required>
+          <option value="client_ledger" {% if tx_values.get('receive_group', 'client_ledger') == 'client_ledger' %}selected{% endif %}>Client Ledger</option>
+          {% for group in tx_receive_groups %}
+          <option value="{{ group }}" {% if tx_values.get('receive_group') == group %}selected{% endif %}>{{ group }}</option>
           {% endfor %}
-        </div>
-        <p class="aw-help" id="tx-source-hint">{{ tx_receive_sources[receive_source].hint }}</p>
+          <option value="party" {% if receive_source == 'party' %}selected{% endif %}>Parties / Loan Givers</option>
+          <option value="other_source" {% if receive_source == 'other' %}selected{% endif %}>Other Source</option>
+        </select>
+        <p class="aw-help" id="tx-source-hint">First choose the transaction group. Then select the matching source entry below.</p>
+        <fieldset class="aw-tx-source" data-tx-source-panel="account" disabled hidden>
+          <div class="aw-picker" data-picker="sourceAccount" data-picker-items="sourceAccounts">
+            <label class="aw-label" for="tx-source-account-search">Receive From Source Entry</label>
+            <div class="aw-picker-control">
+              <input class="aw-input aw-picker-input" id="tx-source-account-search" data-picker-input autocomplete="off" placeholder="Search source entries…" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tx-source-account-list">
+              <button type="button" class="aw-picker-toggle" data-picker-toggle aria-label="Show source entries">⌄</button>
+            </div>
+            <div class="aw-picker-list" id="tx-source-account-list" data-picker-list role="listbox" hidden></div>
+            <input type="hidden" name="receive_from_account_id" data-picker-value value="{{ tx_values.get('receive_from_account_id', '') }}">
+            <p class="aw-help" data-picker-help>Select an active entry in the chosen transaction group.</p>
+          </div>
+        </fieldset>
 
         {# Client: searchable list, live payable, discount against dues #}
         <fieldset class="aw-tx-source" data-tx-source-panel="client" {% if receive_source != 'client' %}disabled hidden{% endif %}>
           <div class="aw-picker" data-picker="client" data-picker-items="clients">
-            <label class="aw-label" for="tx-client-search">Client <span aria-hidden="true">*</span></label>
+            <label class="aw-label" for="tx-client-search">Receive From Client <span aria-hidden="true">*</span></label>
             <div class="aw-picker-control">
               <i class="bi bi-search aw-picker-icon" aria-hidden="true"></i>
               <input class="aw-input aw-picker-input" id="tx-client-search" type="text" data-picker-input
@@ -170,11 +171,47 @@
         </fieldset>
       </fieldset>
 
+      <fieldset class="aw-tx-section" data-tx-panel="receive" {% if mode != 'receive' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Receive into</legend>
+        <label class="aw-label" for="tx-receive-account">Receive To Account <span aria-hidden="true">*</span></label>
+        <select class="aw-select" id="tx-receive-account" name="receive_account_id" required data-account-select>
+          <option value="">Select an account</option>
+          {% for account in tx_accounts %}
+          <option value="{{ account.id }}" {% if tx_values.get('receive_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
+          {% endfor %}
+        </select>
+        <p class="aw-help" data-balance-help="receive"></p>
+      </fieldset>
+
       <fieldset class="aw-tx-section" data-tx-panel="pay" {% if mode != 'pay' %}disabled hidden{% endif %}>
         <legend class="aw-tx-section-title">Payment details</legend>
+        <label class="aw-label" for="tx-pay-target">Payment type <span aria-hidden="true">*</span></label>
+        <select class="aw-select" id="tx-pay-target" name="pay_target">
+          {% for key, label in [('supplier', 'Supplier Payment'), ('client_refund', 'Client Refund / Payback'), ('expense', 'Expenses'), ('other', 'Other Spending')] %}
+          <option value="{{ key }}" {% if tx_values.get('pay_target', 'expense') == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <p class="aw-help">Choose the spending type, then select who you are paying. Supplier payments and client refunds update their ledgers.</p>
+        {% for key, items, label, field in [('supplier', 'suppliers', 'Supplier', 'supplier_id'), ('client_refund', 'refundClients', 'Client receiving refund', 'refund_client_code')] %}
+        <fieldset class="aw-tx-source" data-pay-target-panel="{{ key }}" disabled hidden>
+          <div class="aw-picker" data-picker="{{ key }}" data-picker-items="{{ items }}">
+            <label class="aw-label" for="tx-{{ key }}-search">{{ label }} <span aria-hidden="true">*</span></label>
+            <div class="aw-picker-control">
+              <i class="bi bi-search aw-picker-icon" aria-hidden="true"></i>
+              <input class="aw-input aw-picker-input" id="tx-{{ key }}-search" data-picker-input autocomplete="off" placeholder="Search by name, code, or phone…" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tx-{{ key }}-list">
+              <button type="button" class="aw-picker-toggle" data-picker-toggle aria-label="Show {{ label }} list"><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
+            </div>
+            <div class="aw-picker-list" id="tx-{{ key }}-list" data-picker-list role="listbox" hidden></div>
+            <input type="hidden" name="{{ field }}" data-picker-value value="{{ tx_values.get(field, '') }}">
+            <p class="aw-help" data-picker-help>Select an active {{ 'supplier' if key == 'supplier' else 'client' }} from the searchable list.</p>
+          </div>
+        </fieldset>
+        {% endfor %}
+        <fieldset class="aw-tx-source" data-pay-target-panel="expense other">
         <label class="aw-label" for="tx-party" id="tx-party-label">Paid to <span aria-hidden="true">*</span></label>
         <input class="aw-input" id="tx-party" name="party" maxlength="160" autocomplete="off"
                placeholder="Person, business, or expense" value="{{ tx_values.get('party', '') if mode == 'pay' else '' }}">
+        </fieldset>
       </fieldset>
 
       <fieldset class="aw-tx-section aw-form-grid" id="tx-category-section" data-tx-panel="receive pay" {% if mode == 'transfer' %}disabled hidden{% endif %}>

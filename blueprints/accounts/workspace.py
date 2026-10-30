@@ -7,7 +7,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
-from models import Account, CashFlowCategory, CashFlowParty, Client, db
+from models import Account, CashFlowCategory, CashFlowParty, Client, Supplier, db
 from app.services import account_setup as setup
 from app.services.cash_flow_svc import collect_cash_flow_rows, filter_cash_flow_rows, summarize_cash_flow_rows
 from app.services.payments_crud import ledger_balance
@@ -268,20 +268,29 @@ def render_workspace(active_tab="cash-flow", *, modal_open=None, form_values=Non
         from app.services.account_transactions import DEFAULT_RECEIVE_SOURCE, RECEIVE_SOURCES
 
         source = (values.get("receive_source") or "").strip().lower()
-        if source not in RECEIVE_SOURCES:
+        if source not in (*RECEIVE_SOURCES, "account"):
             # A fresh visit starts on the common case. A re-render of a
             # submitted form must show the source the service will actually
             # apply, or a counterparty typed without the field would vanish
             # between the failed post and the page that asks for a correction.
             source = DEFAULT_RECEIVE_SOURCE if form_values else "client"
         values["receive_source"] = source
+        values.setdefault("receive_group", {"client": "client_ledger", "party": "party", "other": "other_source"}.get(source, ""))
         context.update({
             "tx_values": values,
             "tx_now": pk_now().strftime("%Y-%m-%dT%H:%M"),
             "tx_accounts": [account for account in accounts if account["is_active"]],
             "tx_categories": build_unified_category_catalog()["all_categories"],
             "tx_clients": _receive_client_options(),
+            "tx_suppliers": [{"code": str(row.id), "name": row.name, "phone": getattr(row, "phone", "") or ""}
+                for row in Supplier.query.filter(func.coalesce(Supplier.is_active, True) == True).order_by(Supplier.name).all()],
             "tx_parties": _receive_party_options(),
+            "tx_source_accounts": [{"code": str(a.id), "name": a.name,
+                "group": (a.source_category or "").strip(), "phone": ""}
+                for a in Account.query.filter(Account.is_active != False).order_by(Account.name).all()
+                if (a.source_category or "").strip()],
+            "tx_receive_groups": sorted(set(["Clients", "Company", "External", "FBM-JPS", "Loan", "Own Funds"] +
+                [(a.source_category or "").strip() for a in Account.query.all() if (a.source_category or "").strip()])),
             "tx_receive_sources": RECEIVE_SOURCES,
             "tx_party_types": _party_type_options(),
         })
