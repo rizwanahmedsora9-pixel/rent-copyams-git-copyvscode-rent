@@ -18,6 +18,9 @@
     <h1 class="aw-heading">Cash Flow</h1>
     <p class="aw-subheading">Money moving through your accounts.</p>
   </div>
+  {% if can_post %}
+  <a class="aw-btn aw-btn-primary" href="{{ url_for('accounts.add_transaction') }}"><i class="bi bi-plus-lg" aria-hidden="true"></i> New transaction</a>
+  {% endif %}
 </div>
 
 <form class="aw-filters aw-filters-wide" method="get" action="{{ url_for('accounts.dashboard') }}">

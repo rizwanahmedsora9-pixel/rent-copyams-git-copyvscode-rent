@@ -119,6 +119,7 @@ npm i jsdom
 node tests/frontend/test_grn_consumption_dom.js   # GRN consumption indicator
 node tests/frontend/test_pan_view_dom.js          # table pan / fit behaviour
 node tests/frontend/test_ledger_live_dom.js       # live revision watcher
+node tests/frontend/test_accounts_transaction_dom.js # Receive / Pay / Transfer form
 ```
 
 Point `GRN_PAGE_HTML` at a saved `/grn` page to run the consumption test against

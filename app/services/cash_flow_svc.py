@@ -1349,9 +1349,11 @@ def collect_cash_flow_rows(from_date, to_date, *, posted_after=None, include_voi
                 continue
             rows.append(_cf_row(
                 sort_dt=tx.date_posted, direction=CF_DIR_TRANSFER, amount=tx.amount,
-                reference=f'TX-{tx.id}',
+                reference=tx.reference_no or f'TX-{tx.id}',
                 description=tx.description or 'Account transfer',
                 note=tx.note or '',
+                category=tx.category or 'Internal Transfer',
+                subcategory=tx.subcategory or '',
                 account_id=tx.from_account_id,
                 account_name=from_acc.name if from_acc else '',
                 dest_account_id=tx.to_account_id,
@@ -1365,9 +1367,11 @@ def collect_cash_flow_rows(from_date, to_date, *, posted_after=None, include_voi
         if tx.transaction_type == 'Receipt' and to_acc and (to_acc.category or '').lower() in ('cash', 'bank'):
             rows.append(_cf_row(
                 sort_dt=tx.date_posted, direction=CF_DIR_IN, amount=tx.amount,
-                reference=f'TX-{tx.id}',
+                reference=tx.reference_no or f'TX-{tx.id}',
                 description=tx.description or 'Cash received',
                 note=tx.note or '',
+                category=tx.category or '', subcategory=tx.subcategory or '',
+                party_name=tx.payee or '',
                 account_id=tx.to_account_id, account_name=to_acc.name,
                 source_type=SRC_ACCOUNT_RECEIPT, origin='derived',
                 origin_label='From Accounts · Other receive',
@@ -1379,9 +1383,11 @@ def collect_cash_flow_rows(from_date, to_date, *, posted_after=None, include_voi
             is_driver = tx.transaction_type == 'Driver Payment'
             rows.append(_cf_row(
                 sort_dt=tx.date_posted, direction=CF_DIR_OUT, amount=tx.amount,
-                reference=f'TX-{tx.id}',
+                reference=tx.reference_no or f'TX-{tx.id}',
                 description=tx.description or ('Driver service payment' if is_driver else 'Expense'),
                 note=tx.note or '',
+                category=tx.category or '', subcategory=tx.subcategory or '',
+                party_name=tx.payee or '',
                 party_type=('delivery_person' if is_driver else ''),
                 account_id=tx.from_account_id, account_name=from_acc.name,
                 source_type=SRC_DRIVER_PAYMENT if is_driver else SRC_ACCOUNT_EXPENSE,

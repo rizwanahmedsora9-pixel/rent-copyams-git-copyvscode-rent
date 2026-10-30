@@ -1,4 +1,4 @@
-"""The from-scratch Accounts workspace: Cash Flow, Categories, Accounts."""
+"""Accounts workspace: Cash Flow, Categories, Accounts, New Transaction."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -20,6 +20,7 @@ TABS = (
     ("cash-flow", "Cash Flow", "accounts.dashboard", "bi-water"),
     ("categories", "Manage Categories", "accounts.manage_categories", "bi-tags"),
     ("accounts", "Manage Accounts", "accounts.manage_accounts", "bi-wallet2"),
+    ("new-transaction", "New Transaction", "accounts.add_transaction", "bi-plus-circle"),
 )
 
 
@@ -41,6 +42,20 @@ def _require_view():
 
 def _require_manage():
     if not can_manage_setup():
+        abort(403)
+
+
+def can_post_transactions():
+    """Setup-only access does not grant permission to move business money."""
+    if not _is_admin() and (getattr(current_user, "access_mode", None) or "read_write").strip().lower() == "read_only":
+        return False
+    return _is_admin() or any(bool(getattr(current_user, flag, False)) for flag in (
+        "can_manage_accounts", "can_manage_payments",
+    ))
+
+
+def _require_post_transactions():
+    if not can_post_transactions():
         abort(403)
 
 
@@ -169,6 +184,7 @@ def render_workspace(active_tab="cash-flow", *, modal_open=None, form_values=Non
         "active_tab": active_tab,
         "tabs": TABS,
         "can_manage": can_manage_setup(),
+        "can_post": can_post_transactions(),
         "accounts": accounts,
         "categories": categories,
         "account_q": account_q,
@@ -186,11 +202,28 @@ def render_workspace(active_tab="cash-flow", *, modal_open=None, form_values=Non
     }
     if active_tab == "cash-flow":
         context.update(_cash_flow_context(accounts))
+    if active_tab == "new-transaction":
+        from uuid import uuid4
+        from app.services.time_money import pk_now
+        from .transaction_tree import build_unified_category_catalog
+
+        values = context["form_values"]
+        values.setdefault("tx_mode", request.args.get("mode") or request.args.get("tx_mode") or "receive")
+        if values["tx_mode"] not in ("receive", "pay", "transfer"):
+            values["tx_mode"] = "receive"
+        values.setdefault("date_posted", pk_now().strftime("%Y-%m-%dT%H:%M"))
+        values.setdefault("idempotency_key", uuid4().hex)
+        context.update({
+            "tx_values": values,
+            "tx_now": pk_now().strftime("%Y-%m-%dT%H:%M"),
+            "tx_accounts": [account for account in accounts if account["is_active"]],
+            "tx_categories": build_unified_category_catalog()["all_categories"],
+        })
     return render_template("accounts/workspace.html", **context), status
 
 
 def _tab_redirect(tab, **params):
-    endpoint = {"cash-flow": "accounts.dashboard", "categories": "accounts.manage_categories", "accounts": "accounts.manage_accounts"}[tab]
+    endpoint = {key: endpoint for key, _, endpoint, _ in TABS}[tab]
     return redirect(url_for(endpoint, **params))
 
 

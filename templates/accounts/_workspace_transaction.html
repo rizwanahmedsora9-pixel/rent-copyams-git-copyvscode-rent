@@ -1,0 +1,166 @@
+<div class="aw-toolbar">
+  <div>
+    <h1 class="aw-heading">New transaction</h1>
+    <p class="aw-subheading">Record money in, money out, or a transfer between your accounts.</p>
+  </div>
+  <a class="aw-btn aw-btn-ghost" href="{{ url_for('accounts.dashboard') }}"><i class="bi bi-water" aria-hidden="true"></i> View cash flow</a>
+</div>
+
+{% if not can_post %}
+<div class="aw-note"><i class="bi bi-lock" aria-hidden="true"></i><span>You have view-only access. Ask an administrator for Accounts or Payments permission to record transactions.</span></div>
+{% elif not tx_accounts %}
+<div class="aw-empty">
+  <div class="aw-empty-icon"><i class="bi bi-wallet2" aria-hidden="true"></i></div>
+  <h2>Add an account to get started</h2>
+  <p>Transactions need an active cash, bank, or mobile wallet account. Add one first, then record your money movements here.</p>
+  <a class="aw-btn aw-btn-primary" href="{{ url_for('accounts.manage_accounts', new=1) if can_manage else url_for('accounts.manage_accounts') }}"><i class="bi bi-plus-lg" aria-hidden="true"></i> {{ 'Add account' if can_manage else 'View accounts' }}</a>
+</div>
+{% else %}
+{% set mode = tx_values.tx_mode %}
+<form id="transactionForm" method="post" action="{{ url_for('accounts.add_transaction') }}" class="aw-tx-layout">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="entry_source" value="accounts_workspace">
+  <input type="hidden" name="idempotency_key" value="{{ tx_values.get('idempotency_key', '') }}">
+  <input type="hidden" name="tx_mode" id="tx-mode" value="{{ mode }}">
+
+  <div class="aw-tx-card">
+    <nav class="aw-tx-modes" aria-label="Transaction type">
+      {% for key, label, icon in [('receive', 'Receive', 'bi-arrow-down-left'), ('pay', 'Pay', 'bi-arrow-up-right'), ('transfer', 'Transfer', 'bi-arrow-left-right')] %}
+      <a href="{{ url_for('accounts.add_transaction', mode=key) }}" class="aw-tx-mode {{ 'is-active' if mode == key }}" data-tx-mode="{{ key }}" {% if mode == key %}aria-current="true"{% endif %}>
+        <i class="bi {{ icon }}" aria-hidden="true"></i><span>{{ label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <div class="aw-tx-card-body">
+      <p class="aw-muted aw-tx-intro" id="tx-intro">{{ 'Record money received into a business account.' if mode == 'receive' else ('Record a business expense or payment out of an account.' if mode == 'pay' else 'Move money between two of your own accounts. This is not income or an expense.') }}</p>
+
+      <fieldset class="aw-tx-section" data-tx-panel="receive" {% if mode != 'receive' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Receive into</legend>
+        <label class="aw-label" for="tx-receive-account">Destination account <span aria-hidden="true">*</span></label>
+        <select class="aw-select" id="tx-receive-account" name="receive_account_id" required data-account-select>
+          <option value="">Select an account</option>
+          {% for account in tx_accounts %}
+          <option value="{{ account.id }}" {% if tx_values.get('receive_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
+          {% endfor %}
+        </select>
+        <p class="aw-help" data-balance-help="receive"></p>
+      </fieldset>
+
+      <fieldset class="aw-tx-section" data-tx-panel="pay" {% if mode != 'pay' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Pay from</legend>
+        <label class="aw-label" for="tx-pay-account">Source account <span aria-hidden="true">*</span></label>
+        <select class="aw-select" id="tx-pay-account" name="pay_from_account_id" required data-account-select>
+          <option value="">Select an account</option>
+          {% for account in tx_accounts %}
+          <option value="{{ account.id }}" {% if tx_values.get('pay_from_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
+          {% endfor %}
+        </select>
+        <p class="aw-help" data-balance-help="pay"></p>
+      </fieldset>
+
+      <fieldset class="aw-tx-section" data-tx-panel="transfer" {% if mode != 'transfer' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Transfer between accounts</legend>
+        {% if tx_accounts|length < 2 %}
+        <div class="aw-note"><span>You need two active accounts for a transfer. <a href="{{ url_for('accounts.manage_accounts') }}">Manage accounts</a></span></div>
+        {% endif %}
+        <div class="aw-form-grid">
+          <div>
+            <label class="aw-label" for="tx-transfer-from">From account <span aria-hidden="true">*</span></label>
+            <select class="aw-select" id="tx-transfer-from" name="transfer_from_account_id" required data-account-select>
+              <option value="">Select source</option>
+              {% for account in tx_accounts %}
+              <option value="{{ account.id }}" {% if tx_values.get('transfer_from_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
+              {% endfor %}
+            </select>
+            <p class="aw-help" data-balance-help="transfer-from"></p>
+          </div>
+          <div>
+            <label class="aw-label" for="tx-transfer-to">To account <span aria-hidden="true">*</span></label>
+            <select class="aw-select" id="tx-transfer-to" name="transfer_to_account_id" required data-account-select>
+              <option value="">Select destination</option>
+              {% for account in tx_accounts %}
+              <option value="{{ account.id }}" {% if tx_values.get('transfer_to_account_id', '')|string == account.id|string %}selected{% endif %}>{{ account.name }} · {{ account.type_label }}</option>
+              {% endfor %}
+            </select>
+            <p class="aw-help" data-balance-help="transfer-to"></p>
+          </div>
+        </div>
+        <p class="aw-field-error" id="tx-same-account" role="alert" hidden>Choose two different accounts.</p>
+      </fieldset>
+
+      <fieldset class="aw-tx-section aw-form-grid" data-tx-panel="receive pay" {% if mode == 'transfer' %}disabled hidden{% endif %}>
+        <legend class="aw-tx-section-title">Transaction details</legend>
+        <div>
+          <label class="aw-label" for="tx-party" id="tx-party-label">{{ 'Received from' if mode == 'receive' else 'Paid to' }} <span aria-hidden="true">*</span></label>
+          <input class="aw-input" id="tx-party" name="party" required maxlength="160" autocomplete="off" placeholder="{{ 'Person or business' if mode == 'receive' else 'Person, business, or expense' }}" value="{{ tx_values.get('party', '') }}">
+        </div>
+        <div>
+          <label class="aw-label" for="tx-category">Category <span class="aw-optional">(optional)</span></label>
+          <select class="aw-select" id="tx-category" name="category">
+            <option value="">Uncategorized</option>
+            {% for category in tx_categories %}
+            <option value="{{ category.name }}" data-direction="{{ category.direction }}" {% if tx_values.get('category', '') == category.name %}selected{% endif %}>{{ category.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="aw-help"><a href="{{ url_for('accounts.manage_categories') }}">Manage categories</a> · <span id="tx-category-help">Only active {{ 'money-in' if mode == 'receive' else 'money-out' }} categories are shown.</span></p>
+        </div>
+        <div id="tx-subcategory-field" {% if not tx_values.get('category') %}hidden{% endif %}>
+          <label class="aw-label" for="tx-subcategory">Subcategory <span class="aw-optional">(optional)</span></label>
+          <select class="aw-select" id="tx-subcategory" name="subcategory">
+            <option value="">No subcategory</option>
+            {% for category in tx_categories if category.name == tx_values.get('category') %}
+              {% for child in category.subcategories %}
+              <option value="{{ child }}" {% if tx_values.get('subcategory', '') == child %}selected{% endif %}>{{ child }}</option>
+              {% endfor %}
+            {% endfor %}
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset class="aw-tx-section">
+        <legend class="aw-tx-section-title">Amount &amp; record</legend>
+        <div class="aw-form-grid">
+          <div>
+            <label class="aw-label" for="tx-amount">Amount (PKR) <span aria-hidden="true">*</span></label>
+            <input class="aw-input aw-mono aw-tx-amount" id="tx-amount" name="amount" type="number" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00" value="{{ tx_values.get('amount', '') }}">
+          </div>
+          <div>
+            <label class="aw-label" for="tx-date">Date &amp; time <span aria-hidden="true">*</span></label>
+            <input class="aw-input" id="tx-date" name="date_posted" type="datetime-local" max="{{ tx_now }}" required value="{{ tx_values.get('date_posted', '') }}">
+            <p class="aw-help">Pakistan time (PKT). Future dates are not allowed.</p>
+          </div>
+          <div>
+            <label class="aw-label" for="tx-reference">Reference <span class="aw-optional">(optional)</span></label>
+            <input class="aw-input" id="tx-reference" name="reference_no" maxlength="80" placeholder="Voucher, slip, or cheque number" value="{{ tx_values.get('reference_no', '') }}">
+          </div>
+          <div>
+            <label class="aw-label" for="tx-note">Note <span class="aw-optional">(optional)</span></label>
+            <input class="aw-input" id="tx-note" name="note" maxlength="500" placeholder="Add a little context" value="{{ tx_values.get('note', '') }}">
+          </div>
+        </div>
+      </fieldset>
+      <div class="aw-tx-footer">
+        <span class="aw-muted"><i class="bi bi-shield-check" aria-hidden="true"></i> Saved to your account history</span>
+        <button type="submit" class="aw-btn aw-btn-primary" id="tx-submit"><i class="bi bi-check2" aria-hidden="true"></i><span>{{ 'Receive money' if mode == 'receive' else ('Record payment' if mode == 'pay' else 'Transfer money') }}</span></button>
+      </div>
+    </div>
+  </div>
+
+  <aside class="aw-tx-aside" aria-label="Transaction preview">
+    <div class="aw-tx-card aw-tx-preview">
+      <span class="aw-tx-eyebrow">Transaction preview</span>
+      <strong class="aw-tx-preview-amount aw-mono" id="tx-preview-amount">PKR 0.00</strong>
+      <div class="aw-tx-flow">
+        <div><span id="tx-preview-from-label">{{ 'Received from' if mode == 'receive' else 'From' }}</span><strong id="tx-preview-from">—</strong></div>
+        <i class="bi bi-arrow-down" aria-hidden="true"></i>
+        <div><span id="tx-preview-to-label">{{ 'Received into' if mode == 'receive' else 'Paid to' }}</span><strong id="tx-preview-to">—</strong></div>
+      </div>
+      <div class="aw-tx-balance"><span id="tx-preview-balance-label">Balance after transaction</span><strong class="aw-mono" id="tx-preview-balance">—</strong></div>
+      <p class="aw-field-error" id="tx-funds-warning" role="alert" hidden></p>
+      <p class="aw-help" id="tx-preview-help">Select an account and enter an amount to preview the balance.</p>
+    </div>
+    <div class="aw-note aw-tx-tip"><i class="bi bi-info-circle" aria-hidden="true"></i><span>Receive and Pay update money in/out. Transfers only move money between your accounts and do not change total cash flow.</span></div>
+  </aside>
+</form>
+{% endif %}

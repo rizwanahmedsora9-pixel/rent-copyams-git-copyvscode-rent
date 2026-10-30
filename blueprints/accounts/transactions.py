@@ -288,9 +288,35 @@ def edit_account_transaction(tx_id):
     return redirect(request.referrer or url_for('accounts.dashboard'))
 
 
-@accounts_bp.route('/transactions/new', methods=['POST'])
+@accounts_bp.route('/transactions/new', methods=['GET', 'POST'])
 @login_required
 def add_transaction():
+    from .workspace import render_workspace, _require_post_transactions
+
+    if request.method == 'GET':
+        return render_workspace('new-transaction')
+
+    # The workspace has a small, validated entry adapter. Keep the legacy
+    # party-ledger / driver / loan payloads below for older integrations.
+    if request.form.get('entry_source') == 'accounts_workspace':
+        _require_post_transactions()
+        from app.services.account_transactions import MODES, save_workspace_transaction
+        try:
+            tx, created = save_workspace_transaction(request.form, actor=current_user)
+            db.session.commit()
+            mode = (request.form.get('tx_mode') or 'receive').strip().lower()
+            flash(MODES[mode]['message'] if created else 'This transaction was already saved. No duplicate was recorded.', 'success')
+            return redirect(url_for('accounts.add_transaction'))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+            return render_workspace('new-transaction', form_values=request.form.to_dict(), status=422)
+        except Exception:
+            db.session.rollback()
+            logger.exception('Workspace transaction save failed')
+            flash('The transaction could not be saved. No changes were applied. Please try again.', 'danger')
+            return render_workspace('new-transaction', form_values=request.form.to_dict(), status=500)
+
     _ensure_default_account_categories()
     _backfill_legacy_account_groups()
     tx_mode = (request.form.get('tx_mode') or '').strip().lower()

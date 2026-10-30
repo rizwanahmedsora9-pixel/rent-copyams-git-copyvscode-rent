@@ -101,6 +101,163 @@
     document.querySelectorAll('[data-category-create]').forEach(btn => btn.addEventListener('click', () => openCategory(null)));
     document.querySelectorAll('[data-category-edit]').forEach(btn => btn.addEventListener('click', () => openCategory(categories.get(btn.dataset.categoryEdit))));
 
+    /* ----- New Transaction: mode switching, category cascade, live preview ----- */
+    const transactionForm = $('transactionForm');
+    if (transactionForm) {
+      const accountList = data.accounts || [];
+      const txCategories = data.transactionCategories || [];
+      const modeInput = $('tx-mode');
+      const amountInput = $('tx-amount');
+      const categoryInput = $('tx-category');
+      const subcategoryInput = $('tx-subcategory');
+      const submit = $('tx-submit');
+      const formatter = new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const descriptions = {
+        receive: 'Record money received into a business account.',
+        pay: 'Record a business expense or payment out of an account.',
+        transfer: 'Move money between two of your own accounts. This is not income or an expense.'
+      };
+      const submitLabels = { receive: 'Receive money', pay: 'Record payment', transfer: 'Transfer money' };
+      const selectedAccount = id => accountList.find(account => String(account.id) === String(id));
+      const accountName = id => { const account = selectedAccount(id); return account ? account.name : '—'; };
+      const cents = value => {
+        const number = Number(value);
+        return Number.isFinite(number) ? Math.round(number * 100) : 0;
+      };
+      const amountCents = () => {
+        const value = amountInput.value;
+        if (!value || !/^\d+(?:\.\d{1,2})?$/.test(value)) return 0;
+        const [whole, fraction = ''] = value.split('.');
+        const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+        return Number.isSafeInteger(result) && result > 0 && result <= 99999999999999 ? result : 0;
+      };
+      const displayMoney = value => 'PKR ' + formatter.format(value / 100);
+
+      function updateSubcategories(preserve) {
+        const previous = preserve ? subcategoryInput.value : '';
+        const category = txCategories.find(item => item.name === categoryInput.value);
+        const children = category ? category.subcategories : [];
+        subcategoryInput.replaceChildren(new Option('No subcategory', ''));
+        children.forEach(name => subcategoryInput.add(new Option(name, name)));
+        if (children.includes(previous)) subcategoryInput.value = previous;
+        $('tx-subcategory-field').hidden = !children.length;
+        subcategoryInput.disabled = !children.length;
+      }
+
+      function updateCategories(preserve) {
+        const previous = preserve ? categoryInput.value : '';
+        const direction = modeInput.value === 'receive' ? 'in' : 'out';
+        let hasPrevious = false;
+        Array.from(categoryInput.options).forEach(option => {
+          if (!option.value) return;
+          const category = txCategories.find(item => item.name === option.value);
+          const visible = Boolean(category && ['both', direction].includes(category.direction));
+          option.hidden = !visible;
+          option.disabled = !visible;
+          if (visible && option.value === previous) hasPrevious = true;
+        });
+        categoryInput.value = hasPrevious ? previous : '';
+        $('tx-category-help').textContent = 'Only active ' + (direction === 'in' ? 'money-in' : 'money-out') + ' categories are shown.';
+        updateSubcategories(preserve && hasPrevious);
+      }
+
+      function updatePreview() {
+        const mode = modeInput.value;
+        const amount = amountCents();
+        const sourceId = mode === 'pay' ? $('tx-pay-account').value : $('tx-transfer-from').value;
+        const destinationId = mode === 'receive' ? $('tx-receive-account').value : $('tx-transfer-to').value;
+        const source = selectedAccount(sourceId);
+        const destination = selectedAccount(destinationId);
+        const balanceAccount = mode === 'receive' ? destination : source;
+        const sameAccount = mode === 'transfer' && sourceId && sourceId === destinationId;
+        let remaining = null;
+        if (balanceAccount && amount) {
+          remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
+        }
+        const insufficient = remaining !== null && remaining < 0;
+        $('tx-preview-amount').textContent = displayMoney(amount);
+        $('tx-preview-from').textContent = mode === 'receive' ? ($('tx-party').value.trim() || '—') : accountName(sourceId);
+        $('tx-preview-to').textContent = mode === 'pay' ? ($('tx-party').value.trim() || '—') : accountName(destinationId);
+        $('tx-preview-from-label').textContent = mode === 'receive' ? 'Received from' : 'From';
+        $('tx-preview-to-label').textContent = mode === 'pay' ? 'Paid to' : (mode === 'receive' ? 'Received into' : 'To');
+        $('tx-party-label').firstChild.textContent = (mode === 'receive' ? 'Received from ' : 'Paid to ');
+        $('tx-party').placeholder = mode === 'receive' ? 'Person or business' : 'Person, business, or expense';
+        $('tx-preview-balance-label').textContent = balanceAccount ? balanceAccount.name + ' · balance after transaction' : 'Balance after transaction';
+        $('tx-preview-balance').textContent = remaining === null ? '—' : displayMoney(remaining);
+        $('tx-preview-balance').classList.toggle('aw-negative', insufficient);
+        $('tx-same-account').hidden = !sameAccount;
+        $('tx-transfer-to').setCustomValidity(sameAccount ? 'Choose two different accounts.' : '');
+        $('tx-funds-warning').hidden = !insufficient;
+        $('tx-funds-warning').textContent = insufficient ? 'Insufficient funds. Choose another account or enter a smaller amount.' : '';
+        $('tx-preview-help').textContent = mode === 'transfer'
+          ? 'Both account balances update together. Total business money stays the same.'
+          : (balanceAccount && amount ? 'This preview includes the amount above. Your saved balance is checked again on the server.' : 'Select an account and enter an amount to preview the balance.');
+        const transferUnavailable = mode === 'transfer' && accountList.filter(account => account.is_active).length < 2;
+        submit.disabled = Boolean(sameAccount || insufficient || transferUnavailable);
+        submit.querySelector('span').textContent = submitLabels[mode];
+        document.querySelectorAll('[data-balance-help]').forEach(help => {
+          const key = help.dataset.balanceHelp;
+          const id = key === 'receive' ? $('tx-receive-account').value
+            : key === 'pay' ? $('tx-pay-account').value
+            : key === 'transfer-from' ? sourceId : destinationId;
+          const account = selectedAccount(id);
+          help.textContent = account ? 'Current balance: ' + displayMoney(cents(account.current_balance)) : 'Only active business accounts are available.';
+        });
+      }
+
+      function setMode(mode, updateUrl) {
+        if (!Object.prototype.hasOwnProperty.call(descriptions, mode)) return;
+        modeInput.value = mode;
+        document.querySelectorAll('[data-tx-mode]').forEach(link => {
+          const active = link.dataset.txMode === mode;
+          link.classList.toggle('is-active', active);
+          if (active) link.setAttribute('aria-current', 'true');
+          else link.removeAttribute('aria-current');
+        });
+        document.querySelectorAll('[data-tx-panel]').forEach(panel => {
+          const active = panel.dataset.txPanel.split(' ').includes(mode);
+          panel.hidden = !active;
+          panel.disabled = !active;
+        });
+        $('tx-intro').textContent = descriptions[mode];
+        updateCategories(true);
+        updatePreview();
+        if (updateUrl) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('mode', mode);
+          history.replaceState(null, '', url);
+        }
+      }
+
+      document.querySelectorAll('[data-tx-mode]').forEach(link => {
+        link.addEventListener('click', event => {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          setMode(link.dataset.txMode, true);
+        });
+      });
+      transactionForm.addEventListener('input', updatePreview);
+      transactionForm.addEventListener('change', updatePreview);
+      categoryInput.addEventListener('change', () => updateSubcategories(false));
+      transactionForm.addEventListener('submit', event => {
+        updatePreview();
+        if (submit.disabled || !transactionForm.checkValidity()) {
+          event.preventDefault();
+          transactionForm.reportValidity();
+          return;
+        }
+        // Keep the server-generated key on retries. The server's unique index
+        // prevents a double click or repeated POST from posting twice.
+        submit.disabled = true;
+        submit.querySelector('span').textContent = 'Saving…';
+      });
+      window.addEventListener('pageshow', () => {
+        submit.querySelector('span').textContent = submitLabels[modeInput.value];
+        updatePreview();
+      });
+      setMode(modeInput.value, false);
+    }
+
     /* ----- Shared confirm dialog ----- */
     const confirmForm = $('confirmForm');
     document.querySelectorAll('[data-confirm-url]').forEach(btn => {
