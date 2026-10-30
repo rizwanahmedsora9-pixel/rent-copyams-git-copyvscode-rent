@@ -42,7 +42,9 @@
     'formValues': form_values,
     'transactionCategories': tx_categories|default([]),
     'clients': tx_clients|default([]),
+    'suppliers': tx_suppliers|default([]),
     'parties': tx_parties|default([]),
+    'sourceAccounts': tx_source_accounts|default([]),
     'receiveSources': tx_receive_sources|default({}),
     'clientDuesUrl': url_for('accounts.transaction_client_dues')
   }|tojson }};

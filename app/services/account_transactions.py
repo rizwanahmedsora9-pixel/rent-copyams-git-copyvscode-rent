@@ -109,6 +109,8 @@ def _receive_source(form):
     source = (form.get("receive_source") or "").strip().lower()
     if not source:
         return DEFAULT_RECEIVE_SOURCE
+    if source == "account":
+        return source
     if source not in RECEIVE_SOURCES:
         raise ValueError("Choose who the money was received from: a client, a party, or other.")
     return source
@@ -347,6 +349,32 @@ def _save_receive(form, *, actor, key, posted, note, reference):
             destination=destination, amount_minor=minor, discount_minor=discount_minor,
         )
 
+    if receive_source == "account":
+        group = _text(form, "receive_group", 100, "Transaction group", required=True)
+        try:
+            source_id = int(form.get("receive_from_account_id") or "")
+        except (ValueError, TypeError):
+            raise ValueError("Select a source entry from the chosen transaction group.")
+        source = db.session.get(Account, source_id)
+        if not source or source.is_active is False or (source.source_category or "").strip() != group:
+            raise ValueError("Selected source entry does not belong to the chosen transaction group.")
+        if source.id == destination.id:
+            raise ValueError("Source and destination accounts must be different.")
+        if group.lower() != "loan" and _account_minor(source) < minor:
+            raise ValueError("Insufficient balance in selected source account.")
+        for account in (source, destination):
+            _assert_period_open(account.id, posted, operation="posted")
+        return _post_account_transaction({
+            "transaction_type": "Transfer", "from_account_id": source.id,
+            "to_account_id": destination.id, "amount": float(from_minor(minor)),
+            "amount_minor": minor, "description": f"Funds received from account {source.name}",
+            "note": note, "category": group, "subcategory": None,
+            "payee": source.name, "reference_no": reference,
+            "payment_method": ACCOUNT_TYPES[account_type_key(destination)]["label"],
+            "date_posted": posted, "created_by": getattr(actor, "username", None),
+            "idempotency_key": key, "is_void": False,
+        }, actor=actor, key=key)
+
     if receive_source == "party":
         party, party_type = _receive_party(form)
         description = f"Loan received from {party}" if party_type == "loan" else f"Money received from {party}"
@@ -403,6 +431,30 @@ def save_workspace_transaction(form, *, actor):
     if mode == "pay":
         source = _account(form, "pay_from_account_id", "source")
         destination = None
+        target = (form.get("pay_target") or "expense").strip()
+        if target not in ("supplier", "client_refund", "expense", "other"):
+            raise ValueError("Select a valid payment type.")
+        if target in ("supplier", "client_refund"):
+            _assert_period_open(source.id, posted, operation="posted")
+            if reference and len(reference) > _MAX_CLIENT_REFERENCE:
+                raise ValueError("Bill / voucher reference must be up to 43 characters.")
+            common = dict(amount=float(from_minor(minor)), method=_client_payment_method(source),
+                payment_account_id=source.id, date_posted=posted, note=note,
+                manual_bill_no=reference or "", actor=actor, idempotency_key=key)
+            if target == "supplier":
+                from models import Supplier
+                from app.services.payments_crud import save_supplier_payment
+                try:
+                    supplier = db.session.get(Supplier, int(form.get("supplier_id") or ""))
+                except (ValueError, TypeError):
+                    raise ValueError("Select a supplier from the search list.")
+                if not supplier or supplier.is_active is False:
+                    raise ValueError("Select an active supplier from the search list.")
+                return save_supplier_payment(supplier_id=supplier.id, **common)
+            from app.services.payments_crud import save_client_payment
+            client = _receive_client({"client_code": form.get("refund_client_code")})
+            return save_client_payment(client_code=client.code, client_name=client.name,
+                payment_type="Refund", discount=0, **common)
         party = _text(form, "party", 160, "Paid to", required=True)
         category, subcategory = _category(form, mode)
         description = f"Payment to {party}"
@@ -448,9 +500,15 @@ def success_message(form, *, created):
         return "This transaction was already saved. No duplicate was recorded."
     mode = (form.get("tx_mode") or "receive").strip().lower()
     if mode != "receive":
+        if mode == "pay":
+            target = form.get("pay_target")
+            if target == "supplier":
+                return "Supplier payment recorded successfully."
+            if target == "client_refund":
+                return "Client refund recorded successfully."
         return MODES.get(mode, MODES["receive"])["message"]
     try:
         source = _receive_source(form)
     except ValueError:
         source = DEFAULT_RECEIVE_SOURCE
-    return RECEIVE_SOURCES[source]["message"]
+    return RECEIVE_SOURCES.get(source, RECEIVE_SOURCES["other"])["message"]

@@ -122,12 +122,12 @@
       const submit = $('tx-submit');
       const formatter = new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const descriptions = {
-        receive: 'Record money received into a business account.',
+        receive: 'Receive mode: choose the transaction group first, then the source entry, and finally the destination account.',
         pay: 'Record a business expense or payment out of an account.',
         transfer: 'Move money between two of your own accounts. This is not income or an expense.'
       };
       const submitLabels = { receive: 'Receive money', pay: 'Record payment', transfer: 'Transfer money' };
-      const sourceKeys = ['client', 'party', 'other'];
+      const sourceKeys = ['client', 'party', 'other', 'account'];
       const selectedAccount = id => accountList.find(account => String(account.id) === String(id));
       const accountName = id => { const account = selectedAccount(id); return account ? account.name : '—'; };
       const cents = value => {
@@ -160,8 +160,8 @@
 
       /* ----- Searchable, data-driven picker (clients and parties) ----- */
       function createPicker(root) {
-        const kind = root.dataset.pickerItems === 'parties' ? 'party' : 'client';
-        const items = kind === 'party' ? partyList : clientList;
+        const kind = ({sourceAccounts: 'account', parties: 'party', suppliers: 'supplier', refundClients: 'refund'})[root.dataset.pickerItems] || 'client';
+        const items = kind === 'account' ? (data.sourceAccounts || []) : kind === 'supplier' ? (data.suppliers || []) : (kind === 'party' ? partyList : clientList);
         const input = root.querySelector('[data-picker-input]');
         const list = root.querySelector('[data-picker-list]');
         const valueInput = root.querySelector('[data-picker-value]');
@@ -221,7 +221,7 @@
         function render() {
           const typed = input.value.trim();
           const tokens = (typed && typed !== selectedText ? typed.toLowerCase() : '').split(/\s+/).filter(Boolean);
-          matches = items.filter(item => tokens.every(token => haystack(item).includes(token)));
+          matches = items.filter(item => (kind !== 'account' || item.group === $('tx-receive-group').value) && tokens.every(token => haystack(item).includes(token)));
           list.replaceChildren();
           cursor = -1;
           const current = valueInput.value.trim();
@@ -300,7 +300,7 @@
               ? (item.name + ' is saved as “' + (item.type_label || 'Other') + '”.')
               : defaultHelp;
           } else {
-            loadDues(valueInput.value.trim(), item);
+            if (kind === 'client') loadDues(valueInput.value.trim(), item);
           }
           updatePreview();
         }
@@ -314,7 +314,7 @@
           if (kind === 'party') {
             $('tx-party-name').value = input.value.trim();
             $('tx-party-type').disabled = false;
-          } else {
+          } else if (kind === 'client') {
             loadDues('', null);
           }
           render();
@@ -472,6 +472,7 @@
           const client = pickedClient();
           return client ? client.name : (pickedClientCode() || ($('tx-client-search').value.trim() || '—'));
         }
+        if (sourceInput.value === 'account') return $('tx-source-account-search').value.trim() || '—';
         if (sourceInput.value === 'party') {
           const id = $('tx-party-id').value;
           const party = partyList.find(item => String(item.id) === String(id));
@@ -532,6 +533,27 @@
         $('tx-amount-label').innerHTML = (discountOnly ? 'Amount received (PKR)' : 'Amount (PKR)') + (discountOnly ? '' : ' <span aria-hidden="true">*</span>');
       }
 
+      function applyPayTarget() {
+        const paying = modeInput.value === 'pay';
+        const target = $('tx-pay-target').value;
+        document.querySelectorAll('[data-pay-target-panel]').forEach(panel => {
+          const active = paying && panel.dataset.payTargetPanel.split(' ').includes(target);
+          panel.hidden = !active;
+          panel.disabled = !active;
+        });
+        const ledgerPayment = paying && ['supplier', 'client_refund'].includes(target);
+        if (ledgerPayment) {
+          categorySection.hidden = true;
+          categorySection.disabled = true;
+        }
+        $('tx-party').required = paying && !ledgerPayment;
+      }
+      function payeeLabel() {
+        const target = $('tx-pay-target').value;
+        return ['supplier', 'client_refund'].includes(target)
+          ? ($('tx-' + target + '-search').value.trim() || '—')
+          : ($('tx-party').value.trim() || '—');
+      }
       function updatePreview() {
         const mode = modeInput.value;
         const amount = amountCents();
@@ -549,7 +571,7 @@
         const insufficient = remaining !== null && remaining < 0;
         $('tx-preview-amount').textContent = displayMoney(amount);
         $('tx-preview-from').textContent = mode === 'receive' ? receivedFromLabel() : accountName(sourceId);
-        $('tx-preview-to').textContent = mode === 'pay' ? ($('tx-party').value.trim() || '—') : accountName(destinationId);
+        $('tx-preview-to').textContent = mode === 'pay' ? payeeLabel() : accountName(destinationId);
         $('tx-preview-from-label').textContent = mode === 'receive' ? 'Received from' : 'From';
         $('tx-preview-to-label').textContent = mode === 'pay' ? 'Paid to' : (mode === 'receive' ? 'Received into' : 'To');
         $('tx-preview-balance-label').textContent = balanceAccount ? balanceAccount.name + ' · balance after transaction' : 'Balance after transaction';
@@ -590,6 +612,7 @@
           help.textContent = account ? 'Current balance: ' + displayMoney(cents(account.current_balance)) : 'Only active business accounts are available.';
         });
         applyReceiveSource();
+        applyPayTarget();
       }
 
       function setMode(mode, updateUrl) {
@@ -622,6 +645,18 @@
         updatePreview();
       }
 
+      const groupInput = $('tx-receive-group');
+      function applyGroup(clear) {
+        const group = groupInput.value;
+        if (clear && pickers.sourceAccount) {
+          pickers.sourceAccount.setText('');
+          document.querySelector('[name="receive_from_account_id"]').value = '';
+        }
+        setSource(group === 'client_ledger' ? 'client' : group === 'other_source' ? 'other' : group === 'party' ? 'party' : 'account');
+      }
+      groupInput.addEventListener('change', () => applyGroup(true));
+      applyGroup(false);
+      if (pickers.sourceAccount) pickers.sourceAccount.restore(document.querySelector('[name="receive_from_account_id"]').value);
       document.querySelectorAll('[data-tx-mode]').forEach(link => {
         link.addEventListener('click', event => {
           if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -662,6 +697,10 @@
 
       // Restore a picked client/party after a server-side validation failure:
       // the hidden value survives the round trip, the visible text does not.
+      ['supplier', 'client_refund'].forEach(key => {
+        const root = document.querySelector('[data-picker="' + key + '"]');
+        if (pickers[key]) pickers[key].restore(root.querySelector('[data-picker-value]').value);
+      });
       if (pickers.client && $('tx-client-code').value) pickers.client.restore($('tx-client-code').value);
       if (pickers.party) {
         if ($('tx-party-id').value) pickers.party.restore($('tx-party-id').value);
