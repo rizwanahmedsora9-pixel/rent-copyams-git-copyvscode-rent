@@ -350,6 +350,90 @@ def transaction_client_dues():
     return response
 
 
+@accounts_bp.route('/transactions/account-balance')
+@login_required
+def transaction_account_balance():
+    """JSON live balance snapshot for the Accounts workspace Receive/Pay/Transfer.
+
+    Read-only: answers "what is the current balance and status of this account?"
+    """
+    from .workspace import _require_view
+
+    _require_view()
+    picked = (request.args.get('account_id') or '').strip()
+    payload = {'found': False}
+    if picked:
+        account = Account.query.get(picked)
+        if account:
+            balance = round(float(account.balance or 0), 2)
+            payload = {
+                'found': True,
+                'kind': 'account',
+                'id': account.id,
+                'name': account.name,
+                'is_active': account.is_active is not False,
+                'balance': balance,
+                'status': 'active' if account.is_active else ('suspended' if account.is_suspended else 'inactive'),
+            }
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+@accounts_bp.route('/transactions/supplier-dues')
+@login_required
+def transaction_supplier_dues():
+    """JSON payable snapshot behind the New Transaction supplier picker.
+
+    Read-only: answers "what does this supplier owe/have in advance?"
+    """
+    from .workspace import _require_view
+
+    _require_view()
+    picked = (request.args.get('supplier_code') or request.args.get('q') or '').strip()
+    payload = {'found': False}
+    if picked:
+        from app.services.payments_crud import _resolve_supplier
+        supplier = _resolve_supplier(picked)
+        if supplier:
+            # We use the same pattern as client dues but for supplier ledger.
+            # For now, we use supplier's balance (if available) or calculate from ledger.
+            # Assuming Supplier model has balance or similar.
+            balance = None
+            try:
+                # If Supplier has a balance field or similar service
+                from app.services.finance_suppliers import _supplier_balance_as_of
+                balance = round(float(_supplier_balance_as_of(supplier) or 0), 2)
+            except Exception:
+                logger.exception('Supplier dues lookup failed for %s', getattr(supplier, 'code', ''))
+            
+            payload = {
+                'found': True,
+                'kind': 'supplier',
+                'code': (supplier.code or '').strip(),
+                'name': (supplier.name or '').strip(),
+                'phone': (supplier.phone or '').strip(),
+                'is_active': supplier.is_active is not False,
+                'balance': balance,
+                'generated_at': pk_now().strftime('%Y-%m-%d %H:%M'),
+            }
+            if balance is None:
+                payload.update({'payable': None, 'advance': None, 'status': 'unavailable'})
+            else:
+                payload.update({
+                    'payable': round(max(0.0, balance), 2),
+                    'advance': round(max(0.0, -balance), 2),
+                    'status': 'payable' if balance > 0.004 else ('advance' if balance < -0.004 else 'settled'),
+                })
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
 @accounts_bp.route('/transactions/new', methods=['GET', 'POST'])
 @login_required
 def add_transaction():

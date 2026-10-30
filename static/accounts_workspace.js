@@ -88,7 +88,7 @@
       $('category-name').value = editing ? category.name : (values.name || '');
       $('category-notes').value = editing ? (category.notes || '') : (values.notes || '');
       const direction = editing ? category.direction : (values.direction || 'both');
-      categoryForm.querySelectorAll('input[name="direction"][type="radio"]').forEach(radio => {
+      categoryForm.querySelectorAll('input[name=\"direction\"][type=\"radio\"]').forEach(radio => {
         radio.checked = radio.value === direction;
         radio.disabled = locked;
       });
@@ -138,7 +138,7 @@
       // decide what the preview shows or what the submit gate accepts.
       const moneyCents = input => {
         const value = (input.value || '').trim().replace(/,/g, '');
-        if (!value || !/^\d+(?:\.\d{1,2})?$/.test(value)) return 0;
+        if (!value || !/^\\d+(?:\\.\\d{1,2})?$/.test(value)) return 0;
         const [whole, fraction = ''] = value.split('.');
         const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
         return Number.isSafeInteger(result) && result > 0 && result <= 99999999999999 ? result : 0;
@@ -220,7 +220,7 @@
 
         function render() {
           const typed = input.value.trim();
-          const tokens = (typed && typed !== selectedText ? typed.toLowerCase() : '').split(/\s+/).filter(Boolean);
+          const tokens = (typed && typed !== selectedText ? typed.toLowerCase() : '').split(/\\s+/).filter(Boolean);
           matches = items.filter(item => (kind !== 'account' || item.group === $('tx-receive-group').value) && tokens.every(token => haystack(item).includes(token)));
           list.replaceChildren();
           cursor = -1;
@@ -299,6 +299,99 @@
             help.textContent = item
               ? (item.name + ' is saved as “' + (item.type_label || 'Other') + '”.')
               : defaultHelp;
+          } else if (kind === 'supplier') {
+            // LIVE SUPPLIER LEDGER BALANCE FETCH
+            const supplierCode = valueInput.value.trim();
+            const supplierPanel = $('tx-supplier-dues');
+            if (supplierPanel) {
+              supplierPanel.hidden = false;
+              supplierPanel.classList.add('is-loading');
+              supplierPanel.classList.remove('is-payable', 'is-advance', 'is-settled');
+              $('tx-supplier-payable').textContent = '…';
+              $('tx-supplier-dues-note').textContent = 'Checking supplier ledger…';
+              if (duesUrl && typeof window.fetch === 'function') {
+                // Create a dedicated supplier endpoint or reuse client endpoint with supplier_code
+                // We will fetch from /transactions/supplier-dues?supplier_code=...
+                // (We will add this endpoint in the backend in the next step)
+                const supplierDuesUrl = duesUrl.replace('client-dues', 'supplier-dues');
+                window.fetch(supplierDuesUrl + '?supplier_code=' + encodeURIComponent(supplierCode), {
+                  headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
+                })
+                  .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
+                  .then(payload => {
+                    supplierPanel.classList.remove('is-loading');
+                    if (!payload || !payload.found || payload.balance === null || payload.balance === undefined) {
+                      supplierPanel.hidden = true;
+                      return;
+                    }
+                    const sCents = cents(payload.balance);
+                    const name = payload.name || 'Supplier';
+                    const status = payload.status || 'settled';
+                    supplierPanel.classList.toggle('is-payable', status === 'payable');
+                    supplierPanel.classList.toggle('is-advance', status === 'advance');
+                    supplierPanel.classList.toggle('is-settled', status === 'settled');
+                    $('tx-supplier-payable').textContent = displayDues(sCents);
+                    $('tx-supplier-dues-note').textContent = status === 'payable'
+                      ? name + ' owes ' + displayDues(sCents) + '. What you pay here reduces that balance.'
+                      : (status === 'advance'
+                        ? name + ' already has an advance of ' + displayDues(sCents) + '. A payment adds to it.'
+                        : name + ' has no outstanding dues. A payment is kept as an advance.');
+                    updatePreview();
+                  })
+                .catch(() => {
+                  supplierPanel.classList.remove('is-loading');
+                  supplierPanel.hidden = true;
+                  // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
+                  if (window.hideLoading) window.hideLoading();
+                  if (window.finishTaskProgress) window.finishTaskProgress();
+                });
+              } else {
+                supplierPanel.hidden = true;
+              }
+            }
+          } else if (kind === 'account') {
+            // LIVE ACCOUNT STATUS / BALANCE FETCH
+            const accountId = valueInput.value.trim();
+            const accountPanel = $('tx-account-dues');
+            if (accountId && accountPanel) {
+              accountPanel.hidden = false;
+              accountPanel.classList.add('is-loading');
+              accountPanel.classList.remove('is-payable', 'is-advance', 'is-settled');
+              $('tx-account-payable').textContent = '…';
+              $('tx-account-dues-note').textContent = 'Checking account status…';
+              // Fetch live account status
+              window.fetch('/accounts/transactions/account-status?account_id=' + encodeURIComponent(accountId), {
+                headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
+              })
+                .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
+                .then(payload => {
+                  accountPanel.classList.remove('is-loading');
+                  if (!payload || !payload.found) {
+                    accountPanel.hidden = true;
+                    return;
+                  }
+                  const aCents = cents(payload.balance);
+                  const name = payload.name || 'Account';
+                  const status = payload.status || 'active';
+                  accountPanel.classList.toggle('is-payable', status === 'active');
+                  accountPanel.classList.toggle('is-advance', status === 'suspended');
+                  accountPanel.classList.toggle('is-settled', status === 'inactive');
+                  $('tx-account-payable').textContent = displayMoney(aCents);
+                  $('tx-account-dues-note').textContent = status === 'active'
+                    ? name + ' balance is ' + displayMoney(aCents) + '.'
+                    : (status === 'suspended'
+                      ? name + ' is suspended.'
+                      : name + ' is inactive.');
+                  updatePreview();
+                })
+                .catch(() => {
+                  accountPanel.classList.remove('is-loading');
+                  accountPanel.hidden = true;
+                  // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
+                  if (window.hideLoading) window.hideLoading();
+                  if (window.finishTaskProgress) window.finishTaskProgress();
+                });
+            }
           } else {
             if (kind === 'client') loadDues(valueInput.value.trim(), item);
           }
@@ -316,6 +409,12 @@
             $('tx-party-type').disabled = false;
           } else if (kind === 'client') {
             loadDues('', null);
+          } else if (kind === 'supplier') {
+            const supplierPanel = $('tx-supplier-dues');
+            if (supplierPanel) supplierPanel.hidden = true;
+          } else if (kind === 'account') {
+            const accountPanel = $('tx-account-dues');
+            if (accountPanel) accountPanel.hidden = true;
           }
           render();
           updatePreview();
@@ -434,6 +533,9 @@
             if (token !== duesToken) return;
             panel.classList.remove('is-loading');
             duesUnavailable('The payable amount could not be loaded right now. The receipt still saves against the client ledger.');
+            // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
+            if (window.hideLoading) window.hideLoading();
+            if (window.finishTaskProgress) window.finishTaskProgress();
           });
       }
 
@@ -528,9 +630,9 @@
         const needsMoney = clientSource && amountCents() === 0 && discountCents() === 0;
         amountInput.setCustomValidity(needsMoney ? 'Enter an amount to receive, or a discount.' : '');
         discountReasonInput.required = discountCents() > 0;
-        $('tx-discount-reason-label').innerHTML = 'Discount reason' + (discountCents() > 0 ? ' <span aria-hidden="true">*</span>' : '');
+        $('tx-discount-reason-label').innerHTML = 'Discount reason' + (discountCents() > 0 ? ' <span aria-hidden=\"true\">*</span>' : '');
         $('tx-reference-help').hidden = !clientSource;
-        $('tx-amount-label').innerHTML = (discountOnly ? 'Amount received (PKR)' : 'Amount (PKR)') + (discountOnly ? '' : ' <span aria-hidden="true">*</span>');
+        $('tx-amount-label').innerHTML = (discountOnly ? 'Amount received (PKR)' : 'Amount (PKR)') + (discountOnly ? '' : ' <span aria-hidden=\"true\">*</span>');
       }
 
       function applyPayTarget() {
@@ -565,9 +667,60 @@
         const balanceAccount = mode === 'receive' ? destination : source;
         const sameAccount = mode === 'transfer' && sourceId && sourceId === destinationId;
         let remaining = null;
-        if (balanceAccount) {
-          remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
+        
+        // LIVE BALANCE FETCH FOR CURRENT ACCOUNT (Receive/Pay)
+        if (balanceAccount && amount > 0 && !sameAccount) {
+          // Instead of using static window.AW_DATA.accounts.current_balance,
+          // we fetch live status dynamically for the selected account.
+          // We will update the preview balance label dynamically.
+          const balancePanel = $('tx-balance-live');
+          if (balancePanel) {
+            balancePanel.hidden = false;
+            balancePanel.classList.add('is-loading');
+            balancePanel.classList.remove('is-payable', 'is-advance', 'is-settled');
+            $('tx-balance-payable').textContent = '…';
+            $('tx-balance-dues-note').textContent = 'Checking live account status…';
+            window.fetch('/accounts/transactions/account-status?account_id=' + encodeURIComponent(balanceAccount.id), {
+              headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store'
+            })
+              .then(response => (response.ok ? response.json() : Promise.reject(new Error(response.status))))
+              .then(payload => {
+                balancePanel.classList.remove('is-loading');
+                if (!payload || !payload.found) {
+                  balancePanel.hidden = true;
+                  remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
+                  return;
+                }
+                const bCents = cents(payload.balance);
+                const name = payload.name || 'Account';
+                const status = payload.status || 'active';
+                balancePanel.classList.toggle('is-payable', status === 'active');
+                balancePanel.classList.toggle('is-advance', status === 'suspended');
+                balancePanel.classList.toggle('is-settled', status === 'inactive');
+                $('tx-balance-payable').textContent = displayMoney(bCents);
+                $('tx-balance-dues-note').textContent = status === 'active'
+                  ? name + ' balance is ' + displayMoney(bCents) + '.'
+                  : (status === 'suspended'
+                    ? name + ' is suspended.'
+                    : name + ' is inactive.');
+                remaining = bCents + (mode === 'receive' ? amount : -amount);
+                updatePreview();
+              })
+              .catch(() => {
+                balancePanel.classList.remove('is-loading');
+                balancePanel.hidden = true;
+                remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
+                // ENSURE GLOBAL OVERLAY IS CLEARED ON FETCH ERROR
+                if (window.hideLoading) window.hideLoading();
+                if (window.finishTaskProgress) window.finishTaskProgress();
+              });
+          } else {
+            remaining = cents(balanceAccount.current_balance) + (mode === 'receive' ? amount : -amount);
+          }
+        } else {
+          remaining = cents(balanceAccount ? balanceAccount.current_balance : 0) + (mode === 'receive' ? amount : -amount);
         }
+        
         const insufficient = remaining !== null && remaining < 0;
         $('tx-preview-amount').textContent = displayMoney(amount);
         $('tx-preview-from').textContent = mode === 'receive' ? receivedFromLabel() : accountName(sourceId);
@@ -650,13 +803,13 @@
         const group = groupInput.value;
         if (clear && pickers.sourceAccount) {
           pickers.sourceAccount.setText('');
-          document.querySelector('[name="receive_from_account_id"]').value = '';
+          document.querySelector('[name=\"receive_from_account_id\"]').value = '';
         }
         setSource(group === 'client_ledger' ? 'client' : group === 'other_source' ? 'other' : group === 'party' ? 'party' : 'account');
       }
       groupInput.addEventListener('change', () => applyGroup(true));
       applyGroup(false);
-      if (pickers.sourceAccount) pickers.sourceAccount.restore(document.querySelector('[name="receive_from_account_id"]').value);
+      if (pickers.sourceAccount) pickers.sourceAccount.restore(document.querySelector('[name=\"receive_from_account_id\"]').value);
       document.querySelectorAll('[data-tx-mode]').forEach(link => {
         link.addEventListener('click', event => {
           if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -675,6 +828,9 @@
         if (submit.disabled || !transactionForm.checkValidity()) {
           event.preventDefault();
           transactionForm.reportValidity();
+          // ENSURE GLOBAL OVERLAY IS CLEARED ON VALIDATION FAILURE
+          if (window.hideLoading) window.hideLoading();
+          if (window.finishTaskProgress) window.finishTaskProgress();
           return;
         }
         if (isClientSource() && !pickedClientCode()) {
@@ -682,6 +838,9 @@
           $('tx-client-search').setCustomValidity('Select a client from the list.');
           $('tx-client-search').reportValidity();
           $('tx-client-search').focus();
+          // ENSURE GLOBAL OVERLAY IS CLEARED ON VALIDATION FAILURE
+          if (window.hideLoading) window.hideLoading();
+          if (window.finishTaskProgress) window.finishTaskProgress();
           return;
         }
         $('tx-client-search').setCustomValidity('');
@@ -689,16 +848,23 @@
         // prevents a double click or repeated POST from posting twice.
         submit.disabled = true;
         submit.querySelector('span').textContent = 'Saving…';
+        
+        // SHOW GLOBAL LOADING OVERLAY FOR TRANSACTION SUBMIT
+        if (window.showLoading) {
+          window.showLoading(220);
+        }
       });
       window.addEventListener('pageshow', () => {
         submit.querySelector('span').textContent = isDiscountOnly() ? 'Save discount' : submitLabels[modeInput.value];
         updatePreview();
+        // HIDE OVERLAY ON PAGESHOW
+        if (window.hideLoading) window.hideLoading();
       });
 
       // Restore a picked client/party after a server-side validation failure:
       // the hidden value survives the round trip, the visible text does not.
       ['supplier', 'client_refund'].forEach(key => {
-        const root = document.querySelector('[data-picker="' + key + '"]');
+        const root = document.querySelector('[data-picker=\"' + key + '\"]');
         if (pickers[key]) pickers[key].restore(root.querySelector('[data-picker-value]').value);
       });
       if (pickers.client && $('tx-client-code').value) pickers.client.restore($('tx-client-code').value);
@@ -732,8 +898,17 @@
     [accountForm, categoryForm, confirmForm].forEach(form => {
       if (!form) return;
       form.addEventListener('submit', () => {
-        const btn = form.querySelector('button[type="submit"]');
+        const btn = form.querySelector('button[type=\"submit\"]');
         if (btn) { btn.disabled = true; btn.dataset.originalText = btn.textContent; btn.textContent = 'Saving…'; }
+        // SHOW GLOBAL LOADING OVERLAY FOR FORM SUBMIT
+        if (window.showLoading) {
+          window.showLoading(220);
+        }
+      });
+      // ENSURE GLOBAL OVERLAY IS CLEARED ON FORM SUBMIT VALIDATION FAILURE OR CANCEL
+      form.addEventListener('invalid', () => {
+        if (window.hideLoading) window.hideLoading();
+        if (window.finishTaskProgress) window.finishTaskProgress();
       });
     });
 
@@ -741,12 +916,14 @@
       const el = $(id);
       if (!el) return;
       el.addEventListener('shown.bs.modal', () => {
-        const input = el.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])');
+        const input = el.querySelector('input:not([type=\"hidden\"]):not([disabled]), select:not([disabled]), textarea:not([disabled])');
         if (input) input.focus();
       });
       el.addEventListener('hidden.bs.modal', () => {
-        const btn = el.querySelector('button[type="submit"]');
+        const btn = el.querySelector('button[type=\"submit\"]');
         if (btn && btn.dataset.originalText) { btn.disabled = false; btn.textContent = btn.dataset.originalText; }
+        // HIDE OVERLAY ON MODAL CLOSE
+        if (window.hideLoading) window.hideLoading();
       });
     });
 
@@ -770,6 +947,9 @@
       const qs = params.toString();
       history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
     }
+    
+    // HIDE OVERLAY ON INITIAL LOAD
+    if (window.hideLoading) window.hideLoading();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
