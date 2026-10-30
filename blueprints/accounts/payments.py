@@ -358,6 +358,7 @@ def expenditures():
         all_expenditures.append({
             'date_posted': tx.date_posted,
             'category': category,
+            'subcategory': (getattr(tx, 'subcategory', None) or ''),
             'amount': float(tx.amount or 0),
             'method': (tx.payment_method or (acc.category.capitalize() if acc else 'Other')),
             'note': tx.note or '',
@@ -416,6 +417,9 @@ def expenditures():
         CashFlowCategory.direction.in_(['out', 'both'])
     ).all():
         all_categories.add(cat.name)
+    from .transaction_tree import DEFAULT_EXPENSE_CATEGORY_TREE
+    for default_cat in DEFAULT_EXPENSE_CATEGORY_TREE.keys():
+        all_categories.add(default_cat)
     categories = sorted(list(all_categories))
 
     all_methods = set()

@@ -308,9 +308,14 @@ def add_transaction():
         if tx_mode == 'receive':
             receive_account_id = request.form.get('receive_account_id', type=int)
             receive_from_category = (request.form.get('receive_from_category') or 'client_ledger').strip()
+            if receive_from_category == 'account_category':
+                receive_from_category = (request.form.get('receive_account_group') or '').strip()
             client_input = (request.form.get('client_input') or '').strip()
             receive_from_account_id = request.form.get('receive_from_account_id', type=int)
             receive_source_label = (request.form.get('receive_source_label') or '').strip()
+            receive_category = (request.form.get('receive_category') or request.form.get('tx_category') or '').strip()
+            receive_subcategory = (request.form.get('receive_subcategory') or request.form.get('tx_subcategory') or '').strip()
+            receive_reference = (request.form.get('receive_reference') or request.form.get('expense_reference') or '').strip()
             amount = float(request.form.get('amount', 0) or 0)
             discount = float(request.form.get('discount', 0) or 0)
 
@@ -353,6 +358,10 @@ def add_transaction():
                     raise ValueError('Received amount must be greater than zero.')
                 if not receive_source_label:
                     raise ValueError('Please enter who or what this money was received from.')
+                if receive_category:
+                    from .transaction_tree import is_valid_transaction_category
+                    if not is_valid_transaction_category(receive_category, direction='in'):
+                        raise ValueError('Select a valid receive category.')
 
                 account_tx = AccountTransaction(
                     from_account_id=None,
@@ -362,7 +371,10 @@ def add_transaction():
                     description=f"Money received from {receive_source_label}",
                     note=note,
                     transaction_type='Receipt',
+                    category=(receive_category or None),
+                    subcategory=(receive_subcategory or None),
                     payee=receive_source_label,
+                    reference_no=(receive_reference or None),
                     payment_method=(method or 'Cash'),
                     date_posted=tx_date,
                     created_by=getattr(current_user, 'username', None),
@@ -377,6 +389,9 @@ def add_transaction():
                 audit_log(current_user, 'account.transaction.receive', f'source_category=other_source, source={receive_source_label}, to={receive_account.name}, amount={amount}')
 
             else:
+                from_account = Account.query.get(receive_from_account_id) if receive_from_account_id else None
+                if not receive_from_category and from_account:
+                    receive_from_category = (from_account.source_category or '').strip()
                 category_exists = AccountCategory.query.filter(
                     func.lower(func.trim(AccountCategory.name)) == receive_from_category.lower(),
                     AccountCategory.is_active == True
@@ -386,7 +401,6 @@ def add_transaction():
                 if amount <= 0:
                     raise ValueError('Received amount must be greater than zero.')
 
-                from_account = Account.query.get(receive_from_account_id) if receive_from_account_id else None
                 if not _is_account_active(from_account):
                     raise ValueError('Please select a valid source account.')
                 if (from_account.source_category or '').strip().lower() != category_exists.name.lower():
@@ -394,7 +408,11 @@ def add_transaction():
                 if from_account.id == receive_account.id:
                     raise ValueError('Source and destination accounts cannot be the same.')
                 # Allow loan accounts to go negative: do not enforce insufficient-balance check for Loan group
-                is_loan_source = ((from_account.source_category or '').strip().lower() == 'loan') or ((category_exists.name or '').strip().lower() == 'loan')
+                is_loan_source = (
+                    ((from_account.source_category or '').strip().lower() == 'loan')
+                    or ((category_exists.name or '').strip().lower() == 'loan')
+                    or ((from_account.class_subcategory or '').strip().lower() == 'loans')
+                )
                 if not is_loan_source and float(from_account.balance or 0) < amount:
                     raise ValueError('Insufficient balance in selected source account.')
 
@@ -407,6 +425,9 @@ def add_transaction():
                     description=f"Funds received from account {from_account.name}",
                     note=note,
                     transaction_type='Transfer',
+                    category=(receive_category or category_exists.name or None),
+                    subcategory=(receive_subcategory or getattr(from_account, 'class_subcategory', None) or None),
+                    reference_no=(receive_reference or None),
                     payment_method=(method or 'Cash'),
                     date_posted=tx_date,
                     created_by=getattr(current_user, 'username', None),
@@ -433,9 +454,10 @@ def add_transaction():
             from app.services.accounting import _apply_account_tx_effect as _apply_effect
 
             # Structured detail for expenses and other pay-mode entries: what
-            # it was for, who was paid, the voucher/slip number and an optional
-            # proof attachment — captured once, shown everywhere after.
-            expense_category = (request.form.get('expense_category') or '').strip()
+            # it was for (category + subcategory), who was paid, the voucher/slip
+            # number and an optional proof attachment — captured once, shown everywhere after.
+            expense_category = (request.form.get('expense_category') or request.form.get('tx_category') or '').strip()
+            expense_subcategory = (request.form.get('expense_subcategory') or request.form.get('tx_subcategory') or '').strip()
             expense_payee = (request.form.get('payee') or '').strip()
             expense_reference = (request.form.get('expense_reference') or '').strip()
             expense_proof = None
@@ -447,12 +469,13 @@ def add_transaction():
                     expense_proof = None
                 if expense_category:
                     from models import CashFlowCategory
+                    from .transaction_tree import is_valid_transaction_category
                     cat_row = CashFlowCategory.query.filter(
                         func.lower(func.trim(CashFlowCategory.name)) == expense_category.lower(),
                         CashFlowCategory.is_active == True,
                         CashFlowCategory.direction.in_(['out', 'both']),
                     ).first()
-                    if not cat_row:
+                    if not cat_row and not is_valid_transaction_category(expense_category, direction='out'):
                         raise ValueError('Select a valid expense category.')
 
             from_account = Account.query.get(from_account_id) if from_account_id else None
@@ -562,7 +585,12 @@ def add_transaction():
                 to_account = Account.query.get(to_account_id) if to_account_id else None
                 if not _is_account_active(to_account):
                     raise ValueError('Please select a valid loan account.')
-                if (to_account.source_category or '').strip().lower() != 'loan':
+                is_loan_dest = (
+                    (to_account.source_category or '').strip().lower() == 'loan'
+                    or (to_account.class_subcategory or '').strip().lower() == 'loans'
+                    or (to_account.type or '').strip().lower() == 'loan'
+                )
+                if not is_loan_dest:
                     raise ValueError('Selected destination is not a Loan account.')
                 if to_account.id == from_account.id:
                     raise ValueError('Source and destination accounts cannot be the same.')
@@ -575,6 +603,8 @@ def add_transaction():
                     description=f'Loan repayment to {to_account.name}',
                     note=note,
                     transaction_type='Payment',
+                    category=(expense_category or None),
+                    subcategory=(expense_subcategory or None),
                     payee=to_account.name,
                     reference_no=(expense_reference or None),
                     payment_method=(method or 'Cash'),
@@ -594,9 +624,9 @@ def add_transaction():
                     if pay_target == 'loan':
                         target_label = 'Loan Payment'
                     elif pay_target == 'personal_expense':
-                        target_label = 'Personal Expense'
+                        target_label = expense_subcategory or expense_category or 'Personal Expense'
                     else:
-                        target_label = 'Other Payment'
+                        target_label = expense_subcategory or expense_category or 'Other Payment'
 
                 tx_type = 'Expense' if pay_target in ['personal_expense', 'other_expense'] else 'Payment'
                 tx = AccountTransaction(
@@ -608,6 +638,7 @@ def add_transaction():
                     note=note,
                     transaction_type=tx_type,
                     category=(expense_category or None),
+                    subcategory=(expense_subcategory or None),
                     payee=(expense_payee or None),
                     reference_no=(expense_reference or None),
                     payment_method=(method or 'Cash'),
@@ -623,6 +654,62 @@ def add_transaction():
 
             _audit_pending_account_transactions()
             db.session.commit()
+
+        elif tx_mode == 'transfer':
+            from utils.money import to_minor as _to_minor
+            from app.services.accounting import _apply_account_tx_effect as _apply_effect
+
+            from_account_id = (
+                request.form.get('transfer_from_account_id', type=int)
+                or request.form.get('pay_from_account_id', type=int)
+            )
+            to_account_id = (
+                request.form.get('transfer_to_account_id', type=int)
+                or request.form.get('pay_to_account_id', type=int)
+            )
+            amount = float(request.form.get('amount', 0) or 0)
+            if amount <= 0:
+                raise ValueError('Transfer amount must be greater than zero.')
+
+            from_account = Account.query.get(from_account_id) if from_account_id else None
+            to_account = Account.query.get(to_account_id) if to_account_id else None
+            if not _is_account_active(from_account):
+                raise ValueError('Please select a valid source account.')
+            if not _is_account_active(to_account):
+                raise ValueError('Please select a valid destination account.')
+            if from_account.id == to_account.id:
+                raise ValueError('Source and destination accounts cannot be the same.')
+            if float(from_account.balance or 0) < amount:
+                raise ValueError('Insufficient balance in selected source account.')
+
+            transfer_cat = (request.form.get('tx_category') or request.form.get('expense_category') or 'Internal Transfer').strip()
+            transfer_subcat = (request.form.get('tx_subcategory') or request.form.get('expense_subcategory') or '').strip()
+            transfer_ref = (request.form.get('expense_reference') or request.form.get('reference_no') or '').strip()
+            transfer_desc = (request.form.get('target_label') or request.form.get('description') or 'Intra-company transfer').strip()
+
+            tx = AccountTransaction(
+                from_account_id=from_account.id,
+                to_account_id=to_account.id,
+                amount=amount,
+                amount_minor=_to_minor(amount),
+                description=transfer_desc,
+                note=note,
+                transaction_type='Transfer',
+                category=(transfer_cat or 'Internal Transfer'),
+                subcategory=(transfer_subcat or None),
+                reference_no=(transfer_ref or None),
+                payment_method=(method or 'Cash'),
+                date_posted=tx_date,
+                created_by=getattr(current_user, 'username', None),
+            )
+            db.session.add(tx)
+            db.session.flush()
+            _apply_effect(tx)
+            _audit_pending_account_transactions()
+            db.session.commit()
+            audit_log(current_user, 'account.transaction.transfer', f'from={from_account.name}, to={to_account.name}, amount={amount}')
+            flash('Transfer transaction recorded successfully.', 'success')
+
         else:
             raise ValueError('Invalid transaction type selected.')
 

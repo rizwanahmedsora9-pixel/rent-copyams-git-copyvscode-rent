@@ -111,6 +111,7 @@ class AccountTransaction(db.Model):
     # (payee), the voucher/cheque/slip number, the method actually used, and
     # an optional proof attachment.  All nullable: legacy rows keep working.
     category = db.Column(db.String(120), nullable=True, index=True)
+    subcategory = db.Column(db.String(120), nullable=True, index=True)
     payee = db.Column(db.String(160), nullable=True, index=True)
     reference_no = db.Column(db.String(80), nullable=True, index=True)
     payment_method = db.Column(db.String(50), nullable=True)

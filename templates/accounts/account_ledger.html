@@ -39,11 +39,13 @@
 .tx-type-badge{ display:inline-block; font-size:.72rem; padding:3px 8px; border-radius:999px; font-weight:600; }
 .tt-Receipt{ background: rgba(16,185,129,.15); color:#10b981; }
 .tt-Payment{ background: rgba(239,68,68,.15); color:#ef4444; }
+.tt-Refund{ background: rgba(244,63,94,.15); color:#f43f5e; }
 .tt-Transfer{ background: rgba(59,130,246,.15); color:#3b82f6; }
-.tt-Supplier{ background: rgba(245,158,11,.15); color:#f59e0b; }
+.tt-Supplier, .tt-SupplierPayment{ background: rgba(245,158,11,.15); color:#f59e0b; }
+.tt-DriverPayment{ background: rgba(6,182,212,.15); color:#06b6d4; }
 .tt-Expense{ background: rgba(236,72,153,.15); color:#ec4899; }
-.tt-Loss{ background: rgba(120,113,108,.15); color:#a8a29e; }
-.tt-Adjustment{ background: rgba(139,92,246,.15); color:#8b5cf6; }
+.tt-Loss, .tt-ReconciliationLoss{ background: rgba(120,113,108,.15); color:#a8a29e; }
+.tt-Adjustment, .tt-ReconciliationExcess{ background: rgba(139,92,246,.15); color:#8b5cf6; }
 .row-voided{ opacity:.55; text-decoration:line-through; }
 </style>
 
@@ -89,8 +91,8 @@
                     <tr>
                         <th style="width:140px">Date</th>
                         <th>Type</th>
-                        <th>Counter Account</th>
-                        <th>Description</th>
+                        <th>Flow &amp; Counterparty (From ──► To)</th>
+                        <th>Description &amp; Classification</th>
                         <th class="text-end">In</th>
                         <th class="text-end">Out</th>
                         <th class="text-end">Running</th>
@@ -100,6 +102,7 @@
                 <tbody>
                 {% for r in page_rows %}
                 {% set tx = r.tx %}
+                {% set ctx = tx|tx_context %}
                 {% set incoming = (tx.to_account_id == account.id) %}
                 {% set outgoing = (tx.from_account_id == account.id) %}
                 <tr class="{% if tx.is_void %}row-voided{% endif %}">
@@ -110,18 +113,36 @@
                         {% if tx.is_void %}<span class="badge bg-danger ms-1">DELETED</span>{% endif %}
                     </td>
                     <td>
-                        {% if incoming and tx.from_account %}<i class="bi bi-arrow-down-left text-success me-1"></i>{{ tx.from_account.name }}
-                        {% elif outgoing and tx.to_account %}<i class="bi bi-arrow-up-right text-primary me-1"></i>{{ tx.to_account.name }}
-                        {% else %}<span class="text-muted">—</span>{% endif %}
+                        <div class="small fw-semibold">
+                            <span>{{ ctx.from_label }}</span>
+                            <i class="bi bi-arrow-right mx-1 text-primary"></i>
+                            <span>{{ ctx.to_label }}</span>
+                        </div>
+                        <div class="small text-muted">
+                            <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ ctx.counterparty_kind }}</span>
+                            {% if incoming and tx.from_account %}{{ tx.from_account.name }}
+                            {% elif outgoing and tx.to_account %}{{ tx.to_account.name }}
+                            {% else %}{{ ctx.counterparty_label }}{% endif %}
+                        </div>
                     </td>
                     <td>
                         <div>{{ tx.description or '' }}</div>
-                        {% if tx.category %}<div class="small"><span class="badge bg-warning text-dark">{{ tx.category }}</span></div>{% endif %}
+                        <div class="small mt-1 d-flex flex-wrap gap-1 align-items-center">
+                            {% if tx.category or ctx.category %}
+                                <span class="badge bg-warning text-dark">{{ tx.category or ctx.category }}</span>
+                            {% endif %}
+                            {% if tx.subcategory or ctx.subcategory %}
+                                <span class="badge bg-secondary bg-opacity-25 text-body">{{ tx.subcategory or ctx.subcategory }}</span>
+                            {% endif %}
+                            {% if ctx.source_badge %}
+                                <span class="badge bg-info bg-opacity-10 text-info border border-info-subtle">{{ ctx.source_badge }}</span>
+                            {% endif %}
+                        </div>
                         {% if tx.payee %}<div class="small"><i class="bi bi-person me-1 text-muted"></i>{{ tx.payee }}</div>{% endif %}
                         {% if tx.reference_no %}<div class="small text-muted"><i class="bi bi-upc-scan me-1"></i>{{ tx.reference_no }}</div>{% endif %}
                         {% if tx.photo_path %}<a class="small" href="{{ url_for('static', filename='uploads/' ~ tx.photo_path) }}" target="_blank"><i class="bi bi-paperclip me-1"></i>proof</a>{% endif %}
                         {% if tx.reason %}<div class="small"><i class="bi bi-chat-left-text me-1 text-muted"></i>{{ tx.reason }}</div>{% endif %}
-                        {% if tx.note %}<div class="small text-muted">{{ tx.note }}</div>{% endif %}
+                        {% if ctx.clean_note %}<div class="small text-muted">{{ ctx.clean_note }}</div>{% endif %}
                     </td>
                     <td class="text-end">{% if incoming and not tx.is_void %}<span class="led-amt-in">Rs. {{ "%.2f"|format(tx.amount or 0) }}</span>{% endif %}</td>
                     <td class="text-end">{% if outgoing and not tx.is_void %}<span class="led-amt-out">Rs. {{ "%.2f"|format(tx.amount or 0) }}</span>{% endif %}</td>

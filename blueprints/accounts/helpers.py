@@ -354,3 +354,18 @@ def _reverse_balance_effect(tx):
     _reverse_account_tx_effect(tx)
 
 
+@accounts_bp.app_template_filter('tx_context')
+def _tx_context_filter(tx):
+    """Return structured visual flow, category, subcategory, and source badge for an AccountTransaction."""
+    from .transaction_tree import describe_account_transaction
+    return describe_account_transaction(tx)
+
+
+@accounts_bp.app_template_filter('clean_tx_note')
+def _clean_tx_note_filter(note):
+    """Strip internal [SRC:...] / [AUTO_GRN_PAY:...] markers from user-visible notes."""
+    from .transaction_tree import strip_internal_markers
+    return strip_internal_markers(note)
+
+
+
